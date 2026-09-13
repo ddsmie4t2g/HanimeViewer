@@ -55,23 +55,57 @@ object PhNetwork {
      * 首页栏目的键。与 [PhParser.homePage] 的取值一一对应，
      * 也是 [io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo] 往
      * `HomePage` 各槽位里填数的依据。
+     *
+     * 数量刻意压到 **10** 个：每个栏目都是一次独立请求（约 140 KB，约 30 条），
+     * 全部并发发出。实测并行总吞吐约 1 MB/s，10 个栏目首屏约 1–2 秒，
+     * 再多就会把中转那条链路压满。
      */
     const val SEC_LATEST = "latest"
     const val SEC_POPULAR = "popular"
     const val SEC_TOP_RATED = "top_rated"
+    const val SEC_WEEKLY = "weekly"
     const val SEC_JAPANESE = "japanese"
+    const val SEC_CHINESE = "chinese"
+    const val SEC_AMATEUR = "amateur"
+    const val SEC_HENTAI = "hentai"
+    const val SEC_COSPLAY = "cosplay"
+    const val SEC_EXCLUSIVE = "exclusive"
 
     /**
-     * 栏目 → 检索条件。前三个用 `ordering`，最后一个用标签 ——
-     * 实测 `ordering` 只有 `newest` / `mostviewed` / `rating` 真正生效
-     * （`longest`、`hotness`、`toprated`、`recentlyfeatured` 都会**静默退回默认排序**，
-     * 也就是和 `newest` 返回同一批数据，所以不能用）。
+     * 栏目 → 检索条件。
+     *
+     * ## 这些取值都是**实测过的**，不是照着站点文案猜的
+     *
+     * `tags[]` 传一个**不存在的** slug 时接口会返回**空列表**（实测 `tags[]=qqqqqq`
+     * → 0 条），所以“能出数据”本身就能证明 slug 存在。更严格的判据是
+     * **命中率**：取回的一页里有多大比例的视频真的带这个标签 —— 只有命中率
+     * 过半才算这个栏目的内容真的是它标的那样（见下面的批注）。
+     *
+     * ## `ordering` 只有三个值生效
+     *
+     * `newest` / `mostviewed` / `rating` 会真的换内容；
+     * `longest`、`hotness`、`toprated`、`recentlyfeatured` 会**静默退回默认排序**
+     * （返回的就是 `newest` 那批），所以不能用。
+     *
+     * ## `period` 是有效的，且必须配合 `ordering`
+     *
+     * `period=weekly` + `ordering=mostviewed` 与不带的相比，一页 30 条**零重合**；
+     * `daily` 与 `weekly` 也是零重合（`alltime` 则与不带 `period` 完全相同）。
+     * 所以「本週熱門」是真的换了一批内容，不是换个名字。
      */
     val HOME_SECTIONS: List<Pair<String, PhQuery>> = listOf(
         SEC_LATEST to PhQuery(ordering = "newest"),
         SEC_POPULAR to PhQuery(ordering = "mostviewed"),
         SEC_TOP_RATED to PhQuery(ordering = "rating"),
+        SEC_WEEKLY to PhQuery(ordering = "mostviewed", period = "weekly"),
         SEC_JAPANESE to PhQuery(tag = "japanese"),
+        // 命中率实测：chinese 18/30 偏弱但确实是真标签（中文/华语内容本来就少）；
+        // 下面几个都在 20/30 以上，属于站点的强分类。
+        SEC_CHINESE to PhQuery(tag = "chinese"),
+        SEC_AMATEUR to PhQuery(tag = "verified-amateurs"),
+        SEC_HENTAI to PhQuery(tag = "hentai"),
+        SEC_COSPLAY to PhQuery(tag = "cosplay"),
+        SEC_EXCLUSIVE to PhQuery(tag = "exclusive"),
     )
 
     /** 一次检索的条件。三者可组合，但列表页目前只用其中一种。 */
@@ -79,6 +113,8 @@ object PhNetwork {
         val keyword: String? = null,
         val ordering: String? = null,
         val tag: String? = null,
+        /** 与 [ordering] 搭配的时间窗（`daily` / `weekly` / `monthly` / `alltime`）。 */
+        val period: String? = null,
     )
 
     /** 每页条数（站点固定 30，用来判断「还有没有下一页」）。 */
@@ -100,6 +136,9 @@ object PhNetwork {
         if (page > 1) builder.addQueryParameter("page", page.toString())
         query.ordering?.takeIf { it.isNotBlank() }
             ?.let { builder.addQueryParameter("ordering", it) }
+        // period 只在有 ordering 时才有意义（单独传它会被忽略）。
+        query.period?.takeIf { it.isNotBlank() && !query.ordering.isNullOrBlank() }
+            ?.let { builder.addQueryParameter("period", it) }
         query.tag?.takeIf { it.isNotBlank() }
             ?.let { builder.addQueryParameter("tags[]", it) }
         return builder.build().toString()
@@ -151,6 +190,39 @@ object PhNetwork {
     private val dns = HDns()
 
     /**
+     * ⭐ **Pornhub 必须用桌面 UA —— 这一条是「详情页有标签/观看数/演员」的前提。**
+     *
+     * 站点按 UA 发**两套完全不同的 DOM**。全应用默认发的是移动 UA
+     * （见 [io.github.daisukikaffuchino.han1meviewer.USER_AGENT]），实测拿到的详情页里：
+     *
+     * | 关键节点 | 移动 UA | 桌面 UA |
+     * |---|---|---|
+     * | `div.video-detailed-info` | **0 个** | 1 个 |
+     * | `div.tagsWrapper` | **0 个** | 1 个 |
+     * | `div.ratingInfo`（观看数） | **0 个** | 1 个 |
+     * | `div.pornstarsWrapper` | **0 个** | 有 |
+     * | 页面体积 | 1.07 MB | 1.55 MB |
+     *
+     * 也就是说移动版详情页**整块「简介 + 标签 + 演员」都不存在**（不是选择器变了，
+     * 是根本没有这些区块）。26.6 发布版正是栽在这里：解析器全对，但一个字段也拿不到，
+     * 表现是「详情页没有作者、没有标签、没有观看数」。
+     *
+     * 代价是每次详情多约 0.5 MB，只走一次详情页，可以接受。
+     *
+     * ⚠️ 必须用 [okhttp3.Request.Builder.header]（**替换**）而不是 `addHeader`（追加）：
+     * [UserAgentInterceptor] 已经用 `addHeader` 塞过一个 UA 了，追加会得到两个
+     * `User-Agent` 头，服务端取哪个不确定。
+     */
+    private object DesktopUserAgentInterceptor : okhttp3.Interceptor {
+        override fun intercept(chain: okhttp3.Interceptor.Chain): okhttp3.Response {
+            val request = chain.request().newBuilder()
+                .header("User-Agent", io.github.daisukikaffuchino.han1meviewer.DESKTOP_USER_AGENT)
+                .build()
+            return chain.proceed(request)
+        }
+    }
+
+    /**
      * 专用的 [OkHttpClient]。
      *
      * 三项必须是它自己的：
@@ -169,6 +241,9 @@ object PhNetwork {
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(40, TimeUnit.SECONDS)
             .addInterceptor(UserAgentInterceptor)
+            // ⚠️ 必须排在 UserAgentInterceptor **之后** —— 它负责把移动 UA 换成桌面 UA，
+            //    顺序反了就等于没换（见 DesktopUserAgentInterceptor 的注释）。
+            .addInterceptor(DesktopUserAgentInterceptor)
             .cookieJar(HCookieJar())
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)

@@ -156,13 +156,18 @@ object AppUpdateChecker {
     /**
      * 当前版本所基于的「上游版本」三段数字。
      *
-     * mod 线的 `versionName` 形如 `26.3.2-mod.7.0`，其中 `26.3.2` 就是它基于的上游版本；
-     * 上游的 tag 则是裸的 `26.3.2`。两边取到的都是 `[26, 3, 2]`，
-     * 于是「上游有没有出更新的版本」就退化成**同一个基准上的比较** ——
-     * 不会因为 mod 后缀（`-mod.7.0`）而误判。
+     * 26.6.1 起 `versionName` 是干净的三段号（`26.6.1`），**不再**编码上游基准，
+     * 所以这里读的是 `BuildConfig.UPSTREAM_BASE_VERSION`（由 `app/build.gradle.kts`
+     * 生成，本仓库当前为 `26.3.2`）。
+     *
+     * 上游的 tag 是裸的 `26.3.2`，两边取到的都是 `[26, 3, 2]`，于是「上游有没有出更新的
+     * 版本」就退化成**同一个基准上的比较**。
+     *
+     * ⚠️ 别再退回去解析 `VERSION_NAME`：那样会把本仓库自己的 `26.6.1` 当成上游基准，
+     * 于是「上游最新 26.3.2」永远显得比本构建旧，上游更新就再也提示不出来了。
      */
     private val localBaseVersion: List<Int>?
-        get() = baseVersionParts(BuildConfig.VERSION_NAME)
+        get() = baseVersionParts(BuildConfig.UPSTREAM_BASE_VERSION)
 
     /**
      * 本构建**所基于的上游版本**（形如 `26.3.2`），取不到就是 null。
@@ -171,7 +176,7 @@ object AppUpdateChecker {
      * 否则用户看到「上游有新版本」却找不到更新按钮，会以为功能坏了。
      */
     val installedBaseVersion: String?
-        get() = VERSION_TRIPLE.find(BuildConfig.VERSION_NAME)?.value
+        get() = VERSION_TRIPLE.find(BuildConfig.UPSTREAM_BASE_VERSION)?.value
 
     private val jsonParser = Json {
         ignoreUnknownKeys = true

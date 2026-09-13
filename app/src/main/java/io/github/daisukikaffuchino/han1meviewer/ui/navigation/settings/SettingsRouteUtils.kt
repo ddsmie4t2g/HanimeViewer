@@ -30,6 +30,10 @@ internal fun buildDomainOptions(context: Context): List<Pair<String, String>> = 
     // nJAV 是独立数据源，但它也得在这一栏里能被选中 / 被展示出来，
     // 否则切到 nJAV 之后「域名」这一行显示的还是 hanime 的地址。
     "${HanimeConstants.NJAV_HOSTNAME} (nJAV)" to HanimeConstants.NJAV_URL,
+    // Pornhub 同理（26.6 起是第三个数据源）。这一项**必须**在这里 ——
+    // 少了它，切到 Pornhub 之后「域名」那一行会显示不出当前地址，
+    // 用户也没法从下拉里主动选回它。
+    "${HanimeConstants.PORN_HUB_HOSTNAME} (Pornhub)" to HanimeConstants.PORN_HUB_URL,
 )
 
 internal fun generateClearCacheSummary(context: Context, size: Long): CharSequence {

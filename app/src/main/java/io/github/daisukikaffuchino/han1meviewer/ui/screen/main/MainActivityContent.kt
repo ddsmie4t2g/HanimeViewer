@@ -43,7 +43,9 @@ import io.github.daisukikaffuchino.han1meviewer.logic.exception.CloudflareBlocke
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageState
 import io.github.daisukikaffuchino.han1meviewer.ui.activity.MainActivity
 import io.github.daisukikaffuchino.han1meviewer.ui.component.HapticTextButton as TextButton
+import io.github.daisukikaffuchino.han1meviewer.ui.component.ChoiceDialog
 import io.github.daisukikaffuchino.han1meviewer.ui.component.ConfirmDialog
+import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.HomeRoute
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.MainDrawerDestination
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.TopNavigation
@@ -62,14 +64,15 @@ fun MainActivityContent(
     viewModel: HomePageViewModel,
     pendingNavigationRequests: Flow<Intent>,
     showAuthGuard: Boolean,
-    showSiteSwitchConfirm: Boolean,
+    showSiteSwitchPicker: Boolean,
+    currentSiteSource: String,
     logoutDialogCloseCurrentPage: Boolean?,
     onOpenAccount: () -> Unit,
     onLogoutClick: () -> Unit,
     onRequireLogin: () -> Unit,
     onSwitchSiteClick: () -> Unit,
     onDismissSiteSwitch: () -> Unit,
-    onConfirmSiteSwitch: () -> Unit,
+    onSelectSite: (String) -> Unit,
     onDismissLogout: () -> Unit,
     onConfirmLogout: () -> Unit,
     onOpenClipboardVideo: (String) -> Unit,
@@ -215,14 +218,22 @@ fun MainActivityContent(
             )
         }
     }
-    ConfirmDialog(
-        visible = showSiteSwitchConfirm,
-        title = stringResource(R.string.confirm_switch_site),
-        message = "",
-        confirmText = stringResource(R.string.sure),
-        dismissText = stringResource(R.string.no),
-        onConfirm = onConfirmSiteSwitch,
+    // 切换站点：**直接列出三个站点让用户选**，而不是循环 + 二次确认。
+    //
+    // 以前只有两个站点时「点一下 → 确认」还凑合；到三个就成了
+    // 「点一下 → 确认 → 发现不是想去的那站 → 再点一下 → 确认」，最多按四次。
+    // 复用设置页那个 [ChoiceDialog]（底部弹层 + 单选），选中项就是当前站点。
+    ChoiceDialog(
+        visible = showSiteSwitchPicker,
+        title = stringResource(R.string.switch_site),
+        options = listOf(
+            stringResource(R.string.site_picker_hanime) to SiteSource.Hanime1.value,
+            stringResource(R.string.site_source_njav_with_host) to SiteSource.Njav.value,
+            stringResource(R.string.site_source_pornhub_with_host) to SiteSource.Pornhub.value,
+        ),
+        selectedValue = currentSiteSource,
         onDismiss = onDismissSiteSwitch,
+        onSelect = onSelectSite,
     )
     ConfirmDialog(
         visible = logoutDialogCloseCurrentPage != null,

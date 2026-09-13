@@ -149,22 +149,25 @@ object PhParser {
     /** 首页栏目 → 往 [HomePage] 哪个槽位填；由 [homePage] 使用。 */
     fun homePage(sections: Map<String, List<HanimeInfo>>): WebsiteState<HomePage> {
         fun list(key: String) = sections[key].orEmpty().toMutableList()
+        // 槽位名是 hanime 那边的叫法，内容与它毫无关系 —— 这里只是借用
+        // 「同一份界面按槽位取数」的机制。映射关系见 HomePageMappers.buildCategoryList
+        // 里 isPornhubSite 的那几个分支，两边必须一一对应。
         return WebsiteState.Success(
             HomePage(
                 csrfToken = null,
                 avatarUrl = null,
                 username = null,
                 banner = null,
-                latestHanime = mutableListOf(),
+                latestHanime = list(PhNetwork.SEC_WEEKLY),
                 latestRelease = list(PhNetwork.SEC_POPULAR),
                 ecchiAnime = list(PhNetwork.SEC_LATEST),
-                shortEpisodeAnime = mutableListOf(),
-                twoPointFiveDAnime = mutableListOf(),
-                threeDCG = mutableListOf(),
+                shortEpisodeAnime = list(PhNetwork.SEC_AMATEUR),
+                twoPointFiveDAnime = list(PhNetwork.SEC_CHINESE),
+                threeDCG = list(PhNetwork.SEC_HENTAI),
                 motionAnime = list(PhNetwork.SEC_JAPANESE),
-                twoDAnime = mutableListOf(),
+                twoDAnime = list(PhNetwork.SEC_COSPLAY),
                 aiGenerated = mutableListOf(),
-                mmd = mutableListOf(),
+                mmd = list(PhNetwork.SEC_EXCLUSIVE),
                 cosplay = mutableListOf(),
                 watchingNow = list(PhNetwork.SEC_TOP_RATED),
                 newAnimeTrailer = mutableListOf(),
@@ -182,6 +185,10 @@ object PhParser {
      * ⚠️ 简繁两套都要认：界面文案按语言给的是简体，而搜索下拉的 `search_key` 取自
      * `genre_ph.json`，那里用的是繁体（与 `genre_av.json` 的习惯一致）。
      * 只认一套的话，另一种语言下点「更多」会静默退回默认排序。
+     *
+     * 目前覆盖 [PhNetwork.HOME_SECTIONS] 的全部 10 个栏目，外加首页以外的几个别名
+     * （如「最多播放」「評分」「角色扮演」）—— 别名是给搜索页那一栏用的，
+     * 用户能选到的每一项都必须在这里有映射，否则点了没反应。
      */
     fun queryForMarker(marker: String?): PhNetwork.PhQuery? =
         marker?.trim()?.takeIf { it.isNotEmpty() }?.let { MARKER_TO_QUERY[it] }
@@ -196,8 +203,30 @@ object PhParser {
         PhNetwork.PhQuery(ordering = "rating").let { q ->
             listOf("最高評分", "最高评分", "評分", "评分").forEach { put(it, q) }
         }
+        // 本週熱門 = mostviewed + period=weekly。判据是实测「与不带的相比一页零重合」，
+        // 不是照着站点文案猜的（见 PhNetwork.HOME_SECTIONS）。
+        PhNetwork.PhQuery(ordering = "mostviewed", period = "weekly").let { q ->
+            listOf("本週熱門", "本周热门", "熱門", "热门").forEach { put(it, q) }
+        }
+        // 下面这些都是**实测过的真实标签 slug**（命中率见 PhNetwork.HOME_SECTIONS）。
         PhNetwork.PhQuery(tag = "japanese").let { q ->
             listOf("日本", "日本AV", "日系").forEach { put(it, q) }
+        }
+        PhNetwork.PhQuery(tag = "chinese").let { q ->
+            listOf("華語", "华语", "中文", "國產", "国产").forEach { put(it, q) }
+        }
+        PhNetwork.PhQuery(tag = "verified-amateurs").let { q ->
+            listOf("素人", "業餘素人", "业余素人", "素人業餘").forEach { put(it, q) }
+        }
+        PhNetwork.PhQuery(tag = "hentai").let { q ->
+            listOf("動漫", "动漫", "二次元").forEach { put(it, q) }
+        }
+        // slug 本身是 `cosplay`，界面文案也一样（简繁同形），所以三种写法都收。
+        PhNetwork.PhQuery(tag = "cosplay").let { q ->
+            listOf("Cosplay", "cosplay", "角色扮演").forEach { put(it, q) }
+        }
+        PhNetwork.PhQuery(tag = "exclusive").let { q ->
+            listOf("官方獨家", "官方独家", "獨家", "独家").forEach { put(it, q) }
         }
     }
 
@@ -237,25 +266,33 @@ object PhParser {
         val uploadTime = UPLOAD_DATE.find(body)?.groupValues?.get(1)
             ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
-        val tags = buildList {
-            info?.select("div.tagsWrapper a.isTag span")?.forEach { el ->
-                el.text().trim().takeIf { it.isNotEmpty() }?.let(::add)
-            }
-            info?.select("div.categoriesWrapper a.item")?.forEach { el ->
-                el.text().trim().takeIf { it.isNotEmpty() }?.let(::add)
-            }
-        }.distinct()
+        // 标签区：`tagsWrapper` 是关键词标签（doggystyle / big boobs …），
+        // `categoriesWrapper` 是站点的正式分类（Amateur / Big Ass …）。界面只要一份，
+        // 所以合起来去重。两个容器都在 `video-detailed-info` 里，别全局搜 ——
+        // 全局会先撞到推荐位卡片的同名 class。
+        val tagList = info?.select("div.tagsWrapper a.isTag span")?.mapNotNull { el ->
+            el.text().trim().takeIf { it.isNotEmpty() }
+        }.orEmpty()
+        val categoryList = info?.select("div.categoriesWrapper a.item")?.mapNotNull { el ->
+            el.text().trim().takeIf { it.isNotEmpty() }
+        }.orEmpty()
+        val tags = (tagList + categoryList).distinct()
 
-        val artist = info?.selectFirst("div.pornstarsWrapper a.pstar-list-btn")?.let { a ->
+        // ⭐ 必须取**全部**演员，不能只取第一个：一部片子挂 2–4 位很常见，
+        //    只画第一位的话，用户既看不到其他作者、也点不进他们的作品。
+        val artists = info?.select("div.pornstarsWrapper a.pstar-list-btn")?.mapNotNull { a ->
             val name = a.ownText().trim().takeIf { it.isNotEmpty() }
                 ?: a.attr("href").substringAfterLast('/').takeIf { it.isNotEmpty() }
-                ?: return@let null
+                ?: return@mapNotNull null
             HanimeVideo.Artist(
                 name = name,
+                // 头像在 phncdn 上，靠自建中转的 ?ref= 才拿得到（见 CdnRelay.refererFor）。
                 avatarUrl = a.selectFirst("img")?.attr("src").orEmpty(),
-                genre = tags.firstOrNull().orEmpty(),
+                // 副标题用第一个**分类**（如 "Amateur"）—— 用第一个 tag 会变成
+                // "doggystyle" 这种动作词，完全不像「这是谁」。
+                genre = categoryList.firstOrNull().orEmpty(),
             )
-        }
+        }.orEmpty()
 
         return VideoLoadingState.Success(
             HanimeVideo(
@@ -267,7 +304,10 @@ object PhParser {
                 views = views,
                 videoUrls = buildVideoUrls(hls),
                 tags = tags,
-                artist = artist,
+                // artist 保留「第一位」，是给订阅等只认单个对象的调用方用的；
+                // 界面上画的是 artists（见 VideoIntroductionScreen）。
+                artist = artists.firstOrNull(),
+                artists = artists,
             )
         )
     }

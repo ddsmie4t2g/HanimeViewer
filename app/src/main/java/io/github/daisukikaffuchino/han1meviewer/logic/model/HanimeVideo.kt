@@ -34,6 +34,17 @@ data class HanimeVideo(
     @Transient val playlist: Playlist? = null,
     @Transient val relatedHanimes: List<HanimeInfo> = emptyList(),
     val artist: Artist? = null,
+    /**
+     * 这部片子的**全部**演员。
+     *
+     * hanime / nJAV 只会有 0 或 1 位（[artist] 就是它）；Pornhub 一部片子挂 2–4 位
+     * 很常见，而界面上只画 [artist] 那一位的话，用户就看不到其他作者、也点不进
+     * 他们的作品 —— 所以详情页改成渲染这一份。
+     *
+     * `@Transient` + 默认空：它是从 [artist] 派生的展示用数据，不进序列化，
+     * 老数据反序列化出来是空列表，界面会退回「只显示 [artist]」的老行为。
+     */
+    @Transient val artists: List<Artist> = emptyList(),
 
     @Transient val favTimes: Int? = null,
     @Transient val isFav: Boolean = false,

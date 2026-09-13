@@ -164,6 +164,7 @@
     <string name="site_source_title">Data Source</string>
     <string name="site_source_summary">Switch the content source. Account features (login / lists / comments) only work on hanime1.me.</string>
     <string name="site_source_hanime">hanime1.me</string>
+    <string name="site_picker_hanime">Hanime (hanime1)</string>
     <string name="site_source_njav">nJAV</string>
     <string name="site_source_njav_with_host">nJAV (njavtv.com)</string>
     <string name="site_source_pornhub_with_host">Pornhub (pornhub.com)</string>
@@ -173,6 +174,11 @@
     <string name="ph_popular">Most viewed</string>
     <string name="ph_top_rated">Top rated</string>
     <string name="ph_japanese">Japanese</string>
+    <string name="ph_weekly">This week\'s top</string>
+    <string name="ph_chinese">Chinese</string>
+    <string name="ph_amateur">Amateur</string>
+    <string name="ph_hentai">Hentai</string>
+    <string name="ph_exclusive">Exclusives</string>
     <string name="site_source_restart_confirm">Switching the data source needs to restart the app. Continue?</string>
     <string name="custom_mirror_site">Custom Mirror Site</string>
     <string name="enable_custom_mirror_site">Enable custom mirror site</string>

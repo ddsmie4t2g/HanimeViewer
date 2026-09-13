@@ -352,12 +352,16 @@ private fun VideoIntroductionContent(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             enableItemAnimation = false,
         ) {
-            video.artist?.let { artist ->
+            // 作者们：Pornhub 一部片子常有 2–4 位，全都要画出来才点得进各自的其它作品。
+            // artists 是 @Transient 的展示字段，老数据反序列化出来是空的 —— 这时回退到
+            // 单个 artist，行为和以前完全一样。
+            val authors = video.artists.ifEmpty { listOfNotNull(video.artist) }
+            if (authors.isNotEmpty()) {
                 item(key = "artist") {
                     ArtistSection(
-                        artist = artist,
-                        onOpenArtist = { onOpenArtist(artist) },
-                        onToggleSubscribe = { onToggleSubscribe(artist) },
+                        artists = authors,
+                        onOpenArtist = onOpenArtist,
+                        onToggleSubscribe = onToggleSubscribe,
                     )
                 }
             }
@@ -870,89 +874,133 @@ private fun PlaylistBottomSheet(
     }
 }
 
+/**
+ * 作者区。
+ *
+ * ## 为什么收的是一个列表而不是单个 [HanimeVideo.Artist]
+ *
+ * 一部片子的作者可以不止一位 —— Pornhub 实测常见 2–4 位（`div.pornstarsWrapper` 里有几个
+ * `a.pstar-list-btn` 就有几位）。原来只取第一位画出来，用户在详情页**根本看不到其他作者**，
+ * 也就点不进他们的作品。所以这里把每一位都画成一行：头像 + 名字 + 分类，
+ * **每一位都能点进「该作者的作品」**，行为与只有一位时完全一致。
+ *
+ * 只有一位作者时（hanime / nJAV，以及大部分 Pornhub 素人片）视觉上与老版一致。
+ */
 @Composable
 private fun ArtistSection(
+    artists: List<HanimeVideo.Artist>,
+    onOpenArtist: (HanimeVideo.Artist) -> Unit,
+    onToggleSubscribe: (HanimeVideo.Artist) -> Unit,
+) {
+    // 卡片本身不再可点（改成每一行自己可点），所以形状取「未按下」那档，
+    // 视觉与老版单作者时一致。cardShapes() 返回的是 ButtonShapes，
+    // 必须过一层 shapeByInteraction 才是 Shape —— 直接塞给 Card 会编译不过。
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = shapeByInteraction(
+            shapes = HanimeDefaults.cardShapes(),
+            pressed = false,
+            animationSpec = HanimeDefaults.shapesDefaultAnimationSpec,
+        ),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            artists.forEachIndexed { index, artist ->
+                // 多位作者之间加一条细分隔线（从头像右侧起），否则几行会糊成一坨。
+                if (index > 0) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 76.dp),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                }
+                ArtistRow(
+                    artist = artist,
+                    onOpenArtist = { onOpenArtist(artist) },
+                    onToggleSubscribe = { onToggleSubscribe(artist) },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ArtistRow(
     artist: HanimeVideo.Artist,
     onOpenArtist: () -> Unit,
     onToggleSubscribe: () -> Unit,
 ) {
     val view = LocalView.current
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-    val cardShape = shapeByInteraction(
-        shapes = HanimeDefaults.cardShapes(),
-        pressed = pressed,
-        animationSpec = HanimeDefaults.shapesDefaultAnimationSpec,
-    )
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = cardShape,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .combinedClickable(
-                    interactionSource = interactionSource,
-                    indication = LocalIndication.current,
-                    onClick = {
-                        VibrationUtil.performHapticFeedback(view)
-                        onOpenArtist()
-                    },
-                    onLongClick = null,
-                )
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            AsyncImage(
-                model = artist.avatarUrl,
-                contentDescription = artist.name,
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(androidx.compose.foundation.shape.CircleShape),
-                contentScale = ContentScale.Crop,
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {
+                    VibrationUtil.performHapticFeedback(view)
+                    onOpenArtist()
+                },
+                onLongClick = null,
             )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = artist.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        AsyncImage(
+            model = artist.avatarUrl,
+            contentDescription = artist.name,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape),
+            contentScale = ContentScale.Crop,
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = artist.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // Pornhub 的第一位作者常常没有分类（素人片），这时不画空的一行。
+            if (artist.genre.isNotBlank()) {
                 Text(
                     text = artist.genre,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            artist.post?.let {
-                if (artist.isSubscribed) {
-                    OutlinedButton(
-                        onClick = {
-                            VibrationUtil.performHapticFeedback(view)
-                            onToggleSubscribe()
-                        },
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        ),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.outlineVariant
-                        )
-                    ) {
-                        Text(text = stringResource(R.string.subscribed))
-                    }
-                } else {
-                    Button(
-                        onClick = onToggleSubscribe,
-                    ) {
-                        Text(text = stringResource(R.string.subscribe))
-                    }
+        }
+        // ⚠️ 关注按钮只有 hanime 的演员有（`Artist.post` 非空才有订阅接口）。
+        //    Pornhub / nJAV 目前没有订阅能力，所以那两站这里不会出现按钮，
+        //    点整行 = 看该作者的作品。
+        artist.post?.let {
+            if (artist.isSubscribed) {
+                OutlinedButton(
+                    onClick = {
+                        VibrationUtil.performHapticFeedback(view)
+                        onToggleSubscribe()
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant
+                    )
+                ) {
+                    Text(text = stringResource(R.string.subscribed))
+                }
+            } else {
+                Button(
+                    onClick = onToggleSubscribe,
+                ) {
+                    Text(text = stringResource(R.string.subscribe))
                 }
             }
         }

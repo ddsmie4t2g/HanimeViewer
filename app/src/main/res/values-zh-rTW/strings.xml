@@ -164,6 +164,7 @@
     <string name="site_source_title">資料來源</string>
     <string name="site_source_summary">切換內容來源。帳號相關功能（登入 / 清單 / 留言）目前僅在 hanime1.me 下可用。</string>
     <string name="site_source_hanime">hanime1.me</string>
+    <string name="site_picker_hanime">裏番（hanime1）</string>
     <string name="site_source_njav">nJAV</string>
     <string name="site_source_njav_with_host">nJAV（njavtv.com）</string>
     <string name="site_source_pornhub_with_host">Pornhub（pornhub.com）</string>
@@ -173,6 +174,11 @@
     <string name="ph_popular">最多觀看</string>
     <string name="ph_top_rated">最高評分</string>
     <string name="ph_japanese">日本</string>
+    <string name="ph_weekly">本週熱門</string>
+    <string name="ph_chinese">華語</string>
+    <string name="ph_amateur">素人</string>
+    <string name="ph_hentai">動漫</string>
+    <string name="ph_exclusive">官方獨家</string>
     <string name="site_source_restart_confirm">切換資料來源需要重啟應用程式，確定要繼續嗎？</string>
     <string name="custom_mirror_site">自訂鏡像站</string>
     <string name="enable_custom_mirror_site">啟用自訂鏡像站</string>

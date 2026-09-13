@@ -55,7 +55,7 @@ class MainActivity : BaseActivity() {
         extraBufferCapacity = 1,
     )
     private var currentVideoHost: VideoPageHost? = null
-    private var showSiteSwitchConfirm by mutableStateOf(false)
+    private var showSiteSwitchPicker by mutableStateOf(false)
     private var logoutDialogCloseCurrentPage by mutableStateOf<Boolean?>(null)
 
     companion object {
@@ -83,13 +83,15 @@ class MainActivity : BaseActivity() {
                 pendingNavigationRequests = pendingNavigationRequests,
                 showAuthGuard = showAuthGuard,
                 onOpenAccount = { mainBackStack.add(AccountRoute) },
-                showSiteSwitchConfirm = showSiteSwitchConfirm,
+                showSiteSwitchPicker = showSiteSwitchPicker,
+                // 当前站点：让弹层里那一项是选中态，用户一眼知道自己在哪一站。
+                currentSiteSource = SettingsRepository.siteSource.value,
                 logoutDialogCloseCurrentPage = logoutDialogCloseCurrentPage,
                 onLogoutClick = { showLogoutConfirmDialog() },
                 onRequireLogin = { openLogin() },
-                onSwitchSiteClick = { showSiteSwitchConfirm = true },
-                onDismissSiteSwitch = { showSiteSwitchConfirm = false },
-                onConfirmSiteSwitch = ::confirmSiteSwitch,
+                onSwitchSiteClick = { showSiteSwitchPicker = true },
+                onDismissSiteSwitch = { showSiteSwitchPicker = false },
+                onSelectSite = { switchSite(SiteSource.fromValue(it)) },
                 onDismissLogout = { logoutDialogCloseCurrentPage = null },
                 onConfirmLogout = ::confirmLogout,
                 onOpenClipboardVideo = ::showVideoDetailFragment,
@@ -211,14 +213,24 @@ class MainActivity : BaseActivity() {
     }
 
     /**
-     * 抽屉头部「切换站点」：hanime 里番 → nJAV → Pornhub → 回到 hanime，三站循环。
+     * 抽屉头部「切换站点」：**直接切到用户点的那一站**（弹层由
+     * [MainActivityContent] 里的 `ChoiceDialog` 渲染）。
+     *
+     * 以前是「三站循环 + 二次确认」：只有两个站点时还凑合，到三个就成了
+     * 「点一下 → 确认 → 发现不是想去的那站 → 再点一下 → 确认」，最多按四次。
+     * 现在点哪个去哪个，一次到位。
+     *
+     * 目标 == 当前站点时**什么都不做**（连重启都不做）—— 用户点错了自己那站，
+     * 不该被强制重启一次。
      *
      * ⚠️ **必须同时写 `siteSource` 与 `domainName`**：只改域名不写数据源，网络层
-     * 仍会按旧站点分流 —— 这正是 mod.5 里「点 nJAV 切不过去」的根因。
-     * 判据一律读 [SettingsRepository.siteSource]，不去比 URL 猜。
+     * 仍会按旧站点分流（mod.5 的历史根因）。判据一律读 [SettingsRepository.siteSource]，
+     * 不去比 URL 猜。
      */
-    private fun confirmSiteSwitch() {
-        showSiteSwitchConfirm = false
+    private fun switchSite(target: SiteSource) {
+        showSiteSwitchPicker = false
+        if (SettingsRepository.siteSource == target) return
+
         // 回 hanime 时用哪个镜像：优先用户之前记下的那个，但必须真的是 hanime 镜像
         // （selectedBaseUrl 有可能是历史遗留值，否则就回不到「里番」了）。
         val comebackSite = SettingsRepository.selectedBaseUrl
@@ -227,31 +239,30 @@ class MainActivity : BaseActivity() {
 
         lifecycleScope.launch {
             SettingsRepository.update {
-                when (SettingsRepository.siteSource) {
-                    // hanime 里番（含自定义镜像）→ nJAV
+                when (target) {
+                    // 回 hanime 里番（含自定义镜像 → 关掉，因为自定义只指向某一个站点）
                     SiteSource.Hanime1 -> it.copy(
-                        domainName = HanimeConstants.NJAV_URL,
-                        // 记下「来的时候在哪个 hanime 镜像」，方便切回去
-                        selectedBaseUrl = comebackSite,
-                        siteSource = SiteSource.Njav,
-                        // 自定义镜像只指向某一个站点，跟不过去，切换站点时关掉。
-                        useCustomMirrorSite = false,
-                    )
-
-                    // nJAV → Pornhub（两者都是 AV 数据源，域名必须跟着换）
-                    SiteSource.Njav -> it.copy(
-                        domainName = HanimeConstants.PORN_HUB_URL,
-                        // 保留 selectedBaseUrl —— 它是「回 hanime 时用哪个镜像」的备忘，
-                        // 在 AV 数据源之间来回切不该把它冲掉。
-                        siteSource = SiteSource.Pornhub,
-                        useCustomMirrorSite = false,
-                    )
-
-                    // Pornhub → 回到 hanime 里番
-                    SiteSource.Pornhub -> it.copy(
                         domainName = comebackSite,
                         selectedBaseUrl = comebackSite,
                         siteSource = SiteSource.Hanime1,
+                        useCustomMirrorSite = false,
+                    )
+
+                    // nJAV：**保留 selectedBaseUrl** —— 它是「回 hanime 时用哪个镜像」的
+                    // 备忘，在 AV 数据源之间来回切不该把它冲掉。
+                    SiteSource.Njav -> it.copy(
+                        domainName = HanimeConstants.NJAV_URL,
+                        selectedBaseUrl = comebackSite,
+                        siteSource = SiteSource.Njav,
+                        useCustomMirrorSite = false,
+                    )
+
+                    // Pornhub：同上保留 selectedBaseUrl。
+                    SiteSource.Pornhub -> it.copy(
+                        domainName = HanimeConstants.PORN_HUB_URL,
+                        selectedBaseUrl = comebackSite,
+                        siteSource = SiteSource.Pornhub,
+                        useCustomMirrorSite = false,
                     )
                 }
             }

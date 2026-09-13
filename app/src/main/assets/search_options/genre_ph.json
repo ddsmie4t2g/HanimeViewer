@@ -33,10 +33,58 @@
   },
   {
     "lang": {
+      "zh-rCN": "本周热门",
+      "en": "This week's top",
+      "zh-rTW": "本週熱門"
+    },
+    "search_key": "本週熱門"
+  },
+  {
+    "lang": {
       "zh-rCN": "日本",
       "en": "Japanese",
       "zh-rTW": "日本"
     },
     "search_key": "日本"
+  },
+  {
+    "lang": {
+      "zh-rCN": "华语",
+      "en": "Chinese",
+      "zh-rTW": "華語"
+    },
+    "search_key": "華語"
+  },
+  {
+    "lang": {
+      "zh-rCN": "素人",
+      "en": "Amateur",
+      "zh-rTW": "素人"
+    },
+    "search_key": "素人"
+  },
+  {
+    "lang": {
+      "zh-rCN": "动漫",
+      "en": "Hentai",
+      "zh-rTW": "動漫"
+    },
+    "search_key": "動漫"
+  },
+  {
+    "lang": {
+      "zh-rCN": "角色扮演",
+      "en": "Cosplay",
+      "zh-rTW": "角色扮演"
+    },
+    "search_key": "Cosplay"
+  },
+  {
+    "lang": {
+      "zh-rCN": "官方独家",
+      "en": "Exclusives",
+      "zh-rTW": "官方獨家"
+    },
+    "search_key": "官方獨家"
   }
 ]

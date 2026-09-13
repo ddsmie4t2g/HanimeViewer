@@ -68,13 +68,29 @@ android {
         applicationId = "io.github.daisukikaffuchino.han1meviewer"
         minSdk = 29
         targetSdk = 37
-        versionCode = 260942
-        versionName = "26.3.2-mod.26.6"
+        // ────────────────────────────────────────────────────────────────────
+        // 版本号规则（26.6.1 起）
+        //
+        // versionName 从 `26.3.2-mod.26.6` 这种「上游基准 + mod 后缀」改成了**干净的
+        // 三段号** `26.6.1`，APK 也就叫 `Han1meViewer-v26.6.1.apk`，不再带 `mod`。
+        // 于是版本号里**不再编码「本构建基于哪个上游版本」** —— 那个信息挪到
+        // UPSTREAM_BASE_VERSION（见下），AppUpdateChecker 读它做上游比较。
+        //
+        // versionCode = major*1_000_000 + minor*1_000 + patch，与 versionName 一一对应：
+        //     26.6.1 → 26_006_001
+        // 老方案是「260940 / 260941 / 260942」这种递增序号（26.4 / 26.5 / 26.6），
+        // 新方案一上来就比它大（26_006_001 > 260_942），不会触发系统的「降级安装」拒绝。
+        // ────────────────────────────────────────────────────────────────────
+        versionCode = 26_006_001
+        versionName = "26.6.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "VERSION_NAME", "\"${versionName}\"")
         buildConfigField("int", "VERSION_CODE", "$versionCode")
+        // 本构建基于的上游版本。versionName 已经不带这个信息了，所以单独给一个字段，
+        // 「关于」页与检查更新里的「上游最新 x / 本构建基于 x」都读它。
+        buildConfigField("String", "UPSTREAM_BASE_VERSION", "\"26.3.2\"")
         buildConfigField("int", "SEARCH_YEAR_RANGE_END", "${Config.thisYear}")
 
         externalNativeBuild {
