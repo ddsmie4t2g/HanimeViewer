@@ -198,6 +198,16 @@ data class AppSettings(
      * 只有 Pornhub / nJAV 这种**没有订阅接口**的站点会往里写；hanime 走服务端订阅。
      */
     val followedArtistsJson: String = "",
+    /**
+     * **自建账号**的本地状态（JSON）：`{token, username, revision, lastSyncAt}`。
+     *
+     * 26.7.0 新增。与 hanime 的登录**完全无关** —— 那是站点账号（cookie），这是
+     * 「你自己的账号」：数据存在用户自己的服务器上（见 `logic/account/AccountRepository`）。
+     *
+     * 同样是一个 JSON 字符串而不是四个字段：这四个值总是一起读写，
+     * 拆成四列只是让 DataStore 的映射表更长。
+     */
+    val accountJson: String = "",
     val useBuiltInHosts: Boolean = false,
     val customHostsData: String = "",
     /**

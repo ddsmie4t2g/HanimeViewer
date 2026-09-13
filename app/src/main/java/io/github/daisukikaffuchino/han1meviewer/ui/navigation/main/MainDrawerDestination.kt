@@ -20,6 +20,15 @@ enum class MainDrawerDestination(
         iconRes = R.drawable.ic_settings,
         titleRes = R.string.settings,
     ),
+    /**
+     * **自建账号**：数据存在用户自己的服务器上，与任何站点无关。
+     * 刻意放在「设置」旁边而不是混进站点账号那一套里 —— 两者是不同的东西。
+     */
+    MyAccount(
+        route = MyAccountRoute,
+        iconRes = R.drawable.ic_person,
+        titleRes = R.string.account_title,
+    ),
     DailyCheckIn(
         route = DailyCheckInRoute,
         iconRes = R.drawable.ic_thumb_up_off_alt,

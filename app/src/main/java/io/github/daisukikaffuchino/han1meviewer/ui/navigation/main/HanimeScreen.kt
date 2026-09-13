@@ -32,6 +32,14 @@ object DownloadRoute : HanimeScreen
 @Serializable
 object AccountRoute : HanimeScreen
 
+/**
+ * **自建账号**（26.7.0）——与 [AccountRoute]（hanime 站点账号）是两件事：
+ * 这一个的数据存在用户自己的服务器上，见
+ * [io.github.daisukikaffuchino.han1meviewer.logic.account.AccountRepository]。
+ */
+@Serializable
+object MyAccountRoute : HanimeScreen
+
 @Serializable
 object LoginRoute : HanimeScreen
 

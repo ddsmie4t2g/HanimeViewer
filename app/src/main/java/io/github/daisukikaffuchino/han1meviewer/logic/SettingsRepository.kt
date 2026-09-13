@@ -98,6 +98,8 @@ object SettingsRepository : SettingsStore {
     val pinnedSearchesJson get() = current.pinnedSearchesJson
     /** 本地关注作者（JSON）。见 [FollowedArtistStore]。 */
     val followedArtistsJson get() = current.followedArtistsJson
+    /** 自建账号的本地状态（JSON）。见 [io.github.daisukikaffuchino.han1meviewer.logic.account.AccountRepository]。 */
+    val accountJson get() = current.accountJson
     /** 是否按影片记住倍速与画质。 */
     val rememberPerVideoPlayback get() = current.rememberPerVideoPlayback
     /** 按影片的播放记忆（JSON）。 */
@@ -179,6 +181,8 @@ object SettingsRepository : SettingsStore {
     suspend fun setRelayNodesJson(value: String) = update { it.copy(relayNodesJson = value) }
     /** 本地关注列表（JSON）。只有 Pornhub / nJAV 这类没有订阅接口的站点会用到。 */
     suspend fun setFollowedArtistsJson(value: String) = update { it.copy(followedArtistsJson = value) }
+    /** 自建账号本地状态（JSON）：token / 用户名 / 云端 revision / 上次同步时间。 */
+    suspend fun setAccountJson(value: String) = update { it.copy(accountJson = value) }
     suspend fun setActiveRelayNodeId(value: String) = update { it.copy(activeRelayNodeId = value) }
     suspend fun setAutoSelectRelayNode(value: Boolean) = update { it.copy(autoSelectRelayNode = value) }
 

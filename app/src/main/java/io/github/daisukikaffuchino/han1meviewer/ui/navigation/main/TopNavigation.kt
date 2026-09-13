@@ -66,6 +66,7 @@ import io.github.daisukikaffuchino.han1meviewer.ui.navigation.settings.SharedHKe
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.settings.VideoPlaybackSettingsRoute
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.account.AccountScreen
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.account.AvatarCropScreen
+import io.github.daisukikaffuchino.han1meviewer.ui.screen.account.MyAccountScreen
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.settings.HomeSettingsPage
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.settings.OpenSourceLicensesScreen
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.settings.SettingsMainScreen
@@ -204,6 +205,9 @@ fun TopNavigation(
                 onNavigateToVideo = onNavigateToVideo,
                 onNavigateToLocalVideo = onNavigateToLocalVideo,
             )
+        }
+        entry<MyAccountRoute>(metadata = pageTransition()) {
+            MyAccountScreen(navigateBack = onBack)
         }
         entry<AccountRoute>(metadata = pageTransition()) {
             val accountViewModel: UserAccountViewModel = viewModel()
