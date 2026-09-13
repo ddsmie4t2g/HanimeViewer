@@ -64,6 +64,18 @@
     <string name="login">Login</string>
     <!-- 自建账号（26.7.0）：数据存在用户自己的服务器上，与任何站点无关 -->
     <string name="account_title">My Account</string>
+    <!-- 账号错误码的本地化文案（服务端只发英文 message，这里按机器码翻） -->
+    <string name="account_err_username_invalid">Username: 2-32 characters — letters of any language (Chinese is fine), digits, _ . - and no spaces.</string>
+    <string name="account_err_password_too_short">Password must be at least 6 characters.</string>
+    <string name="account_err_username_taken">That username is already taken.</string>
+    <string name="account_err_bad_credentials">Wrong username or password.</string>
+    <string name="account_err_rate_limited">Too many attempts. Wait a few minutes and try again.</string>
+    <string name="account_err_registration_disabled">This server has registration disabled.</string>
+    <string name="account_err_account_limit">This server has reached its account limit.</string>
+    <string name="account_err_wrong_password">The current password is wrong.</string>
+    <string name="account_err_token">Your sign-in expired. Please sign in again.</string>
+    <string name="account_err_conflict">The cloud copy just changed. Try again.</string>
+    <string name="account_server_unreachable">Cannot reach the account server: %1$s</string>
     <!-- 账号分区与「站点账号 vs 自建账号」的说明（26.7.1） -->
     <string name="account_section">Account</string>
     <string name="site_account_hanime">hanime site account</string>
@@ -77,7 +89,7 @@
     <string name="account_no_site_accounts">nJAV and Pornhub have no accounts of their own (the sites simply do not offer them), so this account is what covers them - and it covers all three sites at once.</string>
     <string name="account_register">Register</string>
     <string name="account_server">Server</string>
-    <string name="account_password_rule">Username: 3-32 characters (letters, digits, _ . -). Password: at least 6 characters. The server only keeps a salted PBKDF2 hash.</string>
+    <string name="account_password_rule">Username: 2-32 characters (Chinese or any language, digits, _ . -). Password: at least 6 characters. The server only keeps a salted PBKDF2 hash.</string>
     <string name="account_cloud_revision">Cloud revision</string>
     <string name="account_last_sync">Last sync</string>
     <string name="account_never_synced">never</string>

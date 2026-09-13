@@ -71,7 +71,7 @@ object AccountRepository {
             )
             save(state)
             state
-        }
+        }.recoverCatching { e -> throw translate(e) }
 
     suspend fun login(username: String, password: String): Result<AccountState> =
         runCatching {
@@ -83,7 +83,7 @@ object AccountRepository {
             )
             save(state)
             state
-        }
+        }.recoverCatching { e -> throw translate(e) }
 
     /**
      * 登出：**先清本地再告诉服务端**。
@@ -102,7 +102,7 @@ object AccountRepository {
         AccountApi.changePassword(state.token, oldPassword, newPassword)
         // 服务端改密会踢掉所有会话（包括这枚 token）→ 本地也清掉，逼一次重新登录。
         save(AccountState())
-    }
+    }.recoverCatching { e -> throw translate(e) }
 
     /**
      * ⭐ **双向同步**：拉云端 → 与本机合并 → 写回本机 → 传回云端。
@@ -181,7 +181,7 @@ object AccountRepository {
         )
         save(updated)
         updated
-    }
+    }.recoverCatching { e -> throw translate(e) }
 
     private suspend fun requireLoggedIn(): AccountState {
         val state = current()
@@ -189,8 +189,8 @@ object AccountRepository {
         return state
     }
 
-    /** 把异常翻译成用户能读懂的一句话（服务端的 message 本来就是中文/英文短句，优先用它）。 */
-    private fun readableError(e: Throwable): String = when (e) {
+    /** 把异常翻译成用户能读懂的一句话（服务端的 message 本来就是短句，优先用它）。 */
+    fun readableError(e: Throwable): String = when (e) {
         is AccountApi.AccountException -> when (e.code) {
             401 -> "登录已失效，请重新登录"
             403 -> e.message
@@ -200,10 +200,25 @@ object AccountRepository {
             else -> "服务器返回 ${e.code}：${e.message}"
         }
 
-        is java.net.UnknownHostException -> "找不到服务器地址"
-        is java.net.SocketTimeoutException -> "服务器响应超时"
-        is javax.net.ssl.SSLException -> "证书校验失败（服务器可能换机了，需要更新 App）"
-        is java.io.IOException -> "连不上账号服务器：${e.message.orEmpty()}"
-        else -> e.message ?: e::class.java.simpleName
+        is AccountApi.NetworkException -> e.message
+        is java.net.UnknownHostException -> "找不到服务器地址（${e.message.orEmpty().ifBlank { "DNS 失败" }}）"
+        is java.net.SocketTimeoutException -> "服务器响应超时（${e.message.orEmpty().ifBlank { "timeout" }}）"
+        is javax.net.ssl.SSLException -> "证书校验失败：服务器可能换机了，需要更新 App（${e::class.java.simpleName}）"
+        is java.io.IOException ->
+            "连不上账号服务器（${e::class.java.simpleName}）：${e.message.orEmpty().ifBlank { "网络不可达" }}"
+
+        // ⚠️ 最后这条兜底**必须**存在：以前失败时把 `it.message.orEmpty()` 交给界面，
+        // 异常 message 为 null 时界面拿到空串 → 提示写着「原因见下方」而下面什么都没有。
+        else -> e.message?.takeIf { it.isNotBlank() }
+            ?: "未知错误（${e::class.java.simpleName}）"
     }
+
+    /**
+     * 把任何异常规整成「一定有一句能看懂的话」的异常。
+     *
+     * 业务错误（[AccountApi.AccountException]）原样保留 —— 界面要靠它的 `errorCode` 查本地化文案；
+     * 其余（网络、超时、证书、未知）包成 [AccountApi.NetworkException]，message 由 [readableError] 保证非空。
+     */
+    private fun translate(e: Throwable): Throwable =
+        if (e is AccountApi.AccountException) e else AccountApi.NetworkException(readableError(e), e)
 }

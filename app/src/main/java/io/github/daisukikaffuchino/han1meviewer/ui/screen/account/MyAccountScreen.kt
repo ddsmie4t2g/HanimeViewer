@@ -37,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.daisukikaffuchino.han1meviewer.R
+import io.github.daisukikaffuchino.han1meviewer.logic.account.AccountApi
 import io.github.daisukikaffuchino.han1meviewer.logic.account.AccountRepository
 import io.github.daisukikaffuchino.han1meviewer.ui.component.appbar.HanimeScaffold
 import io.github.daisukikaffuchino.utils.SonnerToast
@@ -69,15 +70,53 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
     var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
+    // 失败原因要**贴着按钮**显示（以前只在页面最底部，键盘一弹就被挡掉，
+    // 用户看到的就是「原因见下方」而下面什么都没有）。
+    var statusIsError by remember { mutableStateOf(false) }
+    fun setStatus(text: String, isError: Boolean) {
+        status = text
+        statusIsError = isError
+    }
     var showPasswordDialog by remember { mutableStateOf(false) }
+
+    // ⚠️ 文案必须在**组合作用域**里先取好：协程（scope.launch）里不能调 stringResource。
+    // 所以这里是「机器码 → 本地化句子」的表 + 一个纯函数，供下面所有回调使用。
+    val errorStrings = mapOf(
+        "username_invalid" to stringResource(R.string.account_err_username_invalid),
+        "password_too_short" to stringResource(R.string.account_err_password_too_short),
+        "username_taken" to stringResource(R.string.account_err_username_taken),
+        "bad_credentials" to stringResource(R.string.account_err_bad_credentials),
+        "rate_limited" to stringResource(R.string.account_err_rate_limited),
+        "registration_disabled" to stringResource(R.string.account_err_registration_disabled),
+        "account_limit" to stringResource(R.string.account_err_account_limit),
+        "wrong_password" to stringResource(R.string.account_err_wrong_password),
+        "invalid_token" to stringResource(R.string.account_err_token),
+        "missing_token" to stringResource(R.string.account_err_token),
+        "conflict" to stringResource(R.string.account_err_conflict),
+    )
+    val serverUnreachable = stringResource(
+        R.string.account_server_unreachable,
+        AccountRepository.serverUrl,
+    )
+
+    /**
+     * 失败原因 —— **一定非空**。
+     *
+     * 用户报的就是这个：提示写着「原因见下方」，而下方什么都没有（异常 message 为 null
+     * 时原来会渲染成空串）。所以这里两条路都有具体内容：认识机器码就用本地化句子，
+     * 不认识就带上服务端原文与 HTTP 码。
+     */
+    fun explain(e: Throwable): String = when (e) {
+        is AccountApi.AccountException ->
+            errorStrings[e.errorCode] ?: "${e.message}（HTTP ${e.code}）"
+
+        else -> AccountRepository.readableError(e)
+    }
 
     // 探活一次：让用户先知道「服务器通不通」，而不是在表单上猜自己是不是填错了。
     LaunchedEffect(Unit) {
-        status = if (AccountRepository.ping()) {
-            AccountRepository.serverUrl
-        } else {
-            "连不上账号服务器（${AccountRepository.serverUrl}）"
-        }
+        val ok = AccountRepository.ping()
+        setStatus(if (ok) AccountRepository.serverUrl else serverUnreachable, isError = !ok)
     }
 
     HanimeScaffold(
@@ -142,6 +181,25 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        // 输入了内容但还不合法时立刻说清楚 —— 灰按钮不该是个哑谜。
+                        if (username.isNotBlank() && !isValidAccountUsername(username)) {
+                            Text(
+                                text = stringResource(R.string.account_err_username_invalid),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        if (status.isNotBlank()) {
+                            Text(
+                                text = status,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (statusIsError) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -155,16 +213,20 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                                             password = ""
                                             // ⭐ 登录成功后**自动同步一次**：用户装完新机、登录，
                                             // 期望的就是「数据自己回来」，而不是再去点一个按钮。
-                                            status = AccountRepository.sync().describe()
+                                            val outcome = AccountRepository.sync()
+                                            setStatus(outcome.describe(), isError = !outcome.success)
                                             SonnerToast.success(R.string.account_logged_in)
-                                        }.onFailure {
-                                            status = it.message.orEmpty()
-                                            SonnerToast.error(R.string.account_failed)
+                                        }.onFailure { e ->
+                                            val reason = explain(e)
+                                            setStatus(reason, isError = true)
+                                            // 原因同时进 toast：即使正文被挡住，也知道到底怎么了。
+                                            SonnerToast.error(reason)
                                         }
                                         busy = false
                                     }
                                 },
-                                enabled = !busy && username.isNotBlank() && password.length >= 6,
+                                enabled = !busy && isValidAccountUsername(username) &&
+                                        password.length >= 6,
                             ) {
                                 Text(stringResource(R.string.login))
                             }
@@ -176,16 +238,19 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                                         result.onSuccess {
                                             password = ""
                                             // 新账号云端是空的 → 这次同步会把**本机数据带上去**。
-                                            status = AccountRepository.sync().describe()
+                                            val outcome = AccountRepository.sync()
+                                            setStatus(outcome.describe(), isError = !outcome.success)
                                             SonnerToast.success(R.string.account_registered)
-                                        }.onFailure {
-                                            status = it.message.orEmpty()
-                                            SonnerToast.error(R.string.account_failed)
+                                        }.onFailure { e ->
+                                            val reason = explain(e)
+                                            setStatus(reason, isError = true)
+                                            SonnerToast.error(reason)
                                         }
                                         busy = false
                                     }
                                 },
-                                enabled = !busy && username.isNotBlank() && password.length >= 6,
+                                enabled = !busy && isValidAccountUsername(username) &&
+                                        password.length >= 6,
                             ) {
                                 Text(stringResource(R.string.account_register))
                             }
@@ -210,11 +275,11 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                                 scope.launch {
                                     val outcome = AccountRepository.sync()
                                     busy = false
-                                    status = outcome.describe()
+                                    setStatus(outcome.describe(), isError = !outcome.success)
                                     if (outcome.success) {
                                         SonnerToast.success(R.string.account_sync_done)
                                     } else {
-                                        SonnerToast.error(R.string.account_failed)
+                                        SonnerToast.error(outcome.message)
                                     }
                                 }
                             },
@@ -233,11 +298,11 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                                     scope.launch {
                                         val outcome = AccountRepository.uploadLocal()
                                         busy = false
-                                        status = outcome.message
+                                        setStatus(outcome.message, isError = !outcome.success)
                                         if (outcome.success) {
                                             SonnerToast.success(R.string.account_sync_done)
                                         } else {
-                                            SonnerToast.error(R.string.account_failed)
+                                            SonnerToast.error(outcome.message)
                                         }
                                     }
                                 },
@@ -255,7 +320,7 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                                 onClick = {
                                     scope.launch {
                                         AccountRepository.logout()
-                                        status = ""
+                                        setStatus("", isError = false)
                                         SonnerToast.success(R.string.account_logged_out)
                                     }
                                 },
@@ -271,11 +336,16 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
             if (busy) {
                 LoadingIndicator(Modifier.align(Alignment.CenterHorizontally))
             }
-            if (status.isNotBlank()) {
+            // 登录态下（卡片里没有内联状态位）仍然在这里显示一次结果。
+            if (state.isLoggedIn && status.isNotBlank()) {
                 Text(
                     text = status,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (statusIsError) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
             Text(
@@ -295,17 +365,35 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                     AccountRepository.changePassword(old, new)
                         .onSuccess {
                             SonnerToast.success(R.string.account_password_changed)
-                            status = ""
+                            setStatus("", isError = false)
                         }
-                        .onFailure {
-                            status = it.message.orEmpty()
-                            SonnerToast.error(R.string.account_failed)
+                        .onFailure { e ->
+                            val reason = explain(e)
+                            setStatus(reason, isError = true)
+                            SonnerToast.error(reason)
                         }
                 }
             },
         )
     }
 }
+
+/** 用户名合法吗（与服务端同规则，先在本机拦一次，省一次往返与一个 400）。 */
+private fun isValidAccountUsername(name: String): Boolean {
+    val trimmed = name.trim()
+    if (trimmed.length !in 2..32) return false
+    if (trimmed.any { it.isWhitespace() || it.isISOControl() }) return false
+    return ACCOUNT_USERNAME.matches(trimmed)
+}
+
+/**
+ * 允许「任意语言的字母/数字 + `_ . -`」，2–32 个。
+ *
+ * ⚠️ 别改成 `[A-Za-z0-9]`：用户第一次注册打的是中文名，被服务端挡下（400），
+ * 而界面又没显示出原因 —— 支持中文用户名是硬需求。
+ * 量词 `{2,32}` 是安全的（ICU 只禁裸大括号）。
+ */
+private val ACCOUNT_USERNAME = Regex("""^[\p{L}\p{N}_.\-]{2,32}$""")
 
 @Composable
 private fun InfoRow(label: String, value: String) {

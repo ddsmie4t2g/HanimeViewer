@@ -64,6 +64,18 @@
     <string name="login">登入</string>
     <!-- 自建帳號（26.7.0）：資料存在使用者自己的伺服器上，與任何站點無關 -->
     <string name="account_title">我的帳號</string>
+    <!-- 账号错误码的本地化文案（服务端只发英文 message，这里按机器码翻） -->
+    <string name="account_err_username_invalid">使用者名稱 2–32 個字元：可以是中文、字母、數字、_ . -，不能有空白。</string>
+    <string name="account_err_password_too_short">密碼至少要 6 位。</string>
+    <string name="account_err_username_taken">這個使用者名稱已經被佔用了。</string>
+    <string name="account_err_bad_credentials">使用者名稱或密碼不對。</string>
+    <string name="account_err_rate_limited">嘗試太頻繁了，過幾分鐘再試。</string>
+    <string name="account_err_registration_disabled">這台伺服器關閉了註冊。</string>
+    <string name="account_err_account_limit">這台伺服器的帳號數已滿。</string>
+    <string name="account_err_wrong_password">目前密碼不對。</string>
+    <string name="account_err_token">登入已失效，請重新登入。</string>
+    <string name="account_err_conflict">雲端剛剛有更新，請再試一次。</string>
+    <string name="account_server_unreachable">連不上帳號伺服器：%1$s</string>
     <!-- 帳號分區與「站點帳號 vs 自建帳號」的說明（26.7.1） -->
     <string name="account_section">帳號</string>
     <string name="site_account_hanime">hanime 站點帳號</string>
@@ -77,7 +89,7 @@
     <string name="account_no_site_accounts">nJAV 與 Pornhub 本身沒有帳號（站點不提供，也登不了），所以這個帳號就是給它們用的 —— 它一個號同時管三個站點。</string>
     <string name="account_register">註冊</string>
     <string name="account_server">伺服器</string>
-    <string name="account_password_rule">使用者名稱 3–32 字元（字母、數字、_ . -）；密碼至少 6 位。伺服器只保存加鹽的 PBKDF2 雜湊，不存明文。</string>
+    <string name="account_password_rule">使用者名稱 2–32 個字元（中文也行，也可用字母、數字、_ . -）；密碼至少 6 位。伺服器只保存加鹽的 PBKDF2 雜湊，不存明文。</string>
     <string name="account_cloud_revision">雲端版本</string>
     <string name="account_last_sync">上次同步</string>
     <string name="account_never_synced">從未同步</string>

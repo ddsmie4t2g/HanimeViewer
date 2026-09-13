@@ -73,11 +73,23 @@ object AccountApi {
             .build()
     }
 
-    /** 服务端返回的业务错误（带着 HTTP 码与它的 message，界面直接显示）。 */
+    /**
+     * 服务端返回的业务错误。
+     *
+     * ⚠️ 两个字段各有用途，别合并：
+     * - [errorCode] 是**机器码**（`username_invalid` / `password_too_short` / `username_taken` …），
+     *   界面拿它查本地化文案 —— 只显示服务端那句英文，中文用户看不懂「原因」；
+     * - [message] 是服务端的人读兜底，机器码认不出时原样显示（总比空白强）。
+     */
     class AccountException(
         val code: Int,
+        val errorCode: String,
         override val message: String,
     ) : Exception(message)
+
+    /** 网络层错误（连不上、超时、证书）——它们没有服务端机器码，但**必须**有一句能看懂的话。 */
+    class NetworkException(override val message: String, cause: Throwable? = null) :
+        Exception(message, cause)
 
     /**
      * 上传冲突：服务端的数据比客户端新。
@@ -129,12 +141,15 @@ object AccountApi {
                 }
                 throw AccountException(
                     code = code,
-                    message = json?.optString("error").orEmpty().ifBlank {
-                        "HTTP $code"
+                    errorCode = json?.optString("error").orEmpty().ifBlank { "error" },
+                    // 服务端现在两个字段都发：error=机器码、message=人读说明。
+                    // 老版本服务端只发 error（整句话），所以 message 缺失时回退到 error。
+                    message = json?.optString("message").orEmpty().ifBlank {
+                        json?.optString("error").orEmpty().ifBlank { "HTTP $code" }
                     },
                 )
             }
-            json ?: throw AccountException(response.code, "服务端返回的不是 JSON")
+            json ?: throw AccountException(response.code, "bad_response", "服务端返回的不是 JSON")
         }
     }
 
@@ -197,7 +212,7 @@ object AccountApi {
     suspend fun putData(token: String, baseRevision: Int, data: String): RemoteData {
         // data 是 JSON 文本，必须**原样**嵌进去（再转义成字符串的话服务端存的就是一坨字符串）。
         val dataObject = runCatching { JSONObject(data.ifBlank { "{}" }) }
-            .getOrElse { throw AccountException(0, "本机数据不是合法 JSON，未上传") }
+            .getOrElse { throw AccountException(0, "local_json_invalid", "本机数据不是合法 JSON，未上传") }
         val payload = JSONObject().apply {
             put("baseRevision", baseRevision)
             put("data", dataObject)
