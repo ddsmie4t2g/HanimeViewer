@@ -167,6 +167,45 @@ object PhNetwork {
     }
 
     /**
+     * ⭐ **作者页（作品列表）地址 —— 修「点作者进去全是别人的视频」。**
+     *
+     * 只对 `/pornstar/<slug>` 与 `/model/<slug>` 有效（这两类站点真的维护了可分页的作品列表）；
+     * 站点上还有 `/users/<name>`、`/channels/<name>` 之类的上传者主页，实测它们的
+     * `/videos` 是**游客受限**的（缩略图链接被换成 `triggerGatewayModal` 的登录引导），
+     * 拿不到可靠列表 —— 这时返回 null，由调用方退回「按名字搜索」。
+     *
+     * 为什么不能只靠按名字搜索：`/webmasters/search` 没有「按作者筛」的能力，
+     * `stars[]=` 也是模糊匹配（见 [PhParser.artistPage] 的注释），
+     * 搜出来的结果里会混进同名的别人。
+     */
+    fun artistVideosUrl(artistUrl: String, page: Int): String? {
+        val path = artistPath(artistUrl) ?: return null
+        val builder = (BASE_URL.trimEnd('/') + path + "/videos").toHttpUrl().newBuilder()
+        if (page > 1) builder.addQueryParameter("page", page.toString())
+        return builder.build().toString()
+    }
+
+    /**
+     * 把作者地址规整成站内路径，只认 `/pornstar/` 与 `/model/`（其余返回 null）。
+     *
+     * 详情页给的是**相对地址**（`/pornstar/tru-kait`），而本地关注表里存的可能是
+     * 带域名的绝对地址（用户手填或跨站跳转过），两种都要能吃下。
+     */
+    fun artistPath(artistUrl: String): String? {
+        val raw = artistUrl.trim()
+        if (raw.isEmpty()) return null
+        val path = if (raw.startsWith("http://", true) || raw.startsWith("https://", true)) {
+            raw.toHttpUrlOrNull()?.encodedPath ?: return null
+        } else {
+            raw.substringBefore('?').substringBefore('#')
+        }
+        val normalized = "/" + path.trim('/')
+        return normalized.takeIf {
+            it.startsWith("/pornstar/") || it.startsWith("/model/")
+        }
+    }
+
+    /**
      * ⭐ **embed 页地址 —— 播放地址的「保底来源」。**
      *
      * 详情页给的播放地址有两种签名形态，其中 `?h=…&e=…&f=1` 那种**必然 410**

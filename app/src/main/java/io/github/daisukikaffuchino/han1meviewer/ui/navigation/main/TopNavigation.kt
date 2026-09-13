@@ -35,6 +35,7 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import io.github.daisukikaffuchino.han1meviewer.R
+import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.ui.activity.MainActivity
 import io.github.daisukikaffuchino.han1meviewer.ui.component.IconButton
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.settings.AboutSettingsRoute
@@ -185,6 +186,9 @@ fun TopNavigation(
             SubscriptionRouteScreen(
                 onBack = onBack,
                 onNavigateToSearch = { query -> backStack.add(SearchRoute(query = query)) },
+                onNavigateToArtist = { artist ->
+                    backStack.add(ArtistRoute(ArtistRef.encode(artist)))
+                },
                 onNavigateToVideo = onNavigateToVideo,
             )
         }
@@ -494,6 +498,13 @@ fun TopNavigation(
         }
         entry<SearchRoute>(metadata = pageTransition()) { route ->
             SearchRouteScreen(
+                route = route,
+                onBack = onBack,
+                onNavigateToVideo = onNavigateToVideo,
+            )
+        }
+        entry<ArtistRoute>(metadata = pageTransition()) { route ->
+            ArtistRouteScreen(
                 route = route,
                 onBack = onBack,
                 onNavigateToVideo = onNavigateToVideo,

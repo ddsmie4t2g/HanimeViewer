@@ -47,6 +47,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.daisukikaffuchino.han1meviewer.R
+import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageLoadingState
 import io.github.daisukikaffuchino.han1meviewer.ui.component.ArtistItem
@@ -64,12 +65,23 @@ import kotlinx.coroutines.flow.map
 /**
  * 订阅页面 Content 层。纯 UI，不持有 ViewModel。
  *
- * 接收 [SubscriptionUiState] + [SubscriptionEvent] 回调，
- * 负责顶部作者横向列表、视频网格、加载更多触发等 UI 渲染。
+ * ## 页面结构（26.6.3 起分成互不相干的两段）
+ *
+ * ```
+ * 关注的作者（本机，三站通用，不需要登录）   ← 空的时候给一句「怎么关注」的提示
+ * ────────────────────────────────────────
+ * hanime 订阅（服务端，登录后才有）          ← 没登录时给一句说明，**不发任何请求**
+ * ────────────────────────────────────────
+ * 订阅视频流（服务端，登录后才有）
+ * ```
+ *
+ * 之所以拆开：关注是纯本机的事（谁都不该被登录挡住），服务端订阅只存在于 hanime。
+ * 合成一段画会让人分不清「这个作者为什么在这儿」，也解释不了「没登录为什么整页报错」。
  *
  * @param uiState 页面 UI 状态
  * @param onEvent 用户事件回调
  * @param gridState LazyGrid 滚动状态（UI 框架层）
+ * @param artistRows 作者格子每个纵列放几个（用户可设，见 `subscriptionArtistRows`）
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -119,61 +131,113 @@ fun SubscriptionContent(
             horizontalArrangement = Arrangement.spacedBy(SpacingNormal),
             verticalArrangement = Arrangement.spacedBy(SpacingNormal)
         ) {
+            // ── 第一段：本机关注的作者 ────────────────────────────────────────
             item(span = { GridItemSpan(videoColumns) }) {
-                AnimatedContent(
-                    targetState = uiState.artists,
-                    label = "artist-animation",
-                    transitionSpec = {
-                        fadeIn(tween(300)) togetherWith fadeOut(tween(200))
+                if (uiState.followed.isEmpty()) {
+                    SectionHint(stringResource(R.string.subscription_followed_empty_hint))
+                } else {
+                    AnimatedContent(
+                        targetState = uiState.followed,
+                        label = "followed-artist-animation",
+                        transitionSpec = {
+                            fadeIn(tween(300)) togetherWith fadeOut(tween(200))
+                        }
+                    ) { artists ->
+                        ArtistListSection(
+                            artists = artists.map {
+                                SubscriptionItem(artistName = it.name, avatar = it.avatar)
+                            },
+                            title = stringResource(
+                                R.string.subscription_followed_artists_count,
+                                artists.size,
+                            ),
+                            artistRows = artistRows,
+                            artistColumns = artistColumns,
+                            onClickArtist = { index ->
+                                artists.getOrNull(index)?.let {
+                                    onEvent(SubscriptionEvent.OnClickFollowed(it))
+                                }
+                            },
+                            onLongClickArtist = { index ->
+                                artists.getOrNull(index)?.let {
+                                    onEvent(SubscriptionEvent.OnLongClickFollowed(it))
+                                }
+                            },
+                        )
                     }
-                ) { artists ->
-                    ArtistListSection(
-                        artists = artists,
-                        artistRows = artistRows,
-                        artistColumns = artistColumns,
-                        onClickArtist = {
-                            onEvent(SubscriptionEvent.OnClickArtist(it))
-                        },
-                        onLongClickArtist = {
-                            onEvent(SubscriptionEvent.OnLongClickArtist(it))
-                        },
-                    )
                 }
             }
 
+            // ── 第二段：hanime 服务端订阅 ─────────────────────────────────────
             item(span = { GridItemSpan(videoColumns) }) {
-                HorizontalDivider(
-                    modifier = Modifier.fillMaxWidth(),
-                    thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
-            }
-
-            items(
-                items = uiState.videos,
-                key = { it.videoCode }
-            ) { video ->
-                Box(
-                    modifier = Modifier.animateItem()
-                ) {
-                    VideoCardItem(
-                        videoItem = video,
-                        onClickVideosItem = {
-                            onEvent(
-                                SubscriptionEvent.OnClickVideo(video.videoCode)
-                            )
-                        },
-                        onLongClickVideosItem = { _, _ -> },
-                    )
+                if (!uiState.isLoggedIn) {
+                    SectionHint(stringResource(R.string.subscription_login_hint))
+                } else {
+                    AnimatedContent(
+                        targetState = uiState.artists,
+                        label = "artist-animation",
+                        transitionSpec = {
+                            fadeIn(tween(300)) togetherWith fadeOut(tween(200))
+                        }
+                    ) { artists ->
+                        ArtistListSection(
+                            artists = artists,
+                            title = stringResource(
+                                R.string.subscription_server_artists_count,
+                                artists.size,
+                            ),
+                            artistRows = artistRows,
+                            artistColumns = artistColumns,
+                            onClickArtist = { index ->
+                                artists.getOrNull(index)?.let {
+                                    onEvent(SubscriptionEvent.OnClickArtist(it.artistName))
+                                }
+                            },
+                            onLongClickArtist = { index ->
+                                artists.getOrNull(index)?.let {
+                                    onEvent(SubscriptionEvent.OnLongClickArtist(it.artistName))
+                                }
+                            },
+                        )
+                    }
                 }
             }
-            if (uiState.videos.isNotEmpty()) {
+
+            if (uiState.isLoggedIn) {
                 item(span = { GridItemSpan(videoColumns) }) {
-                    LoadMoreFooter(
-                        state = PageLoadingState.Success(emptyList<String>()),
-                        isLoadingMore = uiState.canLoadMore,
-                        loadedPage = currentPage
+                    HorizontalDivider(
+                        modifier = Modifier.fillMaxWidth(),
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant
                     )
+                }
+
+                items(
+                    items = uiState.videos,
+                    key = { it.videoCode }
+                ) { video ->
+                    Box(
+                        modifier = Modifier.animateItem()
+                    ) {
+                        VideoCardItem(
+                            videoItem = video,
+                            onClickVideosItem = {
+                                onEvent(
+                                    SubscriptionEvent.OnClickVideo(video.videoCode)
+                                )
+                            },
+                            onLongClickVideosItem = { _, _ -> },
+                        )
+                    }
+                }
+                if (uiState.videos.isNotEmpty()) {
+                    item(span = { GridItemSpan(videoColumns) }) {
+                        LoadMoreFooter(
+                            state = PageLoadingState.Success(emptyList<String>()),
+                            isLoadingMore = uiState.canLoadMore,
+                            loadedPage = currentPage
+                        )
+                    }
                 }
             }
         }
@@ -181,15 +245,37 @@ fun SubscriptionContent(
 }
 
 /**
- * 已订阅作者横向列表区域。
+ * 段落说明（空关注 / 未登录时那两句）。
+ *
+ * 单独抽出来是因为它要被放在**网格里**（`GridItemSpan` 满行），
+ * 直接塞 `Text` 会窄成一列。
+ */
+@Composable
+private fun SectionHint(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+    )
+}
+
+/**
+ * 已订阅 / 已关注作者的横向格子区域。
+ *
+ * @param onClickArtist 收到的是**下标**而不是名字：作者可能重名（跨站同名很常见），
+ *   按下标回传才能让上层取回正确那一条（关注的作者要整份身份，不只是名字）。
  */
 @Composable
 private fun ArtistListSection(
     artists: List<SubscriptionItem>,
+    title: String,
     artistRows: Int,
     artistColumns: Int,
-    onClickArtist: (String) -> Unit,
-    onLongClickArtist: (String) -> Unit,
+    onClickArtist: (Int) -> Unit,
+    onLongClickArtist: (Int) -> Unit,
 ) {
     val scrollState = rememberScrollState()
     val artistColumnCount = maxOf(1, (artists.size + artistRows - 1) / artistRows)
@@ -207,7 +293,7 @@ private fun ArtistListSection(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = stringResource(R.string.subscribed_artists_count, artists.size),
+                text = title,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -249,8 +335,8 @@ private fun ArtistListSection(
                             if (artist != null) {
                                 ArtistItem(
                                     artist = artist,
-                                    onClickArtist = { onClickArtist(artist.artistName) },
-                                    onLongClickArtist = { onLongClickArtist(artist.artistName) },
+                                    onClickArtist = { onClickArtist(itemIndex) },
+                                    onLongClickArtist = { onLongClickArtist(itemIndex) },
                                 )
                             } else {
                                 Spacer(modifier = Modifier.width(ArtistIconSize))
@@ -285,8 +371,10 @@ private fun PreviewSubscriptionContent() {
     MaterialTheme {
         SubscriptionContent(
             uiState = SubscriptionUiState(
+                followed = listOf(ArtistRef(name = "Tru Kait", url = "/pornstar/tru-kait")),
                 artists = fakeArtists,
                 videos = fakeVideos,
+                isLoggedIn = true,
             ),
             onEvent = {},
             gridState = LazyGridState(),

@@ -55,6 +55,19 @@ data class SearchRoute(
     val advancedSearchJson: String? = null,
 ) : HanimeScreen
 
+/**
+ * 作者页（26.6.3 新增）。
+ *
+ * 参数与 [SearchRoute.advancedSearchJson] 同一套路：把
+ * [io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef] 整份 JSON 塞进来。
+ * 之所以不在路由里摊平成一个个字段：作者资料的字段会随站点增加（作品数、关注者数、
+ * 之后的简介…），摊平后每加一个字段都要动路由签名，而 JSON 只要给默认值就兼容。
+ */
+@Serializable
+data class ArtistRoute(
+    val artistJson: String,
+) : HanimeScreen
+
 @Serializable
 object PreviewRoute : HanimeScreen
 

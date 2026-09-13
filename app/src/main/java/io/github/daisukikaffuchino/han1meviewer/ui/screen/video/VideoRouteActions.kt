@@ -13,9 +13,11 @@ import io.github.daisukikaffuchino.han1meviewer.getHanimeVideoLink
 import io.github.daisukikaffuchino.han1meviewer.logic.dao.CheckInRecordDatabase
 import io.github.daisukikaffuchino.han1meviewer.logic.entity.CheckInRecordEntity
 import io.github.daisukikaffuchino.han1meviewer.logic.entity.download.DownloadGroupEntity
+import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeVideo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SearchOption
 import io.github.daisukikaffuchino.han1meviewer.ui.activity.MainActivity
+import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.ArtistRoute
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.SearchRoute
 import io.github.daisukikaffuchino.han1meviewer.ui.widget.CheckInWidget
 import io.github.daisukikaffuchino.han1meviewer.ui.viewmodel.VideoViewModel
@@ -43,6 +45,27 @@ class VideoRouteActions(
     private val onRequestNotificationPermission: () -> Unit,
     private val onRequestLocalListAction: (() -> Unit) -> Unit,
 ) {
+    /**
+     * 点作者 —— 26.6.3 起**优先进作者页**（[ArtistRoute]）。
+     *
+     * 进作者页的条件是「这个站点真的有作者页」：
+     * - Pornhub `/pornstar|/model/<slug>`、nJAV `/actresses/<名字>` → 作者页，能分页看全部作品；
+     * - Pornhub 的 `/users/…` 上传者、以及 hanime（站点只有搜索 + 服务端订阅）→ 退回
+     *   [openArtistSearch]（按名字搜索）。
+     *
+     * 判据放在 [ArtistRef.hasArtistPage] 里，这里只做路由选择 —— 加数据源时不用改这个文件。
+     */
+    fun openArtist(artist: HanimeVideo.Artist) {
+        val ref = ArtistRef.from(artist, SettingsRepository.siteSource)
+        if (ref.hasArtistPage) {
+            (context as? MainActivity)?.mainBackStack?.add(
+                ArtistRoute(ArtistRef.encode(ref))
+            )
+            return
+        }
+        openArtistSearch(artist)
+    }
+
     fun openArtistSearch(artist: HanimeVideo.Artist) {
         val searchKey = genres.firstOrNull { option ->
             option.lang?.let { lang ->
@@ -75,11 +98,11 @@ class VideoRouteActions(
         if (post == null) {
             // Pornhub / nJAV 没有订阅接口（站点订阅要登录、也没有公开 API），
             // 关注态只能存在本机 —— 见 FollowedArtistStore。
+            // ⚠️ 存**整份** ArtistRef（含站点与作品数/关注者数）：关注列表点进作者页时
+            //    要拿它画头部，只存名字+头像的话作者页上什么都显示不出来。
             scope.launch {
                 val followed = FollowedArtistStore.toggle(
-                    url = artist.url,
-                    name = artist.name,
-                    avatar = artist.avatarUrl,
+                    ArtistRef.from(artist, SettingsRepository.siteSource)
                 )
                 SonnerToast.success(
                     if (followed) R.string.artist_followed else R.string.artist_unfollow

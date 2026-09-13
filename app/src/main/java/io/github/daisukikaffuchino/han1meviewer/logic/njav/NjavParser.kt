@@ -301,6 +301,8 @@ object NjavParser {
             ?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }
             .orEmpty()
 
+        val artists = artistsOf(doc)
+
         return VideoLoadingState.Success(
             HanimeVideo(
                 title = title,
@@ -312,8 +314,60 @@ object NjavParser {
                 },
                 videoUrls = videoUrls,
                 tags = tags,
+                // artist 保留「第一位」，给只认单个对象的调用方用；界面画的是 artists。
+                artist = artists.firstOrNull(),
+                artists = artists,
             )
         )
+    }
+
+    /**
+     * 详情页的**女优**（26.6.3 起解析）。
+     *
+     * 站点的字段表长这样（实测 2026-09-13，繁体页面）：
+     *
+     * ```html
+     * <div class="text-secondary">
+     *     <span>女優:</span>
+     *     <a href="https://njavtv.com/actresses/%E6%8C%81%E9%87%8E%E8%93%AC" class="text-nord13 font-medium">持野蓬</a>
+     * </div>
+     * ```
+     *
+     * 三个要点：
+     *
+     * 1. **不能只取第一个 `.text-secondary > a`**：同一张表里还有「類型」「發行日期」「番號」，
+     *    它们的值也是链接（类型就是 `genres/…`）。所以要按标签文字筛出「女優」那一行。
+     * 2. **`href` 必须原样保留**（含 URL 编码的名字）：站点给的编码就是作者页能接受的写法，
+     *    拿显示名重新编码会撞上繁简差异 —— 与女优索引那条「href 繁体、h4 简体」是同一个坑。
+     * 3. 一个视频**很少**有多位女优，但列表页确实见过合作片；这里全部收下。
+     */
+    private fun artistsOf(doc: org.jsoup.nodes.Document): List<HanimeVideo.Artist> {
+        val result = LinkedHashMap<String, HanimeVideo.Artist>()
+        for (block in doc.select("div.text-secondary")) {
+            val label = block.selectFirst("span")?.text()?.trim().orEmpty()
+            if (!label.startsWith("女優") && !label.startsWith("演員") && !label.startsWith("演员")) continue
+            for (anchor in block.select("a[href]")) {
+                val href = anchor.attr("href").trim()
+                if (!href.contains("/actresses/")) continue
+                val name = anchor.text().trim().ifEmpty { href.substringAfterLast('/') }
+                if (name.isEmpty()) continue
+                val absolute = if (href.startsWith("http")) {
+                    href
+                } else {
+                    NjavNetwork.BASE_URL.trimEnd('/') + "/" + href.trimStart('/')
+                }
+                result.putIfAbsent(
+                    name,
+                    HanimeVideo.Artist(
+                        name = name,
+                        avatarUrl = "",
+                        genre = "",
+                        url = absolute,
+                    ),
+                )
+            }
+        }
+        return result.values.toList()
     }
 
     /**

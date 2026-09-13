@@ -43,7 +43,9 @@ enum class MainDrawerDestination(
     Subscription(
         route = SubscriptionRoute,
         iconRes = R.drawable.ic_subscribtion,
-        titleRes = R.string.my_subscribe,
+        // 这一页 26.6.3 起装的是两段：本机关注的作者（三站通用、免登录）+ hanime 服务端订阅。
+        // 只叫「我的订阅」会让人以为关注的东西不在这儿 —— 用户报的正是这一点。
+        titleRes = R.string.follow_and_subscribe,
     ),
     WatchHistory(
         route = WatchHistoryRoute,

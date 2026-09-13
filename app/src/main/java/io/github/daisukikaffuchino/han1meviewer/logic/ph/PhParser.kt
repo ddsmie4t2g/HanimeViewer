@@ -3,6 +3,8 @@ package io.github.daisukikaffuchino.han1meviewer.logic.ph
 import io.github.daisukikaffuchino.han1meviewer.HanimeLink
 import io.github.daisukikaffuchino.han1meviewer.ResolutionLinkMap
 import io.github.daisukikaffuchino.han1meviewer.logic.exception.ParseException
+import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistProfile
+import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistVideosPage
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimePreview
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeVideo
@@ -549,6 +551,123 @@ object PhParser {
 
     /** 「自动」实际指向的高度，理由见 [buildVideoUrls]。 */
     private const val DEFAULT_HEIGHT = 480
+
+    //</editor-fold>
+
+    //<editor-fold desc="作者页（/pornstar|/model/<slug>/videos）">
+
+    /**
+     * 解析 Pornhub 的**作者页**：`/{pornstar|model}/<slug>/videos?page=N`。
+     *
+     * ## 为什么这里必须抓 HTML（而不是像列表那样走 JSON 接口）
+     *
+     * `/webmasters/search` 只支持「按关键词搜」，**没有**「按作者筛」的参数：
+     * 实测 `stars[]=<slug>` 是当**模糊文本**处理的（`stars[]=riley-reid` 会同时返回
+     * Riley Nixon / Ryan Reid / Audrey Reid……），拿它当作者过滤器会混进一堆别人。
+     * 而作者页是站点自己维护的权威列表，还带真分页 —— 代价是 1.2 MB/页。
+     *
+     * ## 资料头与作品列表在**同一个** HTML 里
+     *
+     * 作者页把 `section.topProfileHeader`（头像 / 封面 / 关注者 / 观看总量）和
+     * `ul#mostRecentVideosSection`（本页作品）放在一起，所以**一次请求拿两样**，
+     * 只有第一页解析资料头（[page] <= 1），后续页返回 null 让界面沿用第一页那份。
+     *
+     * ## 翻页判据
+     *
+     * 站点在 `<head>` 里给 `<link rel="next" href="…?page=N+1">`（是 link 不是 a，
+     * 和 nJAV 的 `a[rel=next]` 不同）——两个都认，别只写一个。
+     */
+    fun artistPage(body: String, page: Int): PageLoadingState<ArtistVideosPage> {
+        val doc = Jsoup.parse(body)
+        val videos = artistVideoList(doc)
+        val profile = if (page <= 1) artistProfile(doc) else null
+        return when {
+            videos.isNotEmpty() -> PageLoadingState.Success(ArtistVideosPage(profile, videos))
+            hasArtistNextPage(doc) -> PageLoadingState.Success(ArtistVideosPage(profile, videos))
+            else -> PageLoadingState.NoMoreData
+        }
+    }
+
+    /**
+     * 作者页里的作品卡片。
+     *
+     * 列表容器**必须**限定在 `#mostRecentVideosSection`（没有才退到 `div.videoUList`）：
+     * 同一个页面上还有 `#hottestMenuSection`（另一个标签页的预载数据）和一堆推荐位，
+     * 全局取 `li.pcVideoListItem` 会把它们一起收进来 —— 表现就是「作者的作品里混着别人的片」。
+     */
+    fun artistVideoList(doc: org.jsoup.nodes.Document): MutableList<HanimeInfo> {
+        val items = doc.select("#mostRecentVideosSection li.pcVideoListItem")
+            .ifEmpty { doc.select("div.videoUList li.pcVideoListItem") }
+            .ifEmpty { doc.select("li.pcVideoListItem") }
+        val result = LinkedHashMap<String, HanimeInfo>()
+        items.forEach { item ->
+            val anchor = item.selectFirst("a[href*=viewkey]")
+            val code = item.attr("data-video-vkey").trim().takeIf { it.isNotEmpty() }
+                ?: PhNetwork.videoIdFrom(anchor?.attr("href"))
+                ?: return@forEach
+            val title = item.selectFirst("span.title a")?.attr("title")?.trim()?.takeIf { it.isNotEmpty() }
+                ?: item.selectFirst("span.title a")?.text()?.trim()?.takeIf { it.isNotEmpty() }
+                ?: anchor?.attr("title")?.trim()?.takeIf { it.isNotEmpty() }
+                ?: code
+            val img = item.selectFirst("img")
+            val cover = listOf("src", "data-mediumthumb", "data-src", "data-thumb_url")
+                .firstNotNullOfOrNull { key -> img?.attr(key)?.trim()?.takeIf { it.isNotEmpty() } }
+                .orEmpty()
+            val duration = item.selectFirst("var.duration")?.text()?.trim()
+                ?.takeIf { DURATION_TEXT.matches(it) }
+            val views = item.selectFirst("div.videoDetailBlock span.views var")?.text()?.trim()
+                ?.takeIf { it.isNotEmpty() }
+            result.putIfAbsent(
+                code,
+                HanimeInfo(
+                    title = title,
+                    coverUrl = cover,
+                    videoCode = code,
+                    duration = duration,
+                    views = views,
+                    itemType = HanimeInfo.NORMAL,
+                )
+            )
+        }
+        return result.values.toMutableList()
+    }
+
+    /** 作者页的 `rel="next"`：站点给的是 `<link rel="next">`，nJAV 那边是 `<a rel="next">`。 */
+    private fun hasArtistNextPage(doc: org.jsoup.nodes.Document): Boolean =
+        doc.selectFirst("link[rel=next]") != null || doc.selectFirst("a[rel=next]") != null
+
+    /**
+     * 作者页头部的资料。
+     *
+     * 选择器全部取自 `section.topProfileHeader`（实测 2026-09-13，`/pornstar/tru-kait/videos`）：
+     *
+     * | 字段 | 选择器 |
+     * |---|---|
+     * | 名字 | `h1[itemprop=name]` |
+     * | 头像 | `#avatarPicture img` |
+     * | 封面 | `#coverPictureDefault` |
+     * | 观看总量 | `div.infoBox.videoViews span.big` |
+     * | 关注者 | `div.infoBox.subscribers span.big` |
+     *
+     * ⚠️ **作品数不在这里**（`infoBoxes` 只有排名 / 观看量 / 关注者），所以它继续用
+     * 详情页带过来的「87 Videos」原文案 —— 别在这页上硬凑一个数字出来。
+     */
+    private fun artistProfile(doc: org.jsoup.nodes.Document): ArtistProfile? {
+        val header = doc.selectFirst("section.topProfileHeader") ?: return null
+        fun img(selector: String): String = header.selectFirst(selector)?.let { el ->
+            listOf("src", "data-src").firstNotNullOfOrNull { key ->
+                el.attr(key).trim().takeIf { s -> s.isNotEmpty() }
+            }
+        }.orEmpty()
+        val profile = ArtistProfile(
+            name = header.selectFirst("h1[itemprop=name]")?.text()?.trim().orEmpty(),
+            avatarUrl = img("#avatarPicture img"),
+            coverUrl = img("#coverPictureDefault"),
+            viewCount = header.selectFirst("div.infoBox.videoViews span.big")?.text()?.trim().orEmpty(),
+            subscriberCount = header.selectFirst("div.infoBox.subscribers span.big")?.text()?.trim().orEmpty(),
+        )
+        return profile.takeIf { it.name.isNotEmpty() || it.avatarUrl.isNotEmpty() }
+    }
 
     //</editor-fold>
 

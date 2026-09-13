@@ -76,6 +76,36 @@ object NjavNetwork {
      */
     fun actressUrl(path: String, page: Int): String = listUrl(path.trim('/'), page)
 
+    /**
+     * 从女优链接里抠出 `actresses/<编码后的名字>` 这一段（[actressUrl] 要的形态）。
+     *
+     * 输入可能是三种写法，全部要能吃下：
+     *
+     * ```
+     * https://njavtv.com/actresses/%E6%8C%81%E9%87%8E%E8%93%AC        ← 详情页给的（主流）
+     * https://njavtv.com/dm288/cn/actresses/%E6%B3%A2%E5%A4%9A%E9%87%8E%E7%B5%90%E8%A1%A3  ← 索引页给的，前缀会变
+     * /actresses/xxx                                                  ← 相对写法
+     * ```
+     *
+     * ⚠️ **只抄路径尾段、绝不按显示名重新编码**：站点自己给的编码里繁简与
+     * 特殊字符都可能是对的，重编一次就会 404（与女优索引「href 繁体、h4 简体」同一个坑）。
+     * 抠不到返回 null，调用方退回按名字搜索。
+     */
+    fun actressPathFrom(url: String): String? {
+        val raw = url.trim()
+        if (raw.isEmpty()) return null
+        val marker = "/actresses/"
+        val index = raw.indexOf(marker)
+        if (index < 0) return null
+        val tail = raw.substring(index + marker.length)
+            .substringBefore('?').substringBefore('#').trim('/')
+        if (tail.isEmpty() || tail in ACTRESS_RESERVED_PATHS) return null
+        return "$ACTRESSES_SEGMENT/$tail"
+    }
+
+    /** 不是具体某个人、而是一个榜单/分类的保留路径。 */
+    private val ACTRESS_RESERVED_PATHS = setOf("ranking", "genres")
+
     private const val ACTRESSES_SEGMENT = "actresses"
 
     /**

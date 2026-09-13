@@ -10,6 +10,8 @@ import io.github.daisukikaffuchino.han1meviewer.logic.exception.CloudflareBlocke
 import io.github.daisukikaffuchino.han1meviewer.logic.exception.HanimeNotFoundException
 import io.github.daisukikaffuchino.han1meviewer.logic.exception.IPBlockedException
 import io.github.daisukikaffuchino.han1meviewer.logic.exception.ParseException
+import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
+import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistVideosPage
 import io.github.daisukikaffuchino.han1meviewer.logic.model.CommentPlace
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimePreview
@@ -19,6 +21,7 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.ModifiedPlaylistArgs
 import io.github.daisukikaffuchino.han1meviewer.logic.model.MyListType
 import io.github.daisukikaffuchino.han1meviewer.logic.model.NjavActress
 import io.github.daisukikaffuchino.han1meviewer.logic.model.OnlineWatchHistorySort
+import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoCommentArgs
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoComments
 import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhNetwork
@@ -870,6 +873,120 @@ object NetworkRepo {
             }
         )
     }
+
+    //</editor-fold>
+
+    //<editor-fold desc="作者页（跨数据源）">
+
+    /**
+     * ⭐ **作者页的作品列表** —— 「点作者进去全是别人的视频」这一条的正解。
+     *
+     * 三个数据源的能力完全不一样，所以这里按 [ArtistRef.siteSource] 分流：
+     *
+     * | 数据源 | 取数方式 | 分页 |
+     * |---|---|---|
+     * | Pornhub `/pornstar|/model/<slug>` | 站点作者页 HTML | **真分页**（`link rel=next`） |
+     * | Pornhub `/users…`（无作者页） | 退回按名字搜索（JSON 接口） | 有（30 条/页，但会混进同名者） |
+     * | nJAV | 女优页 `/cn/actresses/<编码名>` | **真分页** |
+     *
+     * hanime 没有作者页（站点只有搜索 + 服务端订阅），调用方在进这个函数之前
+     * 就应该把它路由到 `SearchRoute`（见 [ArtistRef.hasArtistPage]），
+     * 所以这里对它返回一个明确的错误而不是静默空列表 —— 真出现了就是路由漏了分支。
+     *
+     * ⚠️ Pornhub 那条走的是 **1.2 MB 的 HTML**（列表接口按不了作者，见
+     * [PhParser.artistPage] 的注释），所以一次别并发多页。
+     */
+    fun getArtistVideos(
+        artist: ArtistRef,
+        page: Int,
+    ): Flow<PageLoadingState<ArtistVideosPage>> = when (artist.siteSource) {
+        SiteSource.Pornhub -> phArtistFlow(artist, page)
+        SiteSource.Njav -> njavArtistFlow(artist, page)
+        SiteSource.Hanime1 -> flowOf(
+            PageLoadingState.Error(
+                ParseException("hanime 没有作者页，应走搜索：${artist.name}")
+            )
+        )
+    }
+
+    private fun phArtistFlow(
+        artist: ArtistRef,
+        page: Int,
+    ): Flow<PageLoadingState<ArtistVideosPage>> = flow {
+        val artistUrl = PhNetwork.artistVideosUrl(artist.url, page)
+        if (artistUrl == null) {
+            // 没有站点作者页（`/users/…`、`/channels/…` 之类）：退回按名字搜索。
+            // ⚠️ 这条结果**不保证只属于这位作者**，所以 profile 传 null —— 界面别把它
+            // 当成「该作者的作品」来标榜，头部仍然用详情页带过来的那份资料。
+            val url = PhNetwork.apiUrl(
+                page,
+                PhNetwork.PhQuery(keyword = artist.name, ordering = "newest"),
+            )
+            val response = PhNetwork.service.get(url)
+            if (!response.isSuccessful) {
+                throw ParseException("Pornhub: HTTP ${response.code()} - $url")
+            }
+            val body = response.body()?.string().orEmpty()
+            val list = PhParser.videoList(body)
+            emit(
+                if (list.isEmpty() && !PhParser.hasNextPage(body, page)) {
+                    PageLoadingState.NoMoreData
+                } else {
+                    PageLoadingState.Success(ArtistVideosPage(profile = null, videos = list))
+                }
+            )
+            return@flow
+        }
+        val response = PhNetwork.service.get(artistUrl)
+        if (!response.isSuccessful) {
+            throw ParseException("Pornhub: HTTP ${response.code()} - $artistUrl")
+        }
+        emit(PhParser.artistPage(response.body()?.string().orEmpty(), page))
+    }.catch { e ->
+        emit(PageLoadingState.Error(handlePhException(e)))
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * nJAV 作者页（女优页）。
+     *
+     * ⚠️ **实测（2026-09-13）：nJAV 的作者页没有分页。**
+     * 女优页 `/actresses/<编码名>` 服务端渲染出来的卡片就是全部能拿到的（实测某位女优 4 部），
+     * 页面上**没有** `a[rel=next]`；而任何 `?page=N`（无论列表页还是女优页）都会返回
+     * 一段 **JS 反爬挑战页**（约 71 KB、零卡片、无 rel=next）—— 非浏览器客户端拿不到内容。
+     *
+     * 所以这里只请求第一页，翻页判据交给 [NjavParser.hasNextPage]（恒为 false）；
+     * 界面表现为「加载到底」，而不是转圈或报错。**不要**为此写个假的 `?page=` 循环：
+     * 那只会把挑战页当成空数据，白跑一趟还容易被站点加重限流。
+     *
+     * 拿不到站点作者页时（关注表里只有名字）退回站点搜索 —— 与 Pornhub 的兜底同一逻辑。
+     */
+    private fun njavArtistFlow(
+        artist: ArtistRef,
+        page: Int,
+    ): Flow<PageLoadingState<ArtistVideosPage>> = flow {
+        val path = NjavNetwork.actressPathFrom(artist.url)
+        val url = if (path != null) {
+            NjavNetwork.actressUrl(path, page)
+        } else {
+            // 关注表里可能只有名字（老数据 / 从索引里搜到的人）→ 退回站点搜索。
+            NjavNetwork.searchUrl(artist.name, page)
+        }
+        val response = NjavNetwork.service.get(url)
+        if (!response.isSuccessful) {
+            throw ParseException("nJAV: HTTP ${response.code()} - $url")
+        }
+        val body = response.body()?.string().orEmpty()
+        val list = NjavParser.videoList(body)
+        emit(
+            if (list.isEmpty() && !NjavParser.hasNextPage(body)) {
+                PageLoadingState.NoMoreData
+            } else {
+                PageLoadingState.Success(ArtistVideosPage(profile = null, videos = list))
+            }
+        )
+    }.catch { e ->
+        emit(PageLoadingState.Error(handleNjavException(e)))
+    }.flowOn(Dispatchers.IO)
 
     //</editor-fold>
 

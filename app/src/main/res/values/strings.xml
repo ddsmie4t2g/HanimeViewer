@@ -382,6 +382,19 @@ Recommendations are as follows:\n
     <string name="artist_follow">Follow</string>
     <string name="artist_followed">Followed</string>
     <string name="artist_unfollow">Unfollowed</string>
+    <!-- 作者页（26.6.3）：点作者不再一律跳搜索，Pornhub / nJAV 有真正的作者页 -->
+    <string name="artist_page_title">Artist</string>
+    <string name="artist_page_works">Works</string>
+    <string name="artist_page_loaded_count">Loaded %1$d</string>
+    <string name="artist_page_view_count">%1$s views</string>
+    <string name="artist_page_no_videos">No works found for this artist</string>
+    <string name="artist_page_broken_args">Could not read the artist info</string>
+    <!-- 订阅页两段：关注的作者（本机、三站通用、免登录）/ hanime 服务端订阅（需登录） -->
+    <string name="follow_and_subscribe">Follows &amp; Subscriptions</string>
+    <string name="subscription_followed_artists_count">Followed Authors (%1$d)</string>
+    <string name="subscription_server_artists_count">hanime Subscriptions (%1$d)</string>
+    <string name="subscription_followed_empty_hint">No followed authors yet. Tap Follow next to an author on a video page or an artist page — following is kept on this device and needs no login.</string>
+    <string name="subscription_login_hint">Log in to hanime to see server-side subscriptions. Following, favorites and lists never need login.</string>
     <string name="unsubscribe_artist">Unsubscribe Artist</string>
     <string name="sure_to_unsubscribe">Are you sure you want to unsubscribe?</string>
     <string name="action_app_open_by_default_settings_not_support">This device does not support opening deep link settings from the app</string>

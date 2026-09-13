@@ -831,7 +831,7 @@ fun VideoRouteHostScreen(
                 onPendingDownloadPromptChange = { pendingDownloadPrompt = it },
                 onRetry = { viewModel.getHanimeVideo(route.videoCode, route.localUri) },
                 onOpenVideo = { item -> activity.showVideoDetailFragment(item.videoCode) },
-                onOpenArtist = actions::openArtistSearch,
+                onOpenArtist = actions::openArtist,
                 onNavigateToSearch = actions::openTagSearch,
                 onToggleSubscribe = actions::toggleArtistSubscription,
                 onToggleFavorite = actions::toggleFavorite,

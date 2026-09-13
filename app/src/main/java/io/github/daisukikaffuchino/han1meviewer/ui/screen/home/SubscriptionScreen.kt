@@ -30,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
+import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionVideosItem
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
@@ -50,10 +51,21 @@ import kotlinx.coroutines.launch
  * 持有 [MySubscriptionsViewModel]，管理缓存、下拉刷新、加载更多等状态编排。
  * 渲染委托给 [SubscriptionContent]。
  *
+ * ## ⭐ 26.6.3：这一段**不需要登录**
+ *
+ * 页面上永远有「关注的作者」这一段 —— 它读的是本机
+ * [FollowedArtistStore]（Pornhub / nJAV 的关注都存在这里），
+ * **未登录时不发任何网络请求**，因此也不会再出现「没登录 → 整页报错」。
+ *
+ * hanime 的服务端订阅只占第二段：[SettingsRepository.isAlreadyLogin] 为真时才请求、
+ * 才渲染。两者互不依赖，是个刻意的取舍 —— 用户的原话是「最好登录不跟网站挂钩」。
+ *
  * @param navigateBack 返回回调
- * @param viewModel 订阅 ViewModel
- * @param onClickArtist 点击作者 → 跳转搜索
- * @param onLongClickArtist 长按作者 → 复制分享文本
+ * @param viewModel 订阅 ViewModel（只服务 hanime 那一段）
+ * @param onClickArtist 点击 hanime 订阅作者 → 跳搜索（hanime 没有作者页）
+ * @param onLongClickArtist 长按 hanime 订阅作者 → 复制分享文本
+ * @param onClickFollowed 点击「关注的作者」→ 进作者页（或退回搜索）
+ * @param onLongClickFollowed 长按「关注的作者」→ 复制分享文本
  * @param onClickVideosItem 点击视频 → 跳转详情
  * @param onLongClickVideosItem 长按视频 → 复制分享文本
  */
@@ -64,6 +76,8 @@ fun SubscriptionScreen(
     viewModel: MySubscriptionsViewModel,
     onClickArtist: (String) -> Unit,
     onLongClickArtist: (String) -> Unit,
+    onClickFollowed: (ArtistRef) -> Unit,
+    onLongClickFollowed: (ArtistRef) -> Unit,
     onClickVideosItem: (String) -> Unit,
     onLongClickVideosItem: (String, String) -> Unit,
 ) {
@@ -80,22 +94,17 @@ fun SubscriptionScreen(
     val refreshState = rememberPullToRefreshState()
     var isRefreshing by rememberSaveable { mutableStateOf(false) }
 
+    val isLoggedIn = settings.isAlreadyLogin
     val canLoadMore = viewModel.canLoadMore()
 
-    // 本地关注的作者（Pornhub / nJAV 没有订阅接口，见 FollowedArtistStore）
-    // 和 hanime 的服务端订阅合到一份里画 —— 否则「关注」点了没地方看。
-    // 两者不会重名（hanime 的作者走服务端订阅、压根不写本地表），去重只是保险。
+    // 本机关注的作者（三个站点通用）。**不经过任何网络**，所以未登录也一定有内容。
     val localFollowed = remember(settings.followedArtistsJson) {
-        FollowedArtistStore.asSubscriptionItems
-    }
-    val displayArtists = remember(cachedArtists.value, localFollowed) {
-        (cachedArtists.value + localFollowed).distinctBy { it.artistName }
+        FollowedArtistStore.asArtistRefs
     }
 
-    val showCached = state is WebsiteState.Loading && displayArtists.isNotEmpty() ||
-            state is WebsiteState.Error && displayArtists.isNotEmpty()
-
-    LaunchedEffect(state) {
+    LaunchedEffect(state, isLoggedIn) {
+        // 未登录：服务端那一段整个不参与 —— 不请求、不报错、不显示加载态。
+        if (!isLoggedIn) return@LaunchedEffect
         when (val s = state) {
             is WebsiteState.Success -> {
                 cachedArtists.value = s.info.subscriptions.toList()
@@ -114,12 +123,14 @@ fun SubscriptionScreen(
     }
 
     val uiState = SubscriptionUiState(
-        artists = displayArtists,
+        followed = localFollowed,
+        artists = cachedArtists.value,
         videos = cachedVideos.value,
+        isLoggedIn = isLoggedIn,
         isRefreshing = isRefreshing,
         canLoadMore = canLoadMore,
         error = (state as? WebsiteState.Error)?.throwable,
-        showCached = showCached,
+        showCached = state is WebsiteState.Loading && cachedArtists.value.isNotEmpty(),
     )
 
     ChoiceDialog(
@@ -143,6 +154,8 @@ fun SubscriptionScreen(
             SubscriptionEvent.OnBack -> navigateBack()
             is SubscriptionEvent.OnClickArtist -> onClickArtist(event.artistName)
             is SubscriptionEvent.OnLongClickArtist -> onLongClickArtist(event.artistName)
+            is SubscriptionEvent.OnClickFollowed -> onClickFollowed(event.artist)
+            is SubscriptionEvent.OnLongClickFollowed -> onLongClickFollowed(event.artist)
             is SubscriptionEvent.OnClickVideo -> onClickVideosItem(event.videoCode)
             is SubscriptionEvent.OnLongClickVideo -> onLongClickVideosItem(
                 event.videoCode,
@@ -151,16 +164,21 @@ fun SubscriptionScreen(
 
             SubscriptionEvent.OnRefresh -> {
                 isRefreshing = true
-                viewModel.loadMySubscriptions(forceReload = true)
+                if (isLoggedIn) {
+                    viewModel.loadMySubscriptions(forceReload = true)
+                } else {
+                    // 未登录时下拉刷新没有服务端可刷：立刻收掉转圈，别转个不停。
+                    isRefreshing = false
+                }
             }
 
-            SubscriptionEvent.OnLoadMore -> viewModel.loadMySubscriptions()
+            SubscriptionEvent.OnLoadMore -> if (isLoggedIn) viewModel.loadMySubscriptions()
         }
     }
 
     HanimeScaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        title = stringResource(R.string.my_subscribe),
+        title = stringResource(R.string.follow_and_subscribe),
         onBack = navigateBack,
         actions = {
             IconButton(onClick = { showArtistRowsDialog = true }) {
@@ -182,47 +200,36 @@ fun SubscriptionScreen(
                     onRefresh = { handleEvent(SubscriptionEvent.OnRefresh) }
                 )
         ) {
-            when (state) {
-                is WebsiteState.Loading -> {
-                    if (displayArtists.isEmpty() && cachedVideos.value.isEmpty()) {
-                        LoadingIndicator(Modifier.align(Alignment.Center))
-                    } else {
-                        SubscriptionContent(
-                            uiState = uiState,
-                            onEvent = handleEvent,
-                            gridState = gridState,
-                            artistRows = settings.subscriptionArtistRows,
-                        )
-                    }
+            // 未登录时**永远**走这条分支：本机关注至少画一句「怎么关注」的提示。
+            val hasServerContent = cachedArtists.value.isNotEmpty() || cachedVideos.value.isNotEmpty()
+            when {
+                !isLoggedIn -> SubscriptionContent(
+                    uiState = uiState,
+                    onEvent = handleEvent,
+                    gridState = gridState,
+                    artistRows = settings.subscriptionArtistRows,
+                )
+
+                state is WebsiteState.Loading && !hasServerContent -> {
+                    LoadingIndicator(Modifier.align(Alignment.Center))
                 }
 
-                is WebsiteState.Error -> {
-                    if (displayArtists.isEmpty()) {
-                        EmptyContent(
-                            hint = stringResource(
-                                R.string.load_failed_with_reason,
-                                (state as WebsiteState.Error).throwable.message.orEmpty()
-                            ),
-                            picRes = R.drawable.h_chan_sad
-                        )
-                    } else {
-                        SubscriptionContent(
-                            uiState = uiState,
-                            onEvent = handleEvent,
-                            gridState = gridState,
-                            artistRows = settings.subscriptionArtistRows,
-                        )
-                    }
-                }
-
-                is WebsiteState.Success -> {
-                    SubscriptionContent(
-                        uiState = uiState,
-                        onEvent = handleEvent,
-                        gridState = gridState,
-                        artistRows = settings.subscriptionArtistRows,
+                state is WebsiteState.Error && !hasServerContent -> {
+                    EmptyContent(
+                        hint = stringResource(
+                            R.string.load_failed_with_reason,
+                            (state as WebsiteState.Error).throwable.message.orEmpty()
+                        ),
+                        picRes = R.drawable.h_chan_sad
                     )
                 }
+
+                else -> SubscriptionContent(
+                    uiState = uiState,
+                    onEvent = handleEvent,
+                    gridState = gridState,
+                    artistRows = settings.subscriptionArtistRows,
+                )
             }
 
             PullRefreshOverlay(

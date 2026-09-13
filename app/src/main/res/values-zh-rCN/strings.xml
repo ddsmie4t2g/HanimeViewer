@@ -387,6 +387,19 @@
     <string name="artist_follow">关注</string>
     <string name="artist_followed">已关注</string>
     <string name="artist_unfollow">已取消关注</string>
+    <!-- 作者页（26.6.3）：点作者不再一律跳搜索，Pornhub / nJAV 有真正的作者页 -->
+    <string name="artist_page_title">作者</string>
+    <string name="artist_page_works">作品</string>
+    <string name="artist_page_loaded_count">已加载 %1$d 部</string>
+    <string name="artist_page_view_count">%1$s 次观看</string>
+    <string name="artist_page_no_videos">没有取到该作者的作品</string>
+    <string name="artist_page_broken_args">作者信息读取失败</string>
+    <!-- 订阅页两段：关注的作者（本机、三站通用、免登录）/ hanime 服务端订阅（需登录） -->
+    <string name="follow_and_subscribe">关注与订阅</string>
+    <string name="subscription_followed_artists_count">关注的作者（%1$d）</string>
+    <string name="subscription_server_artists_count">hanime 订阅（%1$d）</string>
+    <string name="subscription_followed_empty_hint">还没有关注的作者。在视频详情页或作者页点作者右侧的「关注」即可 —— 关注存在本机，不需要登录。</string>
+    <string name="subscription_login_hint">登录 hanime 后才能看到服务端订阅；关注、收藏、清单都不需要登录。</string>
     <string name="unsubscribe_artist">取消关注该作者</string>
     <string name="sure_to_unsubscribe">确定要取消关注吗？</string>
     <string name="action_app_open_by_default_settings_not_support">此设备不支持从程序中开启深层链接设置</string>

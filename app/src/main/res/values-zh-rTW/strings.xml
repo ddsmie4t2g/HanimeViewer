@@ -374,6 +374,19 @@
     <string name="artist_follow">關注</string>
     <string name="artist_followed">已關注</string>
     <string name="artist_unfollow">已取消關注</string>
+    <!-- 作者頁（26.6.3）：點作者不再一律跳搜尋，Pornhub / nJAV 有真正的作者頁 -->
+    <string name="artist_page_title">作者</string>
+    <string name="artist_page_works">作品</string>
+    <string name="artist_page_loaded_count">已載入 %1$d 部</string>
+    <string name="artist_page_view_count">%1$s 次觀看</string>
+    <string name="artist_page_no_videos">沒有取得該作者的作品</string>
+    <string name="artist_page_broken_args">作者資訊讀取失敗</string>
+    <!-- 訂閱頁兩段：關注的作者（本機、三站通用、免登入）/ hanime 伺服器端訂閱（需登入） -->
+    <string name="follow_and_subscribe">關注與訂閱</string>
+    <string name="subscription_followed_artists_count">關注的作者（%1$d）</string>
+    <string name="subscription_server_artists_count">hanime 訂閱（%1$d）</string>
+    <string name="subscription_followed_empty_hint">還沒有關注的作者。在影片詳情頁或作者頁點作者右側的「關注」即可 —— 關注存在本機，不需要登入。</string>
+    <string name="subscription_login_hint">登入 hanime 後才能看到伺服器端訂閱；關注、收藏、清單都不需要登入。</string>
     <string name="unsubscribe_artist">取消追蹤此作者</string>
     <string name="sure_to_unsubscribe">確定要取消追蹤嗎？</string>
     <string name="action_app_open_by_default_settings_not_support">此裝置不支援從程式中開啟深層連結設定</string>
