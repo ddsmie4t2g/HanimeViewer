@@ -125,8 +125,21 @@ data class HanimeVideo(
         val avatarUrl: String,
         val genre: String,
         @Transient val post: POST? = null,
+        /**
+         * 作者主页地址。Pornhub 用 `/pornstar/<slug>`、`/model/<slug>` 或 `/users/<name>`。
+         *
+         * 本地关注靠它认身份 —— 光看名字，不同站点/同名作者会撞在一起。
+         */
+        val url: String = "",
+        /** 「87 Videos」这种原样文案（站点给什么就显示什么，不做单位换算）。 */
+        val videoCount: String = "",
+        /** 「448K Subscribers」这种原样文案。 */
+        val subscriberCount: String = "",
     ) {
         val isSubscribed: Boolean get() = post != null && post.isSubscribed
+
+        /** 本地关注用的身份键：有主页地址就用地址，没有才退回名字。 */
+        val followKey: String get() = url.trim().ifEmpty { name.trim() }
 
         data class POST(
             val userId: String,

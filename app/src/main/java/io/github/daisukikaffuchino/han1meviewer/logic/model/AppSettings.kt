@@ -192,6 +192,12 @@ data class AppSettings(
      * Room 迁移，收益不匹配。
      */
     val pinnedSearchesJson: String = "",
+    /**
+     * 本地关注列表（JSON 数组，见 [io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore]）。
+     *
+     * 只有 Pornhub / nJAV 这种**没有订阅接口**的站点会往里写；hanime 走服务端订阅。
+     */
+    val followedArtistsJson: String = "",
     val useBuiltInHosts: Boolean = false,
     val customHostsData: String = "",
     /**

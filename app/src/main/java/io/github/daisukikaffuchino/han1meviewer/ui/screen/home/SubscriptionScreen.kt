@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -27,6 +28,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.daisukikaffuchino.han1meviewer.R
+import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionVideosItem
@@ -80,8 +82,18 @@ fun SubscriptionScreen(
 
     val canLoadMore = viewModel.canLoadMore()
 
-    val showCached = state is WebsiteState.Loading && cachedArtists.value.isNotEmpty() ||
-            state is WebsiteState.Error && cachedArtists.value.isNotEmpty()
+    // 本地关注的作者（Pornhub / nJAV 没有订阅接口，见 FollowedArtistStore）
+    // 和 hanime 的服务端订阅合到一份里画 —— 否则「关注」点了没地方看。
+    // 两者不会重名（hanime 的作者走服务端订阅、压根不写本地表），去重只是保险。
+    val localFollowed = remember(settings.followedArtistsJson) {
+        FollowedArtistStore.asSubscriptionItems
+    }
+    val displayArtists = remember(cachedArtists.value, localFollowed) {
+        (cachedArtists.value + localFollowed).distinctBy { it.artistName }
+    }
+
+    val showCached = state is WebsiteState.Loading && displayArtists.isNotEmpty() ||
+            state is WebsiteState.Error && displayArtists.isNotEmpty()
 
     LaunchedEffect(state) {
         when (val s = state) {
@@ -102,7 +114,7 @@ fun SubscriptionScreen(
     }
 
     val uiState = SubscriptionUiState(
-        artists = cachedArtists.value,
+        artists = displayArtists,
         videos = cachedVideos.value,
         isRefreshing = isRefreshing,
         canLoadMore = canLoadMore,
@@ -172,7 +184,7 @@ fun SubscriptionScreen(
         ) {
             when (state) {
                 is WebsiteState.Loading -> {
-                    if (cachedArtists.value.isEmpty() || cachedVideos.value.isEmpty()) {
+                    if (displayArtists.isEmpty() && cachedVideos.value.isEmpty()) {
                         LoadingIndicator(Modifier.align(Alignment.Center))
                     } else {
                         SubscriptionContent(
@@ -185,7 +197,7 @@ fun SubscriptionScreen(
                 }
 
                 is WebsiteState.Error -> {
-                    if (cachedArtists.value.isEmpty()) {
+                    if (displayArtists.isEmpty()) {
                         EmptyContent(
                             hint = stringResource(
                                 R.string.load_failed_with_reason,

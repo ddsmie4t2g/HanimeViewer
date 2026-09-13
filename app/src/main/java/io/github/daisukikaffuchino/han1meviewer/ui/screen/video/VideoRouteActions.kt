@@ -5,6 +5,7 @@ import androidx.glance.appwidget.updateAll
 import io.github.daisukikaffuchino.han1meviewer.HAdvancedSearch
 import io.github.daisukikaffuchino.han1meviewer.HCacheManager
 import io.github.daisukikaffuchino.han1meviewer.logic.DatabaseRepo
+import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.getHanimeVideoDownloadLink
@@ -70,7 +71,22 @@ class VideoRouteActions(
     }
 
     fun toggleArtistSubscription(artist: HanimeVideo.Artist) {
-        val post = artist.post ?: return
+        val post = artist.post
+        if (post == null) {
+            // Pornhub / nJAV 没有订阅接口（站点订阅要登录、也没有公开 API），
+            // 关注态只能存在本机 —— 见 FollowedArtistStore。
+            scope.launch {
+                val followed = FollowedArtistStore.toggle(
+                    url = artist.url,
+                    name = artist.name,
+                    avatar = artist.avatarUrl,
+                )
+                SonnerToast.success(
+                    if (followed) R.string.artist_followed else R.string.artist_unfollow
+                )
+            }
+            return
+        }
         if (!SettingsRepository.isAlreadyLogin) {
             SonnerToast.warning(R.string.login_first)
             return

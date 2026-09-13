@@ -75,9 +75,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.ResolutionLinkMap
+import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
+import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.entity.CheckInRecordEntity
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeVideo
@@ -892,6 +895,12 @@ private fun ArtistSection(
     onOpenArtist: (HanimeVideo.Artist) -> Unit,
     onToggleSubscribe: (HanimeVideo.Artist) -> Unit,
 ) {
+    // 本地关注存在本机（Pornhub / nJAV 没有订阅接口，见 FollowedArtistStore），
+    // 所以要在这里读一次。用 settings 流当 key：关注/取关写回后按钮会立刻变。
+    val settings by SettingsRepository.settings.collectAsStateWithLifecycle()
+    val followedKeys = remember(settings.followedArtistsJson) {
+        FollowedArtistStore.all.mapTo(mutableSetOf()) { it.key }
+    }
     // 卡片本身不再可点（改成每一行自己可点），所以形状取「未按下」那档，
     // 视觉与老版单作者时一致。cardShapes() 返回的是 ButtonShapes，
     // 必须过一层 shapeByInteraction 才是 Shape —— 直接塞给 Card 会编译不过。
@@ -918,6 +927,7 @@ private fun ArtistSection(
                 }
                 ArtistRow(
                     artist = artist,
+                    isFollowed = artist.followKey in followedKeys,
                     onOpenArtist = { onOpenArtist(artist) },
                     onToggleSubscribe = { onToggleSubscribe(artist) },
                 )
@@ -930,6 +940,7 @@ private fun ArtistSection(
 @Composable
 private fun ArtistRow(
     artist: HanimeVideo.Artist,
+    isFollowed: Boolean,
     onOpenArtist: () -> Unit,
     onToggleSubscribe: () -> Unit,
 ) {
@@ -964,10 +975,16 @@ private fun ArtistRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Pornhub 的第一位作者常常没有分类（素人片），这时不画空的一行。
-            if (artist.genre.isNotBlank()) {
+            // 副标题优先给「作品数 · 关注者数」（Pornhub 的主模特区块就有这两个数字，
+            // 原样显示站点给的文案，不做单位换算），没有才退回分类。
+            // 素人片常常两样都没有，这时整行不画。
+            val subtitle = listOf(artist.videoCount, artist.subscriberCount)
+                .filter { it.isNotBlank() }
+                .joinToString(" · ")
+                .ifBlank { artist.genre }
+            if (subtitle.isNotBlank()) {
                 Text(
-                    text = artist.genre,
+                    text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -975,11 +992,11 @@ private fun ArtistRow(
                 )
             }
         }
-        // ⚠️ 关注按钮只有 hanime 的演员有（`Artist.post` 非空才有订阅接口）。
-        //    Pornhub / nJAV 目前没有订阅能力，所以那两站这里不会出现按钮，
-        //    点整行 = 看该作者的作品。
-        artist.post?.let {
-            if (artist.isSubscribed) {
+        // 按钮分两种，一行只出一个：
+        //  - hanime 有服务端订阅接口（`Artist.post` 非空）→ 原来的订阅按钮；
+        //  - Pornhub / nJAV 没有 → 本地关注（FollowedArtistStore，只存在本机）。
+        if (artist.post == null) {
+            if (isFollowed) {
                 OutlinedButton(
                     onClick = {
                         VibrationUtil.performHapticFeedback(view)
@@ -994,14 +1011,35 @@ private fun ArtistRow(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
                 ) {
-                    Text(text = stringResource(R.string.subscribed))
+                    Text(text = stringResource(R.string.artist_followed))
                 }
             } else {
-                Button(
-                    onClick = onToggleSubscribe,
-                ) {
-                    Text(text = stringResource(R.string.subscribe))
+                Button(onClick = onToggleSubscribe) {
+                    Text(text = stringResource(R.string.artist_follow))
                 }
+            }
+        } else if (artist.isSubscribed) {
+            OutlinedButton(
+                onClick = {
+                    VibrationUtil.performHapticFeedback(view)
+                    onToggleSubscribe()
+                },
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ),
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+            ) {
+                Text(text = stringResource(R.string.subscribed))
+            }
+        } else {
+            Button(
+                onClick = onToggleSubscribe,
+            ) {
+                Text(text = stringResource(R.string.subscribe))
             }
         }
     }

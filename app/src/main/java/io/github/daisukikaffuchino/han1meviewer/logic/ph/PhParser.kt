@@ -11,6 +11,7 @@ import io.github.daisukikaffuchino.han1meviewer.logic.state.PageLoadingState
 import io.github.daisukikaffuchino.han1meviewer.logic.state.VideoLoadingState
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
 import kotlinx.datetime.LocalDate
+import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
@@ -278,21 +279,60 @@ object PhParser {
         }.orEmpty()
         val tags = (tagList + categoryList).distinct()
 
-        // ⭐ 必须取**全部**演员，不能只取第一个：一部片子挂 2–4 位很常见，
-        //    只画第一位的话，用户既看不到其他作者、也点不进他们的作品。
-        val artists = info?.select("div.pornstarsWrapper a.pstar-list-btn")?.mapNotNull { a ->
+        // ⭐ 作者必须从**两处**取，只取一处都不全 —— 26.6.1 被吐槽「作者显示不全」就是只取了第二处。
+        //
+        //   1. `div.userInfoBlock`：站点标为「主模特 / 上传者」的那一位，也是唯一带
+        //      **作品数**与**关注者数**的地方（`<span>87 Videos</span>`、
+        //      `<span>448K Subscribers</span>`），最像用户心里的「作者」。
+        //      ⚠️ 这一块在 `video-detailed-info` **里面**，别全局搜 `usernameWrap` ——
+        //      推荐位卡片里有 180+ 个同名 class（实测）。
+        //   2. `div.pornstarsWrapper a.pstar-list-btn`：参演的全部演员，一部片常 2–4 位。
+        //
+        //   两处会重复（主模特几乎总在演员列表里），按名字去重、主模特排最前。
+        // `video-detailed-info` 里的三块：主模特块 / 演员列表 / 分类与标签。
+        fun imgUrl(el: Element?): String = el?.let { e ->
+            listOf("src", "data-src", "data-image", "data-thumb_url")
+                .firstNotNullOfOrNull { e.attr(it).trim().takeIf { s -> s.isNotEmpty() } }
+        }.orEmpty()
+
+        val primaryBlock = info?.selectFirst("div.userInfoBlock")
+        val primaryLink = primaryBlock?.selectFirst("div.userInfo .usernameWrap a.bolded")
+        // `div.userInfo span` 里既有名字徽章也有数据文案，靠关键字挑，别按下标取。
+        val primaryStats = primaryBlock?.select("div.userInfo span")?.map { it.text().trim() }.orEmpty()
+        val primaryArtist = primaryLink
+            ?.takeIf { it.text().isNotBlank() }
+            ?.let { link ->
+                HanimeVideo.Artist(
+                    name = link.text().trim(),
+                    avatarUrl = imgUrl(primaryBlock?.selectFirst("div.userAvatar img")),
+                    genre = categoryList.firstOrNull().orEmpty(),
+                    url = link.attr("href").trim(),
+                    videoCount = primaryStats.firstOrNull { it.contains("video", true) }.orEmpty(),
+                    subscriberCount = primaryStats.firstOrNull { it.contains("subscrib", true) }.orEmpty(),
+                )
+            }
+
+        val pornstars = info?.select("div.pornstarsWrapper a.pstar-list-btn")?.mapNotNull { a ->
             val name = a.ownText().trim().takeIf { it.isNotEmpty() }
                 ?: a.attr("href").substringAfterLast('/').takeIf { it.isNotEmpty() }
                 ?: return@mapNotNull null
             HanimeVideo.Artist(
                 name = name,
                 // 头像在 phncdn 上，靠自建中转的 ?ref= 才拿得到（见 CdnRelay.refererFor）。
-                avatarUrl = a.selectFirst("img")?.attr("src").orEmpty(),
+                avatarUrl = imgUrl(a.selectFirst("img")),
                 // 副标题用第一个**分类**（如 "Amateur"）—— 用第一个 tag 会变成
                 // "doggystyle" 这种动作词，完全不像「这是谁」。
                 genre = categoryList.firstOrNull().orEmpty(),
+                url = a.attr("href").trim(),
             )
         }.orEmpty()
+
+        val artists = buildList {
+            primaryArtist?.let { add(it) }
+            pornstars.forEach { a ->
+                if (none { it.name.equals(a.name, ignoreCase = true) }) add(a)
+            }
+        }
 
         return VideoLoadingState.Success(
             HanimeVideo(
@@ -325,24 +365,43 @@ object PhParser {
     ) {
         val isHls: Boolean get() = format.equals("hls", ignoreCase = true)
 
+        /**
+         * ⭐ 这条地址是不是**可取**的那种签名形态。
+         *
+         * 实测（2026-09-13）站点会随机发两种形态，同一个视频、同样的请求头：
+         *
+         * | 形态 | 长相 | 结果 |
+         * |---|---|---|
+         * | **A** | `?validfrom=…&validto=…&ipa=1&hdl=-1&hash=…` | 可取（master / 子清单 / 分片全 200） |
+         * | **B** | `?h=…&e=…&f=1` | **必 410** —— 12 种组合（UA × Referer × cookie）全试过 |
+         *
+         * 判据**只认 `validfrom`**，别去认主机名：主机名（`ev-h` / `em-h` / `hv-h` / `hm-h` / `ee-h` …）
+         * 每次请求都在变，而且两种形态都可能出现在任意主机上。
+         *
+         * B 形态不是「过期」——它的 `e=` 明明在未来一小时。它就是**取不到**，
+         * 站点侧灰度迁移的中间状态。所以只能绕开，见 [PhNetwork.embedUrl] 那条退路。
+         */
+        val hasTimeWindow: Boolean get() = url.contains("validfrom=")
+
         fun resolvedHeight(): Int = height.takeIf { it > 0 }
             ?: quality.filter { it.isDigit() }.toIntOrNull()
             ?: 0
     }
 
     /**
-     * 抠出 `var flashvars_<id> = { … }` 里的 `mediaDefinitions`。
+     * 抠出 `mediaDefinitions` 里的一份媒体表。
      *
      * 不能对它整体用正则：每个条目里有嵌套的 `segmentFormats:{…}`，
      * 而 JSON 的 `{}` 又不允许跨层匹配。所以先做一次**括号配对扫描**把整个对象切出来，
      * 再交给 [JSONObject] 解析（见 [extractJsonObject]）。
+     *
+     * 两条来源路径都要支持，因为播放地址现在从两处取（见 [NetworkRepo.phVideoFlow]）：
+     * 1. **详情页** `view_video.php`：`var flashvars_<id> = { … "mediaDefinitions":[…] }`
+     * 2. **embed 页** `/embed/<viewkey>`：没有 `flashvars`，只在一段 JSON 里裸着
+     *    `"mediaDefinitions":[…]`（这一页连 `flashvars` 这个词都不出现）
      */
     fun mediaDefinitions(body: String): List<PhMedia> {
-        val marker = FLASHVARS.find(body) ?: return emptyList()
-        val json = extractJsonObject(body, marker.range.last + 1) ?: return emptyList()
-        val array = runCatching {
-            JSONObject(json).optJSONArray("mediaDefinitions")
-        }.getOrNull() ?: return emptyList()
+        val array = mediaDefinitionArray(body) ?: return emptyList()
 
         return buildList {
             for (i in 0 until array.length()) {
@@ -362,6 +421,39 @@ object PhParser {
         }
     }
 
+    /** 这份 HTML 给的播放地址是否**可信**（存在带时间窗的 HLS 档）。 */
+    fun mediaLooksPlayable(html: String): Boolean =
+        mediaDefinitions(html).any { it.isHls && it.url.isNotBlank() && it.hasTimeWindow }
+
+    /**
+     * 用另一份 HTML（[PhNetwork.embedUrl] 那一页）里的播放地址替换 [video] 的地址。
+     *
+     * 取不到可信地址时返回 `null`，调用方保持原样 —— 「换源失败」不该把原本
+     * 还能用的结果变成错误。
+     */
+    fun videoWithMediaFrom(video: HanimeVideo, html: String): HanimeVideo? {
+        val hls = mediaDefinitions(html).filter { it.isHls && it.url.isNotBlank() && it.hasTimeWindow }
+        if (hls.isEmpty()) return null
+        return video.copy(videoUrls = buildVideoUrls(hls))
+    }
+
+    private fun mediaDefinitionArray(body: String): JSONArray? {
+        FLASHVARS.find(body)?.let { marker ->
+            val json = extractJsonObject(body, marker.range.last + 1)
+            if (json != null) {
+                runCatching { JSONObject(json).optJSONArray(MEDIA_DEFINITIONS) }
+                    .getOrNull()?.let { return it }
+            }
+        }
+        // embed 页那条路：直接找键名，取它后面的数组。
+        val key = body.indexOf("\"$MEDIA_DEFINITIONS\"")
+        if (key < 0) return null
+        val json = extractJsonArray(body, key + MEDIA_DEFINITIONS.length + 2) ?: return null
+        return runCatching { JSONArray(json) }.getOrNull()
+    }
+
+    private const val MEDIA_DEFINITIONS = "mediaDefinitions"
+
     private val FLASHVARS = Regex("""var\s+flashvars_\d+\s*=\s*""")
 
     /**
@@ -370,13 +462,20 @@ object PhParser {
      * 括号必须按「字符串内不计」来数：这个对象里全是 URL 与转义引号，
      * 不区分字符串状态的话，`"…{…}"` 里出现一个 `{` 就会把深度算歪。
      */
-    private fun extractJsonObject(text: String, from: Int): String? {
-        var i = text.indexOf('{', from.coerceAtLeast(0))
-        if (i < 0) return null
-        val start = i
+    private fun extractJsonObject(text: String, from: Int): String? =
+        extractJsonBlock(text, from, '{', '}')
+
+    /** 与 [extractJsonObject] 同一套逻辑，括号换成 `[]`（`mediaDefinitions` 是数组）。 */
+    private fun extractJsonArray(text: String, from: Int): String? =
+        extractJsonBlock(text, from, '[', ']')
+
+    private fun extractJsonBlock(text: String, from: Int, open: Char, close: Char): String? {
+        val start = text.indexOf(open, from.coerceAtLeast(0))
+        if (start < 0) return null
         var depth = 0
         var inString = false
         var escaped = false
+        var i = start
         while (i < text.length) {
             val c = text[i]
             if (inString) {
@@ -388,8 +487,8 @@ object PhParser {
             } else {
                 when (c) {
                     '"' -> inString = true
-                    '{' -> depth++
-                    '}' -> {
+                    open -> depth++
+                    close -> {
                         depth--
                         if (depth == 0) return text.substring(start, i + 1)
                     }

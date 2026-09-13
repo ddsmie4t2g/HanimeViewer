@@ -46,6 +46,12 @@ object PhNetwork {
     /** 详情页。播放地址（`mediaDefinitions`）只在这里。 */
     private const val VIEW_PATH = "view_video.php"
 
+    /**
+     * embed 页。**播放地址的保底来源** —— 只有 48 KB、且签名形态稳定可取，
+     * 但只有 480P 一档。详见 [embedUrl]。
+     */
+    private const val EMBED_PATH = "embed/"
+
     /** 详情页与列表都用的 key 名。 */
     const val VIEWKEY_PARAM = "viewkey"
 
@@ -160,13 +166,30 @@ object PhNetwork {
         return builder.build().toString()
     }
 
+    /**
+     * ⭐ **embed 页地址 —— 播放地址的「保底来源」。**
+     *
+     * 详情页给的播放地址有两种签名形态，其中 `?h=…&e=…&f=1` 那种**必然 410**
+     * （详见 [PhParser.PhMedia.hasTimeWindow]），而且站点是**随机**发哪种的：
+     * 实测同一分钟连抓 8 次，可取 2–5 次不等；遇上不可取的那次，
+     * 表现就是「视频明明在，一播就 410」。
+     *
+     * 这一页（`/embed/<viewkey>`）实测 **10/10 次都是可取形态**，而且只有 **48 KB**
+     * （详情页 1.5 MB），代价是**只给 480P 一档**（详情页有 240/480/720/1080）。
+     * 所以顺序是「详情页优先、不可取才退到这里」，见 [NetworkRepo.phVideoFlow]。
+     */
+    fun embedUrl(videoCode: String): String {
+        val id = videoIdFrom(videoCode)
+            ?: videoCode.trim().trimStart('/').substringAfterLast('/').substringBefore('?')
+        return BASE_URL + EMBED_PATH + id
+    }
+
     /** 从各种形态的地址里抠出 `viewkey`；抠不到返回 null。 */
     fun videoIdFrom(url: String?): String? {
         val raw = url?.trim().orEmpty()
         if (raw.isEmpty()) return null
         return VIEWKEY.find(raw)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }
     }
-
     /** `viewkey=` 后面是一段大小写字母 + 数字（实测长度 13 / 15 / 21 都有，别写死长度）。 */
     private val VIEWKEY = Regex("""[?&]viewkey=([A-Za-z0-9]+)""", RegexOption.IGNORE_CASE)
 

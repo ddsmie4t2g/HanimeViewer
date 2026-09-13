@@ -78,11 +78,12 @@ android {
         //
         // versionCode = major*1_000_000 + minor*1_000 + patch，与 versionName 一一对应：
         //     26.6.1 → 26_006_001
+        //     26.6.2 → 26_006_002
         // 老方案是「260940 / 260941 / 260942」这种递增序号（26.4 / 26.5 / 26.6），
         // 新方案一上来就比它大（26_006_001 > 260_942），不会触发系统的「降级安装」拒绝。
         // ────────────────────────────────────────────────────────────────────
-        versionCode = 26_006_001
-        versionName = "26.6.1"
+        versionCode = 26_006_002
+        versionName = "26.6.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

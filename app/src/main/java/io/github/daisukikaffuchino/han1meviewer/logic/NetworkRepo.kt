@@ -783,10 +783,48 @@ object NetworkRepo {
         if (!response.isSuccessful) {
             throw ParseException("Pornhub: HTTP ${response.code()} - $videoCode")
         }
-        emit(PhParser.video(response.body()?.string().orEmpty()))
+        val detailHtml = response.body()?.string().orEmpty()
+        emit(withPlayablePhMedia(PhParser.video(detailHtml), videoCode, detailHtml))
     }.catch { e ->
         emit(VideoLoadingState.Error(handlePhException(e)))
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * ⭐⭐ 播放地址「换源」—— 修「视频明明在，一播就 410」。
+     *
+     * 详情页给的播放地址有两种签名形态，站点**随机**发：
+     *
+     * | 形态 | 长相 | 结果 |
+     * |---|---|---|
+     * | A | `?validfrom=…&validto=…&ipa=1&hdl=-1&hash=…` | 可取 |
+     * | B | `?h=…&e=…&f=1` | **必 410**（12 种头组合全试过，且 `e=` 明明在未来） |
+     *
+     * 实测同一分钟连抓 8 次详情页：可取 2–5 次（2026-09-13 那一刻 B 占多数）。
+     * 而 `/embed/<viewkey>`（[PhNetwork.embedUrl]）**10/10 次**都发可取形态，
+     * 只是只有 480P 一档 —— 所以这里只在**详情页那条不可取**时才去换。
+     *
+     * ⚠️ 判据是**地址长相**（有没有 `validfrom`），不是去 `HEAD` 探一下：
+     * 换一次源要多一趟 48 KB，没必要为「本来就好」的情况付这个钱。
+     * 探测另一个坑是 410 与 403/404 混在一起分不清（403 是签名不对，重试无意义）。
+     */
+    private suspend fun withPlayablePhMedia(
+        state: VideoLoadingState<HanimeVideo>,
+        videoCode: String,
+        detailHtml: String,
+    ): VideoLoadingState<HanimeVideo> {
+        if (state !is VideoLoadingState.Success) return state
+        if (PhParser.mediaLooksPlayable(detailHtml)) return state
+
+        val fallback = runCatching { PhNetwork.service.get(PhNetwork.embedUrl(videoCode)) }
+            .getOrNull()
+            ?.takeIf { it.isSuccessful }
+            ?.body()?.string()
+            ?: return state
+
+        return PhParser.videoWithMediaFrom(state.info, fallback)
+            ?.let { VideoLoadingState.Success(it) }
+            ?: state
+    }
 
     /**
      * 把 hanime 风格的检索条件翻译成 Pornhub 的接口地址。

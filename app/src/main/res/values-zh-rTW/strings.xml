@@ -370,6 +370,10 @@
     <string name="switch_to_year_month">切換至年月</string>
     <string name="subscribe">追蹤</string>
     <string name="subscribed">已追蹤</string>
+    <!-- 本地關注：Pornhub / nJAV 沒有服務端訂閱介面，關注狀態只存在本機（FollowedArtistStore） -->
+    <string name="artist_follow">關注</string>
+    <string name="artist_followed">已關注</string>
+    <string name="artist_unfollow">已取消關注</string>
     <string name="unsubscribe_artist">取消追蹤此作者</string>
     <string name="sure_to_unsubscribe">確定要取消追蹤嗎？</string>
     <string name="action_app_open_by_default_settings_not_support">此裝置不支援從程式中開啟深層連結設定</string>

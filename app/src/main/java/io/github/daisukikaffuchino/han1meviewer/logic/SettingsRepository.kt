@@ -96,6 +96,8 @@ object SettingsRepository : SettingsStore {
     val selfHealLogJson get() = current.selfHealLogJson
     /** 置顶搜索词（JSON）。 */
     val pinnedSearchesJson get() = current.pinnedSearchesJson
+    /** 本地关注作者（JSON）。见 [FollowedArtistStore]。 */
+    val followedArtistsJson get() = current.followedArtistsJson
     /** 是否按影片记住倍速与画质。 */
     val rememberPerVideoPlayback get() = current.rememberPerVideoPlayback
     /** 按影片的播放记忆（JSON）。 */
@@ -175,6 +177,8 @@ object SettingsRepository : SettingsStore {
     val autoSelectRelayNode get() = current.autoSelectRelayNode
 
     suspend fun setRelayNodesJson(value: String) = update { it.copy(relayNodesJson = value) }
+    /** 本地关注列表（JSON）。只有 Pornhub / nJAV 这类没有订阅接口的站点会用到。 */
+    suspend fun setFollowedArtistsJson(value: String) = update { it.copy(followedArtistsJson = value) }
     suspend fun setActiveRelayNodeId(value: String) = update { it.copy(activeRelayNodeId = value) }
     suspend fun setAutoSelectRelayNode(value: Boolean) = update { it.copy(autoSelectRelayNode = value) }
 
