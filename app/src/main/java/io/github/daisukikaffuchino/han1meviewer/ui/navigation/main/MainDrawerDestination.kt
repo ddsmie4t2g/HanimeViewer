@@ -21,13 +21,23 @@ enum class MainDrawerDestination(
         titleRes = R.string.settings,
     ),
     /**
-     * **自建账号**：数据存在用户自己的服务器上，与任何站点无关。
-     * 刻意放在「设置」旁边而不是混进站点账号那一套里 —— 两者是不同的东西。
+     * **我的账号**（自建，26.7.0）：数据存在用户自己的服务器上，**三个站点共用**。
+     * 抽草稿里它叫「自建账号」，界面上统一叫「我的账号」。
      */
     MyAccount(
         route = MyAccountRoute,
         iconRes = R.drawable.ic_person,
         titleRes = R.string.account_title,
+    ),
+    /**
+     * **hanime 站点账号**（原「我的账号」页）：只管 hanime 的订阅 / 清单 / 评论。
+     * ⚠️ 它以前叫「我的账号」，与自建账号撞名，用户会以为「登录了 hanime 就等于登录了全部」——
+     * 26.7.1 起明确标成「hanime 站点账号」，并把自建账号放在它前面。
+     */
+    SiteAccount(
+        route = AccountRoute,
+        iconRes = R.drawable.ic_admin_panel_settings,
+        titleRes = R.string.site_account_hanime,
     ),
     DailyCheckIn(
         route = DailyCheckInRoute,

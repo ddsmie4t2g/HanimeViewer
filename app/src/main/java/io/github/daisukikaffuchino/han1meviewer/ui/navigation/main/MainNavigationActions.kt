@@ -3,9 +3,14 @@ package io.github.daisukikaffuchino.han1meviewer.ui.navigation.main
 import android.content.Intent
 import kotlinx.serialization.json.Json
 
-private val loginRequiredDrawerItems = setOf(
-    MainDrawerDestination.Subscription,
-)
+/**
+ * 需要登录才能进的抽屉项。
+ *
+ * ⭐ 26.7.1 起**清空**：原来只有「订阅」在这里，但那页现在未登录也能用（显示本机关注的作者，
+ * 一段网络请求都不发）。把它拦在登录页前面，等于继续暗示「这些功能属于 hanime」——
+ * 而用户要的恰恰是「关注是我自己的数据，不该被某个站点的登录挡住」。
+ */
+private val loginRequiredDrawerItems = emptySet<MainDrawerDestination>()
 
 const val EXTRA_OPEN_DAILY_CHECK_IN = "openDailyCheckIn"
 const val ACTION_OPEN_CLOUDFLARE_VERIFICATION =

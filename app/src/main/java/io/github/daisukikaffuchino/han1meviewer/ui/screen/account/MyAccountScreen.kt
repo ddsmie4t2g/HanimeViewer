@@ -97,6 +97,13 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // 用户的原话是「njav 和 pornhub 账号都是没有的，也不能官方登录」——
+            // 直接把这件事说清楚：那两个站点没有账号可登，这个账号就是它们的账号。
+            Text(
+                text = stringResource(R.string.account_no_site_accounts),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             Card(
                 modifier = Modifier.fillMaxWidth(),

@@ -82,6 +82,8 @@ fun AccountScreen(
     onAvatarCropResultConsumed: () -> Unit,
     onRefreshHome: () -> Unit,
     onLogout: () -> Unit,
+    /** 打开**自建账号**（三站统筹：关注 / 本机清单 / 观看记录）。26.7.1 新增。 */
+    onOpenMyAccount: () -> Unit,
 ) {
     val uriHandler = LocalUriHandler.current
     val avatarPickerLauncher = rememberLauncherForActivityResult(
@@ -132,7 +134,7 @@ fun AccountScreen(
     }
 
     HanimeScaffold(
-        title = stringResource(R.string.my_account),
+        title = stringResource(R.string.site_account_hanime),
         onBack = onBack,
     ) { paddingValues ->
         val loadingHint = rememberRandomLoadingHint()
@@ -172,7 +174,48 @@ fun AccountScreen(
                 onOpenPasswordReset = {
                     uriHandler.openUri("${io.github.daisukikaffuchino.han1meviewer.HANIME_BASE_URL}password/reset")
                 },
+                onOpenMyAccount = onOpenMyAccount,
             )
+        }
+    }
+}
+
+/**
+ * 「这一页只管 hanime」的说明条（26.7.1）。
+ *
+ * 用户的原话是「njav 和 pornhub 账号都是没有的，也不能官方登录，而 hanime 就像把三个全管了，
+ * 这不对啊，要么就是搞一个号统筹三个」。这条横幅干的就是这件事：
+ *
+ * 1. 承认站点账号**只有 hanime 有**（另两个站点根本不提供账号，不是 App 没做）；
+ * 2. 把「三站统筹」的那一个账号 —— 自建账号（`MyAccountRoute`）—— 直接递到用户手上；
+ * 3. 顺手说清各自管什么，免得再有人以为「登录 hanime = 登录了全部」。
+ */
+@Composable
+private fun SiteAccountNotice(onOpenMyAccount: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        shape = MaterialTheme.shapes.extraLarge,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.site_account_notice_title),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = stringResource(R.string.site_account_notice_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = onOpenMyAccount) {
+                Text(text = stringResource(R.string.site_account_open_my_account))
+            }
         }
     }
 }
@@ -188,6 +231,7 @@ private fun AccountContent(
     onPickAvatar: () -> Unit,
     onLogout: () -> Unit,
     onOpenPasswordReset: () -> Unit,
+    onOpenMyAccount: () -> Unit,
 ) {
     val view = LocalView.current
     val scrollState = rememberScrollState()
@@ -216,6 +260,12 @@ private fun AccountContent(
             .padding(top = HanimeDefaults.Spacing.itemVertical),
         verticalArrangement = Arrangement.spacedBy(HanimeDefaults.Spacing.itemVertical),
     ) {
+        // ⭐ 26.7.1：说清「这个账号只管 hanime」并把用户引到自建账号。
+        //
+        // 以前这一页叫「我的账号」，而 Pornhub / nJAV **没有账号可登**（站点不提供），
+        // 于是切到那两个站点时这里还显示 hanime 的东西，看起来像「hanime 把三个都管了」。
+        SiteAccountNotice(onOpenMyAccount = onOpenMyAccount)
+
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
             shape = MaterialTheme.shapes.extraLarge,
@@ -559,6 +609,7 @@ private fun AccountScreenPreview() {
             onPickAvatar = {},
             onLogout = {},
             onOpenPasswordReset = {},
+            onOpenMyAccount = {},
             submittingState = UserAccountSubmittingState.Idle,
         )
     }

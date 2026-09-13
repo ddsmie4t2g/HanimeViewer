@@ -185,6 +185,17 @@ private fun MainDrawerContent(
             checkInEnabled = checkInEnabled,
         )
         MainDrawerSection(
+            titleRes = R.string.account_section,
+            items = listOf(
+                // 自建账号在前：**一个号统筹三个站点**（关注 / 本机清单 / 观看记录）。
+                MainDrawerDestination.MyAccount,
+                // hanime 站点账号在后，名字里就写明只属于 hanime（订阅/清单/评论）。
+                MainDrawerDestination.SiteAccount,
+            ),
+            selectedDestination = selectedDestination,
+            onItemClick = { onDrawerItemSelected(it) },
+        )
+        MainDrawerSection(
             titleRes = R.string.my_list,
             items = listOf(
                 MainDrawerDestination.WatchLater,

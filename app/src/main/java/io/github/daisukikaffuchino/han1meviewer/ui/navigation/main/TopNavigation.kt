@@ -221,6 +221,7 @@ fun TopNavigation(
                 onAvatarCropResultConsumed = { pendingAvatarCropResult = null },
                 onRefreshHome = { activity.viewModel.getHomePage() },
                 onLogout = { activity.showLogoutConfirmDialog(closeCurrentPageOnConfirm = true) },
+                onOpenMyAccount = { backStack.add(MyAccountRoute) },
             )
         }
         entry<LoginRoute>(metadata = pageTransition()) {

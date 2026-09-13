@@ -64,7 +64,17 @@
     <string name="login">登入</string>
     <!-- 自建帳號（26.7.0）：資料存在使用者自己的伺服器上，與任何站點無關 -->
     <string name="account_title">我的帳號</string>
+    <!-- 帳號分區與「站點帳號 vs 自建帳號」的說明（26.7.1） -->
+    <string name="account_section">帳號</string>
+    <string name="site_account_hanime">hanime 站點帳號</string>
+    <string name="account_not_logged_in_tap">未登入 · 點此登入</string>
+    <string name="account_header_subtitle_synced">你自己的帳號 · 關注與觀看記錄存在你自己的伺服器上</string>
+    <string name="account_header_subtitle_hint">點這裡註冊/登入你自己的帳號（一個號統籌三個站點）</string>
+    <string name="site_account_notice_title">這一頁只是 hanime 的站點帳號</string>
+    <string name="site_account_notice_body">nJAV 與 Pornhub **根本沒有帳號**（站點不提供），所以那兩個站也沒什麼可登入的。這個 hanime 帳號只管 hanime：訂閱、hanime 清單、評論、頭像。你關注的作者、本機清單（我喜歡 / 稍後再看 / 播放清單）與觀看記錄屬於「我的帳號」—— 它們存在你自己的伺服器上，三個站點通用。</string>
+    <string name="site_account_open_my_account">打開「我的帳號」（存在你自己的伺服器）</string>
     <string name="account_intro">這是**你自己**的帳號，不是站點帳號。關注的作者、本機清單（我喜歡 / 稍後再看 / 播放清單）與觀看記錄都會存在你自己的伺服器上 —— 重裝、換手機都能拿回來。這裡的登入與 hanime / nJAV / Pornhub 沒有任何關係。</string>
+    <string name="account_no_site_accounts">nJAV 與 Pornhub 本身沒有帳號（站點不提供，也登不了），所以這個帳號就是給它們用的 —— 它一個號同時管三個站點。</string>
     <string name="account_register">註冊</string>
     <string name="account_server">伺服器</string>
     <string name="account_password_rule">使用者名稱 3–32 字元（字母、數字、_ . -）；密碼至少 6 位。伺服器只保存加鹽的 PBKDF2 雜湊，不存明文。</string>

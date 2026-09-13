@@ -33,6 +33,7 @@ import io.github.daisukikaffuchino.han1meviewer.ui.bridge.VideoPageHost
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.AccountRoute
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.HanimeScreen
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.LoginRoute
+import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.MyAccountRoute
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.TopLevelBackStack
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.VideoRoute
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.main.MainActivityContent
@@ -82,7 +83,9 @@ class MainActivity : BaseActivity() {
                 viewModel = viewModel,
                 pendingNavigationRequests = pendingNavigationRequests,
                 showAuthGuard = showAuthGuard,
-                onOpenAccount = { mainBackStack.add(AccountRoute) },
+                // 抽屉头部的账号区点进去的是**自建账号**（三站统筹）；
+                // hanime 站点账号改从抽屉「账号」分区里进（26.7.1）。
+                onOpenAccount = { mainBackStack.add(MyAccountRoute) },
                 showSiteSwitchPicker = showSiteSwitchPicker,
                 // 当前站点：让弹层里那一项是选中态，用户一眼知道自己在哪一站。
                 currentSiteSource = SettingsRepository.siteSource.value,

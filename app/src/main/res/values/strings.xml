@@ -64,7 +64,17 @@
     <string name="login">Login</string>
     <!-- 自建账号（26.7.0）：数据存在用户自己的服务器上，与任何站点无关 -->
     <string name="account_title">My Account</string>
+    <!-- 账号分区与「站点账号 vs 自建账号」的说明（26.7.1） -->
+    <string name="account_section">Account</string>
+    <string name="site_account_hanime">hanime site account</string>
+    <string name="account_not_logged_in_tap">Not signed in · tap to sign in</string>
+    <string name="account_header_subtitle_synced">Your own account · follows, local lists and history are on your own server</string>
+    <string name="account_header_subtitle_hint">Tap to create your own account (one account for all three sites)</string>
+    <string name="site_account_notice_title">This page is the hanime site account only</string>
+    <string name="site_account_notice_body">nJAV and Pornhub do not provide accounts at all, so there is nothing to sign in to there. This hanime account only covers hanime: subscriptions, hanime lists, comments and avatar. Your follows, local lists (favorites / watch later / playlists) and watch history belong to \'My Account\', which keeps them on your own server and works across all three sites.</string>
+    <string name="site_account_open_my_account">Open \'My Account\' (your own server)</string>
     <string name="account_intro">This is your own account, not a site account. Your follows, local lists and watch history are stored on your own server, so they survive a reinstall or a new phone. Signing in here has nothing to do with hanime / nJAV / Pornhub.</string>
+    <string name="account_no_site_accounts">nJAV and Pornhub have no accounts of their own (the sites simply do not offer them), so this account is what covers them - and it covers all three sites at once.</string>
     <string name="account_register">Register</string>
     <string name="account_server">Server</string>
     <string name="account_password_rule">Username: 3-32 characters (letters, digits, _ . -). Password: at least 6 characters. The server only keeps a salted PBKDF2 hash.</string>
