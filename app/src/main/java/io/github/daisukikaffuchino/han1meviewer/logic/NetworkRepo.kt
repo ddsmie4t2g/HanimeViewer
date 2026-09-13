@@ -887,14 +887,11 @@ object NetworkRepo {
      * |---|---|---|
      * | Pornhub `/pornstar|/model/<slug>` | 站点作者页 HTML | **真分页**（`link rel=next`） |
      * | Pornhub `/users…`（无作者页） | 退回按名字搜索（JSON 接口） | 有（30 条/页，但会混进同名者） |
-     * | nJAV | 女优页 `/cn/actresses/<编码名>` | **真分页** |
+     * | nJAV | 女优页 `/cn/actresses/<编码名>` | 无（站点反爬，见 [njavArtistFlow]） |
+     * | hanime | **合成**：按名字（+分类）搜索 | 有 |
      *
-     * hanime 没有作者页（站点只有搜索 + 服务端订阅），调用方在进这个函数之前
-     * 就应该把它路由到 `SearchRoute`（见 [ArtistRef.hasArtistPage]），
-     * 所以这里对它返回一个明确的错误而不是静默空列表 —— 真出现了就是路由漏了分支。
-     *
-     * ⚠️ Pornhub 那条走的是 **1.2 MB 的 HTML**（列表接口按不了作者，见
-     * [PhParser.artistPage] 的注释），所以一次别并发多页。
+     * ⚠️ 分流认的是 [ArtistRef.siteSource]（作者自己的站点），**不是用户当前在哪个站** ——
+     * 「在 hanime 域名下点一个 Pornhub 关注的人」必须去问 Pornhub（26.6.3 的 404 就出在这）。
      */
     fun getArtistVideos(
         artist: ArtistRef,
@@ -902,12 +899,46 @@ object NetworkRepo {
     ): Flow<PageLoadingState<ArtistVideosPage>> = when (artist.siteSource) {
         SiteSource.Pornhub -> phArtistFlow(artist, page)
         SiteSource.Njav -> njavArtistFlow(artist, page)
-        SiteSource.Hanime1 -> flowOf(
-            PageLoadingState.Error(
-                ParseException("hanime 没有作者页，应走搜索：${artist.name}")
-            )
-        )
+        SiteSource.Hanime1 -> hanimeArtistFlow(artist, page)
     }
+
+    /**
+     * hanime 的「作者页」—— 站点没有这个页面，所以是**合成**的。
+     *
+     * 做法就是原来 `openArtistSearch` 做的事：拿名字（加上作者自带的分类检索键）去搜索，
+     * 但把结果装进作者页的壳里：头部有头像/名字/关注按钮，正文是这个搜索的结果。
+     * 比直接把人丢进一个通用搜索页清楚，也让三个站点的作者页长得一样。
+     *
+     * ⚠️ 这里**不能**复用 [getHanimeSearchResult]：那个函数按**当前站点**分流，
+     * 于是「在 Pornhub 域名下点一个 hanime 关注的人」会跑去问 Pornhub。
+     * 作者页取数必须认**作者自己的站点**，与用户当前在哪个站无关。
+     */
+    private fun hanimeArtistFlow(
+        artist: ArtistRef,
+        page: Int,
+    ): Flow<PageLoadingState<ArtistVideosPage>> = flow {
+        val response = HanimeNetwork.hanimeService.getHanimeSearchResult(
+            page = page,
+            query = artist.name,
+            genre = artist.genreKey.takeIf { it.isNotBlank() },
+        )
+        if (!response.isSuccessful) {
+            throw ParseException("hanime: HTTP ${response.code()} - ${artist.name}")
+        }
+        val state = Parser.hanimeSearch(response.body()?.string().orEmpty())
+        emit(
+            when (state) {
+                is PageLoadingState.Success ->
+                    PageLoadingState.Success(ArtistVideosPage(profile = null, videos = state.info))
+
+                is PageLoadingState.Error -> state
+                PageLoadingState.Loading -> PageLoadingState.Loading
+                PageLoadingState.NoMoreData -> PageLoadingState.NoMoreData
+            }
+        )
+    }.catch { e ->
+        emit(PageLoadingState.Error(handleException(e)))
+    }.flowOn(Dispatchers.IO)
 
     private fun phArtistFlow(
         artist: ArtistRef,

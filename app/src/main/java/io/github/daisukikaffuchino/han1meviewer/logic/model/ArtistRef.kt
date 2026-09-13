@@ -48,6 +48,17 @@ data class ArtistRef(
     val subscriberCount: String = "",
     /** 数据源：`SiteSource.value`。为空时按 [url] 猜（老数据兼容，见 [siteSource]）。 */
     val site: String = "",
+    /**
+     * hanime 兜底搜索用的「类型检索键」。
+     *
+     * hanime 站点没有作者页，作者页对它是**合成**的：拿名字去搜。而只按名字搜，
+     * 短名字会混进一堆无关片子 —— 原来的 `openArtistSearch` 就是这么处理的：
+     * 把作者带的分类（如「里番」）映射成搜索用的 genre key 一起带上。
+     *
+     * 那个映射需要首页的 `List<SearchOption>`（只有 UI 层有），所以在这里存**映射结果**，
+     * 由 `VideoRouteActions` 在跳转时填 —— 仓库层就不用再去猜这些文案了。
+     */
+    val genreKey: String = "",
 ) {
     /** 本地关注用的身份键：有主页地址就用地址，没有才退回名字。 */
     val followKey: String get() = url.trim().ifEmpty { name.trim() }
@@ -55,32 +66,64 @@ data class ArtistRef(
     /**
      * 实际用哪个数据源取作者页。
      *
-     * [site] 为空是**老数据的常态**：26.6.2 写进 `followedArtistsJson` 的条目没有这个字段
-     * （`Json { ignoreUnknownKeys = true }` 会把它读成默认空串）。这时按 [url] 反推 ——
-     * 猜错的后果是「作者页取不到数据」，比「整条关注记录读不出来」轻得多。
+     * ## ⭐⭐ 为什么这里必须**先看 url 的路径形态**，不能只看 [site]
+     *
+     * 26.6.2 写进 `followedArtistsJson` 的条目**没有 [site] 字段**（那是 26.6.3 才加的）。
+     * 而 Pornhub 的作者 url 是**相对路径**（`/pornstar/tru-kait`，站点原样给的），
+     * 里面不含 "pornhub" 字样 —— 只按域名关键词猜，它会掉进 `else` 被当成 hanime，
+     * 于是「在 hanime 域名下点一个 Pornhub 关注的人」会跑去 hanime 搜一个欧美名字，
+     * 结果就是 404（用户 2026-09-13 报的那个 bug）。
+     *
+     * 所以判据按可信度排序：
+     * 1. url 里的**路径形态**（`/pornstar/`、`/model/`、`/actresses/` …）—— 最可靠，
+     *    Pornhub 与 nJAV 的作者页路径不会和 hanime 撞车；
+     * 2. url 里的域名关键词；
+     * 3. 最后才是存下来的 [site]。
+     *
+     * ⚠️ 顺序刻意是「url 优先于 site」：url 是站点自己给的原始地址，而 `site` 是**我们**在
+     * 关注那一刻用「当时的站点」写下的 —— 用户在 Pornhub 页面上关注、随后切到 hanime，
+     * 这个字段本来是准的；但更早的老记录压根没有它。让 url 说话两边都对。
      */
     val siteSource: SiteSource
-        get() = when {
-            site.isNotBlank() -> SiteSource.fromValue(site)
-            url.contains("njavtv", ignoreCase = true) -> SiteSource.Njav
-            url.contains("pornhub", ignoreCase = true) -> SiteSource.Pornhub
-            else -> SiteSource.Hanime1
+        get() {
+            val path = url.trim().lowercase()
+            return when {
+                path.contains("/actresses/") || path.contains("njavtv") -> SiteSource.Njav
+                path.contains("/pornstar/") || path.contains("/model/") ||
+                        path.contains("/pornhub") || path.contains("/channels/") -> SiteSource.Pornhub
+                path.contains("/users/") -> SiteSource.Pornhub
+                site.isNotBlank() -> SiteSource.fromValue(site)
+                else -> SiteSource.Hanime1
+            }
         }
 
     /**
-     * 这个作者有没有**站点自带的作者页**。
+     * 站点**真的**有作者页吗？
      *
-     * hanime 没有（只有服务端订阅 + 搜索），所以它的作者仍然走 `SearchRoute`；
-     * 另外两个站点有，才值得进作者页。
+     * - `true`：能拿到「只属于这位作者」的作品列表（Pornhub `/pornstar|/model`、nJAV `/actresses`）；
+     * - `false`：作者页是**合成**的 —— hanime 站点上没有作者页，Pornhub 的 `/users/…` 上传者页
+     *   对游客不可用，这两种情况只能退化成「按名字搜索」，结果里可能混进同名作者。
+     *
+     * ⭐ 26.6.5 起作者页对**三个站点一律可进**（不再有「点作者跳搜索页」这种分流），
+     * 但界面要靠这个属性**如实说明**下面那份列表是怎么来的 —— 宁可说清楚，也不要让人
+     * 以为「这就是该作者的全部作品」。
      */
-    val hasArtistPage: Boolean
+    val hasRealArtistPage: Boolean
+        get() {
+            val path = url.trim().lowercase()
+            return when (siteSource) {
+                SiteSource.Pornhub -> path.contains("/pornstar/") || path.contains("/model/")
+                SiteSource.Njav -> path.contains("/actresses/")
+                SiteSource.Hanime1 -> false
+            }
+        }
+
+    /** 站点短名（作者卡片上的角标用）。 */
+    val siteLabelRes: Int
         get() = when (siteSource) {
-            SiteSource.Pornhub -> url.startsWith("/pornstar/") ||
-                    url.startsWith("/model/") ||
-                    url.contains("/pornstar/") ||
-                    url.contains("/model/")
-            SiteSource.Njav -> url.contains("/actresses/")
-            SiteSource.Hanime1 -> false
+            SiteSource.Hanime1 -> io.github.daisukikaffuchino.han1meviewer.R.string.site_badge_hanime
+            SiteSource.Njav -> io.github.daisukikaffuchino.han1meviewer.R.string.site_badge_njav
+            SiteSource.Pornhub -> io.github.daisukikaffuchino.han1meviewer.R.string.site_badge_pornhub
         }
 
     fun toFollowedItem(): FollowedArtistStore.Item = FollowedArtistStore.Item(
@@ -91,12 +134,17 @@ data class ArtistRef(
         genre = genre,
         videoCount = videoCount,
         subscriberCount = subscriberCount,
+        genreKey = genreKey,
     )
 
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 
-        fun from(artist: HanimeVideo.Artist, site: SiteSource): ArtistRef = ArtistRef(
+        fun from(
+            artist: HanimeVideo.Artist,
+            site: SiteSource,
+            genreKey: String = "",
+        ): ArtistRef = ArtistRef(
             name = artist.name,
             avatar = artist.avatarUrl,
             url = artist.url,
@@ -104,6 +152,7 @@ data class ArtistRef(
             videoCount = artist.videoCount,
             subscriberCount = artist.subscriberCount,
             site = site.value,
+            genreKey = genreKey,
         )
 
         /** 路由参数用：整份编码成 JSON（见 [io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.ArtistRoute]）。 */

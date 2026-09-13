@@ -2,7 +2,6 @@ package io.github.daisukikaffuchino.han1meviewer.ui.screen.video
 
 import android.content.Context
 import androidx.glance.appwidget.updateAll
-import io.github.daisukikaffuchino.han1meviewer.HAdvancedSearch
 import io.github.daisukikaffuchino.han1meviewer.HCacheManager
 import io.github.daisukikaffuchino.han1meviewer.logic.DatabaseRepo
 import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
@@ -28,8 +27,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import java.io.Serializable
 
 class VideoRouteActions(
     private val context: Context,
@@ -46,47 +43,45 @@ class VideoRouteActions(
     private val onRequestLocalListAction: (() -> Unit) -> Unit,
 ) {
     /**
-     * 点作者 —— 26.6.3 起**优先进作者页**（[ArtistRoute]）。
+     * 点作者 → **一律进作者页**（[ArtistRoute]）。
      *
-     * 进作者页的条件是「这个站点真的有作者页」：
-     * - Pornhub `/pornstar|/model/<slug>`、nJAV `/actresses/<名字>` → 作者页，能分页看全部作品；
-     * - Pornhub 的 `/users/…` 上传者、以及 hanime（站点只有搜索 + 服务端订阅）→ 退回
-     *   [openArtistSearch]（按名字搜索）。
+     * 26.6.5 起不再在这里分流：三个站点统一进作者页，取数由
+     * [io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo.getArtistVideos]
+     * 按**作者自己的站点**决定（Pornhub 走站点作者页且有真分页、nJAV 走女优页、
+     * hanime 没有作者页就退化成按名字+分类搜索，但照样装在作者页的壳里）。
      *
-     * 判据放在 [ArtistRef.hasArtistPage] 里，这里只做路由选择 —— 加数据源时不用改这个文件。
+     * ⚠️ 之前这里用「当前站点」当作者站点（`ArtistRef.from(artist, SettingsRepository.siteSource)`），
+     * 于是老记录（没有站点字段、url 又是 Pornhub 的相对路径 `/pornstar/x`）被判成 hanime，
+     * 跑到 hanime 搜一个欧美名字 → **404**。现在站点判定统一收在 [ArtistRef.siteSource] 里，
+     * 以 url 的路径形态为准。
      */
     fun openArtist(artist: HanimeVideo.Artist) {
-        val ref = ArtistRef.from(artist, SettingsRepository.siteSource)
-        if (ref.hasArtistPage) {
-            (context as? MainActivity)?.mainBackStack?.add(
-                ArtistRoute(ArtistRef.encode(ref))
-            )
-            return
-        }
-        openArtistSearch(artist)
+        val ref = ArtistRef.from(
+            artist = artist,
+            site = SettingsRepository.siteSource,
+            genreKey = hanimeGenreKeyFor(artist),
+        )
+        (context as? MainActivity)?.mainBackStack?.add(
+            ArtistRoute(ArtistRef.encode(ref))
+        )
     }
 
-    fun openArtistSearch(artist: HanimeVideo.Artist) {
-        val searchKey = genres.firstOrNull { option ->
+    /**
+     * 把作者自带的分类文案映射成 hanime 搜索用的 genre key（映射不上返回空串）。
+     *
+     * 尊重设置里的「搜索作者时忽略视频类型」：打开它就一直返回空串 ——
+     * 这条设置原本管的是 `openArtistSearch` 拼不拼 genre，现在管的是**合成作者页**拼不拼，
+     * 语义没变，只是换了个地方生效。
+     */
+    private fun hanimeGenreKeyFor(artist: HanimeVideo.Artist): String {
+        if (SettingsRepository.searchArtistIgnoreVideoType) return ""
+        return genres.firstOrNull { option ->
             option.lang?.let { lang ->
                 artist.genre == lang.zhrCN ||
                         artist.genre == lang.zhrTW ||
                         artist.genre == lang.en
             } == true
-        }?.searchKey ?: ""
-        val map = buildMap<HAdvancedSearch, Serializable> {
-            put(HAdvancedSearch.QUERY, artist.name)
-            if (searchKey.isNotEmpty() && !SettingsRepository.searchArtistIgnoreVideoType) {
-                put(HAdvancedSearch.GENRE, searchKey)
-            }
-        }
-        val bundleMap = HashMap<String, Serializable>().apply {
-            map.forEach { (key, value) -> put(key.name, value) }
-        }
-        val routeMap = bundleMap.mapValues { it.value.toString() }
-        (context as? MainActivity)?.mainBackStack?.add(
-            SearchRoute(query = artist.name, advancedSearchJson = Json.encodeToString(routeMap))
-        )
+        }?.searchKey.orEmpty()
     }
 
     fun openTagSearch(tag: String) {

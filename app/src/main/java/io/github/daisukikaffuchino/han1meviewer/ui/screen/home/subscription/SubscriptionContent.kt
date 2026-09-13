@@ -144,8 +144,13 @@ fun SubscriptionContent(
                         }
                     ) { artists ->
                         ArtistListSection(
-                            artists = artists.map {
-                                SubscriptionItem(artistName = it.name, avatar = it.avatar)
+                            cards = artists.map {
+                                ArtistCard(
+                                    name = it.name,
+                                    avatar = it.avatar,
+                                    // 跨站显示的关注：每张卡标出站点，点进去才知道会去哪。
+                                    badge = stringResource(it.siteLabelRes),
+                                )
                             },
                             title = stringResource(
                                 R.string.subscription_followed_artists_count,
@@ -181,7 +186,7 @@ fun SubscriptionContent(
                         }
                     ) { artists ->
                         ArtistListSection(
-                            artists = artists,
+                            cards = artists.map { ArtistCard(it.artistName, it.avatar) },
                             title = stringResource(
                                 R.string.subscription_server_artists_count,
                                 artists.size,
@@ -263,6 +268,18 @@ private fun SectionHint(text: String) {
 }
 
 /**
+ * 作者卡片要画的东西。
+ *
+ * 之所以不直接用 [SubscriptionItem]（只有名字 + 头像）：26.6.5 起「关注的作者」是跨站显示的，
+ * 每张卡还要有一个**站点角标**，否则点进去之前根本看不出这是哪个站的人。
+ */
+private data class ArtistCard(
+    val name: String,
+    val avatar: String,
+    val badge: String? = null,
+)
+
+/**
  * 已订阅 / 已关注作者的横向格子区域。
  *
  * @param onClickArtist 收到的是**下标**而不是名字：作者可能重名（跨站同名很常见），
@@ -270,7 +287,7 @@ private fun SectionHint(text: String) {
  */
 @Composable
 private fun ArtistListSection(
-    artists: List<SubscriptionItem>,
+    cards: List<ArtistCard>,
     title: String,
     artistRows: Int,
     artistColumns: Int,
@@ -278,7 +295,7 @@ private fun ArtistListSection(
     onLongClickArtist: (Int) -> Unit,
 ) {
     val scrollState = rememberScrollState()
-    val artistColumnCount = maxOf(1, (artists.size + artistRows - 1) / artistRows)
+    val artistColumnCount = maxOf(1, (cards.size + artistRows - 1) / artistRows)
     val showArtistOverflowHint by remember(scrollState, artistColumnCount, artistColumns) {
         derivedStateOf {
             artistColumnCount > artistColumns && scrollState.value < scrollState.maxValue
@@ -331,10 +348,14 @@ private fun ArtistListSection(
                     ) {
                         repeat(artistRows) { rowIndex ->
                             val itemIndex = columnIndex * artistRows + rowIndex
-                            val artist = artists.getOrNull(itemIndex)
-                            if (artist != null) {
+                            val card = cards.getOrNull(itemIndex)
+                            if (card != null) {
                                 ArtistItem(
-                                    artist = artist,
+                                    artist = SubscriptionItem(
+                                        artistName = card.name,
+                                        avatar = card.avatar,
+                                    ),
+                                    badgeText = card.badge,
                                     onClickArtist = { onClickArtist(itemIndex) },
                                     onLongClickArtist = { onLongClickArtist(itemIndex) },
                                 )

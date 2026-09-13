@@ -388,9 +388,14 @@ Recommendations are as follows:\n
     <string name="artist_page_loaded_count">Loaded %1$d</string>
     <string name="artist_page_view_count">%1$s views</string>
     <string name="artist_page_no_videos">No works found for this artist</string>
+    <string name="artist_page_search_result_hint">This site has no artist page, so the list below is a name search — works by namesakes may be mixed in.</string>
     <string name="artist_page_broken_args">Could not read the artist info</string>
     <!-- 订阅页两段：关注的作者（本机、三站通用、免登录）/ hanime 服务端订阅（需登录） -->
     <string name="follow_and_subscribe">Follows &amp; Subscriptions</string>
+    <!-- 跨站关注列表上的站点角标 -->
+    <string name="site_badge_hanime">hanime1</string>
+    <string name="site_badge_njav">nJAV</string>
+    <string name="site_badge_pornhub">Pornhub</string>
     <string name="subscription_followed_artists_count">Followed Authors (%1$d)</string>
     <string name="subscription_server_artists_count">hanime Subscriptions (%1$d)</string>
     <string name="subscription_followed_empty_hint">No followed authors yet. Tap Follow next to an author on a video page or an artist page — following is kept on this device and needs no login.</string>

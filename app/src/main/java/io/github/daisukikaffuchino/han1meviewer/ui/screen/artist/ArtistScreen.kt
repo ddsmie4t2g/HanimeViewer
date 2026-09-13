@@ -241,6 +241,20 @@ private fun ArtistVideoGrid(
             }
         }
 
+        // ⭐ 站点没有真作者页时（hanime 全部、Pornhub 的 /users 上传者），如实说明这份列表是怎么来的：
+        // 它是**按名字搜索**的结果，可能混进同名作者。宁可说清楚，也不要点进来的人误以为
+        // 「这就是该作者的全部作品」—— 用户一开始抱怨的就是「点进去全都是视频」。
+        if (!state.artist.hasRealArtistPage) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Text(
+                    text = stringResource(R.string.artist_page_search_result_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+        }
+
         // 一条作品都还没有：把「加载中 / 失败 / 没有作品」画在资料头**下面**这块区域。
         // 注意这里**不是**整页替身 —— 资料头在上面已经画出来了。
         if (state.videos.isEmpty()) {

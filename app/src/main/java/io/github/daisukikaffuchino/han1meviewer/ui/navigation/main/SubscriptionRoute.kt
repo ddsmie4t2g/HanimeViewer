@@ -14,9 +14,9 @@ import io.github.daisukikaffuchino.utils.SonnerToast
 /**
  * 订阅页路由。
  *
- * ⭐ 26.6.3 起「关注的作者」不再统一跳搜索：有站点作者页的（Pornhub `/pornstar|/model`、
- * nJAV `/actresses`）直接进 [ArtistRoute]，其余（hanime 全部、Pornhub 的 `/users/…`）
- * 才退回按名字搜索 —— 判据是 [ArtistRef.hasArtistPage]，与详情页点作者走的是同一条规则。
+ * ⭐ 26.6.5 起「关注的作者」**一律进作者页**（[ArtistRoute]）：站点判定与取数分流都收在
+ * [ArtistRef.siteSource] 与 `NetworkRepo.getArtistVideos` 里 —— 这样「在 hanime 域名下点一个
+ * Pornhub 关注的人」也会正确地进 Pornhub 的作者页，而不是跑去 hanime 搜索（26.6.3 的 404）。
  */
 @Composable
 fun SubscriptionRouteScreen(
@@ -35,13 +35,7 @@ fun SubscriptionRouteScreen(
             copyTextToClipboard(getHanimeSearchShareText(artistName))
             SonnerToast.success(R.string.copy_to_clipboard)
         },
-        onClickFollowed = { artist ->
-            if (artist.hasArtistPage) {
-                onNavigateToArtist(artist)
-            } else {
-                onNavigateToSearch(artist.name)
-            }
-        },
+        onClickFollowed = { artist -> onNavigateToArtist(artist) },
         onLongClickFollowed = { artist ->
             copyTextToClipboard(getHanimeSearchShareText(artist.name))
             SonnerToast.success(R.string.copy_to_clipboard)

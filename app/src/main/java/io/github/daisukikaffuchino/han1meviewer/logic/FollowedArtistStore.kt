@@ -13,7 +13,8 @@ import kotlinx.serialization.json.Json
  * 站点的订阅要登录，接口也没公开。所以这里做一份存在本机的关注表。
  *
  * 它同时是**关注列表**的数据源：订阅页会把本地关注的人一起画出来
- * （见 `SubscriptionScreen`），点一下进**作者页**（[ArtistRef.hasArtistPage] 为真时）
+ * （见 `SubscriptionScreen`），点一下进**作者页**（26.6.5 起三站一律进作者页，
+ * 谁能拿到「只属于该作者」的作品由 [ArtistRef.hasRealArtistPage] 说明）。
  * —— 也就是"看该作者的作品"。
  *
  * 落盘位置：[SettingsRepository.followedArtistsJson]（一个 JSON 字符串，
@@ -43,6 +44,8 @@ object FollowedArtistStore {
         val genre: String = "",
         val videoCount: String = "",
         val subscriberCount: String = "",
+        /** hanime 兜底搜索用的类型检索键（见 [ArtistRef.genreKey]）。 */
+        val genreKey: String = "",
     ) {
         /** 身份键：**优先主页地址** —— 只按名字，跨站同名作者会撞在一起。 */
         val key: String get() = url.trim().ifEmpty { name.trim() }
@@ -55,6 +58,7 @@ object FollowedArtistStore {
             videoCount = videoCount,
             subscriberCount = subscriberCount,
             site = site,
+            genreKey = genreKey,
         )
     }
 

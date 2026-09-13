@@ -33,6 +33,9 @@ import io.github.daisukikaffuchino.utils.VibrationUtil
  * @param artist 艺术家订阅信息，包含名称和头像地址
  * @param onClickArtist 点击回调，参数为艺术家名称
  * @param onLongClickArtist 长按回调，参数为艺术家名称
+ * @param badgeText 角标（站点短名，如 `Pornhub` / `nJAV` / `里番`）。
+ *   ⭐ 26.6.5 起「关注的作者」是**跨站**显示的（你的关注是你的数据，不该被当前站点藏起来），
+ *   所以每张卡要能看出这个人是哪个站的 —— 点进去才知道会去哪。
  * @param modifier 应用于根 [Column] 布局的修饰符，默认 [Modifier]
  *
  * @see SubscriptionItem
@@ -44,6 +47,7 @@ fun ArtistItem(
     onClickArtist: (String) -> Unit,
     onLongClickArtist: (String) -> Unit,
     modifier: Modifier = Modifier,
+    badgeText: String? = null,
 ) {
     val view = LocalView.current
     Column(
@@ -78,6 +82,15 @@ fun ArtistItem(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (!badgeText.isNullOrBlank()) {
+            Text(
+                text = badgeText,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

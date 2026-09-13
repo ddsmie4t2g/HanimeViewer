@@ -380,9 +380,14 @@
     <string name="artist_page_loaded_count">已載入 %1$d 部</string>
     <string name="artist_page_view_count">%1$s 次觀看</string>
     <string name="artist_page_no_videos">沒有取得該作者的作品</string>
+    <string name="artist_page_search_result_hint">該站沒有作者頁，下面是依名字搜尋的結果，可能混入同名作者的作品。</string>
     <string name="artist_page_broken_args">作者資訊讀取失敗</string>
     <!-- 訂閱頁兩段：關注的作者（本機、三站通用、免登入）/ hanime 伺服器端訂閱（需登入） -->
     <string name="follow_and_subscribe">關注與訂閱</string>
+    <!-- 跨站關注列表上的站點角標 -->
+    <string name="site_badge_hanime">裡番</string>
+    <string name="site_badge_njav">nJAV</string>
+    <string name="site_badge_pornhub">Pornhub</string>
     <string name="subscription_followed_artists_count">關注的作者（%1$d）</string>
     <string name="subscription_server_artists_count">hanime 訂閱（%1$d）</string>
     <string name="subscription_followed_empty_hint">還沒有關注的作者。在影片詳情頁或作者頁點作者右側的「關注」即可 —— 關注存在本機，不需要登入。</string>
