@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -59,7 +60,6 @@ import io.github.daisukikaffuchino.han1meviewer.logic.state.PageLoadingState
 import io.github.daisukikaffuchino.han1meviewer.ui.component.LoadMoreFooter
 import io.github.daisukikaffuchino.han1meviewer.ui.component.VideoCardItem
 import io.github.daisukikaffuchino.han1meviewer.ui.component.appbar.HanimeScaffold
-import io.github.daisukikaffuchino.han1meviewer.ui.component.content.EmptyContent
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.RetryableImage
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.rememberVideoGridColumns
 import io.github.daisukikaffuchino.han1meviewer.ui.theme.SpacingNormal
@@ -146,64 +146,24 @@ fun ArtistScreen(
                 .padding(innerPadding)
                 .fillMaxSize()
         ) {
-            when (val current = state.state) {
-                is PageLoadingState.Loading -> if (state.videos.isEmpty()) {
-                    LoadingIndicator(Modifier.align(Alignment.Center))
-                } else {
-                    ArtistVideoGrid(
-                        state = state, isFollowed = isFollowed, columns = videoColumns,
-                        gridState = gridState, isLoadingMore = isLoadingMore,
-                        onClickVideo = onClickVideo,
-                        onToggleFollow = { toggleFollow(scope, view, artist) },
-                    )
-                }
-
-                is PageLoadingState.Error -> if (state.videos.isEmpty()) {
-                    EmptyContent(
-                        hint = stringResource(
-                            R.string.load_failed_with_reason,
-                            current.throwable.message.orEmpty()
-                        ),
-                        picRes = R.drawable.h_chan_sad,
-                    )
-                } else {
-                    ArtistVideoGrid(
-                        state = state, isFollowed = isFollowed, columns = videoColumns,
-                        gridState = gridState, isLoadingMore = isLoadingMore,
-                        onClickVideo = onClickVideo,
-                        onToggleFollow = { toggleFollow(scope, view, artist) },
-                    )
-                }
-
-                is PageLoadingState.NoMoreData -> if (state.videos.isEmpty()) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        ArtistHeader(
-                            artist = target,
-                            profile = profile,
-                            isFollowed = isFollowed,
-                            onToggleFollow = { toggleFollow(scope, view, artist) },
-                        )
-                        EmptyContent(
-                            hint = stringResource(R.string.artist_page_no_videos),
-                            picRes = R.drawable.h_chan_speechless,
-                        )
-                    }
-                } else {
-                    ArtistVideoGrid(
-                        state = state, isFollowed = isFollowed, columns = videoColumns,
-                        gridState = gridState, isLoadingMore = isLoadingMore,
-                        onClickVideo = onClickVideo,
-                        onToggleFollow = { toggleFollow(scope, view, artist) },
-                    )
-                }
-
-                is PageLoadingState.Success -> ArtistVideoGrid(
-                    state = state, isFollowed = isFollowed, columns = videoColumns,
-                    gridState = gridState, isLoadingMore = isLoadingMore,
-                    onClickVideo = onClickVideo,
-                    onToggleFollow = { toggleFollow(scope, view, artist) },
-                )
-            }
+            // ⭐ **永远先画网格**（= 先画资料头）。
+            //
+            // 资料头用的全是**本地已有**的数据（`ArtistRef` 里的名字/头像/作品数来自上一个页面），
+            // 完全没必要等这 1.2 MB 的作者页回来才显示 —— 26.6.3 的第一版在这里只画了个加载圈，
+            // 于是「刚点进来是一片空白」，而其实那一刻我们已经知道这是谁了。
+            //
+            // 网络状态（加载中/失败/没有作品）改由网格内部**在资料头下面**那块区域表达，
+            // 见 [ArtistVideoGrid] 里的 [ArtistStatus]。
+            ArtistVideoGrid(
+                state = state,
+                isFollowed = isFollowed,
+                columns = videoColumns,
+                gridState = gridState,
+                isLoadingMore = isLoadingMore,
+                onClickVideo = onClickVideo,
+                onToggleFollow = { toggleFollow(scope, view, artist) },
+                onRetry = viewModel::retry,
+            )
         }
     }
 }
@@ -238,6 +198,7 @@ private fun ArtistVideoGrid(
     isLoadingMore: Boolean,
     onClickVideo: (String) -> Unit,
     onToggleFollow: () -> Unit,
+    onRetry: () -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
@@ -280,6 +241,15 @@ private fun ArtistVideoGrid(
             }
         }
 
+        // 一条作品都还没有：把「加载中 / 失败 / 没有作品」画在资料头**下面**这块区域。
+        // 注意这里**不是**整页替身 —— 资料头在上面已经画出来了。
+        if (state.videos.isEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                ArtistStatus(state = state.state, onRetry = onRetry)
+            }
+            return@LazyVerticalGrid
+        }
+
         items(state.videos.size, key = { state.videos[it].videoCode }) { index ->
             val video = state.videos[index]
             VideoCardItem(
@@ -309,14 +279,107 @@ private fun ArtistVideoGrid(
                     )
                 }
             }
-        } else if (state.videos.isNotEmpty()) {
+        } else {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                HorizontalDivider(
-                    modifier = Modifier.padding(top = 8.dp),
-                    thickness = 0.5.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                )
+                // 已经翻到底：如果最后一次是**失败**（而不是真的没了），得说出来 ——
+                // 否则「只有这么多」和「下一页没取到」在界面上长得一模一样。
+                val failure = state.state as? PageLoadingState.Error
+                if (failure != null) {
+                    RetryRow(
+                        message = stringResource(
+                            R.string.load_failed_with_reason,
+                            failure.throwable.message.orEmpty(),
+                        ),
+                        onRetry = onRetry,
+                    )
+                } else {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(top = 8.dp),
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                }
             }
+        }
+    }
+}
+
+/**
+ * 作品区的状态占位（资料头**下面**那一块）。
+ *
+ * 三种状态一眼可分：
+ * - **加载中**：转圈；
+ * - **失败**：原因 + 「重试」按钮（比只给一句报错有用得多）；
+ * - **没有作品**：空态文案。
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ArtistStatus(
+    state: PageLoadingState<*>,
+    onRetry: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 40.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        when (state) {
+            is PageLoadingState.Loading -> LoadingIndicator()
+
+            is PageLoadingState.Error -> Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = stringResource(
+                        R.string.load_failed_with_reason,
+                        state.throwable.message.orEmpty(),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                OutlinedButton(onClick = onRetry) {
+                    Text(text = stringResource(R.string.retry))
+                }
+            }
+
+            is PageLoadingState.NoMoreData -> Text(
+                text = stringResource(R.string.artist_page_no_videos),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+
+            is PageLoadingState.Success -> Unit
+        }
+    }
+}
+
+/** 「加载更多失败」时挂在列表末尾的那一行（文案 + 重试）。 */
+@Composable
+private fun RetryRow(
+    message: String,
+    onRetry: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        OutlinedButton(onClick = onRetry) {
+            Text(text = stringResource(R.string.retry))
         }
     }
 }
