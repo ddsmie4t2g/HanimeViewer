@@ -144,7 +144,7 @@ fun VideoRouteHostScreen(
     val stringLongPressShare = remember(activity) {
         activity.getString(R.string.long_press_share_to_copy)
     }
-    // tag 搜索的候选分类：每个数据源一套 —— 好色TV 用它的固定栏目，
+    // tag 搜索的候选分类：每个数据源一套 —— Pornhub 用它的排序 / 标签，
     // nJAV 用 AV 那套（genre_av.json），hanime 用里番那套。
     // 判据 mod 7.0 起从「域名 == javchu」改成看数据源。
     val genres = remember(
@@ -153,7 +153,7 @@ fun VideoRouteHostScreen(
     ) {
         loadAssetAs<List<SearchOption>>(
             when {
-                SettingsRepository.isHsexSite -> "search_options/genre_hsex.json"
+                SettingsRepository.isPornhubSite -> "search_options/genre_ph.json"
                 SettingsRepository.isNjavSite -> "search_options/genre_av.json"
                 else -> "search_options/genre.json"
             }

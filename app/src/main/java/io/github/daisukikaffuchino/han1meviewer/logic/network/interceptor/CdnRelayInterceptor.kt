@@ -8,12 +8,19 @@ import okhttp3.Response
 import java.io.IOException
 
 /**
- * 把被封 CDN（`vdownload.hembed.com` / `fourhoi.com`）的请求改道到自建 TLS 中转。
+ * 把被封域名的请求改道到自建 TLS 中转。
  *
- * 背景与原理见 [CdnRelay] 的类注释 —— 一句话：这两个域名在内地**连代理都救不了**，
+ * 覆盖两类目标（见 [CdnRelay.BLOCKED_HOSTS]）：
+ *
+ * | 域名 | 大陆直连 | 策略 |
+ * |---|---|---|
+ * | `vdownload.hembed.com`、`fourhoi.com` | 立即 RST | **直连优先，失败才中转**（海外用户直连更快） |
+ * | `pornhub.com`、`*.phncdn.com` | 立即 RST（SNI 阻断，换 IP 也没用） | **一律中转**，不试直连（见 [CdnRelay.mustRelay]） |
+ *
+ * 背景与原理见 [CdnRelay] 的类注释 —— 一句话：这些域名在内地**连代理都救不了**，
  * 因为 TLS 的 SNI 是明文，墙在明文隧道里就能读到并 RST，只有「中转站终结 TLS」这一条路。
  *
- * ## 为什么是「直连优先，失败才中转」
+ * ## 为什么 hembed 那类要「直连优先」
  *
  * | 用户位置 | 直连 | 结果 |
  * |---|---|---|
@@ -31,6 +38,8 @@ import java.io.IOException
  *
  * 请求头（`Range`、`User-Agent`，以及 nJAV 那条链路的 `Referer`）原样带过去 ——
  * 视频的 `Range` 是播放器跳转/拖动的基础，少一个字节都可能表现为「拖不动」。
+ * 唯一的例外是需要补 `Referer` 的域名（Pornhub CDN 的分片），那是**服务器侧**用
+ * 中转 URL 上的 `?ref=` 参数补的，不在此处动客户端请求头。
  */
 class CdnRelayInterceptor : Interceptor {
 
@@ -40,6 +49,13 @@ class CdnRelayInterceptor : Interceptor {
         if (!CdnRelay.isRelayHost(host)) return chain.proceed(request)
         // 用户可在「网络设置 → CDN 中转」关掉。每次请求都读一次，改设置立即生效。
         if (!CdnRelay.enabled) return chain.proceed(request)
+
+        // 已被实测确认「大陆任何网络下直连都不通」的域名（Pornhub 及其 CDN），
+        // 跳过直连、直接中转 —— 免得每个请求都先白撞一次 RST（见 CdnRelay 的 ALWAYS_RELAY_HOSTS）。
+        if (CdnRelay.mustRelay(host)) {
+            if (CdnRelay.cachedReachable == false) return chain.proceed(request)
+            return relay(chain, request, null)
+        }
 
         if (CdnRelay.isKnownDead(host)) {
             // 已验证过直连必死。中转若也被探活判死，就别再绕这一趟了 ——
@@ -68,7 +84,8 @@ class CdnRelayInterceptor : Interceptor {
      * 那才是根因，中转失败通常只是次生现象。
      */
     private fun relay(chain: Interceptor.Chain, request: Request, cause: Throwable?): Response {
-        val forwarded = CdnRelay.relayUrl(request.url.toString())
+        val ref = CdnRelay.refererFor(request.url.host)
+        val forwarded = CdnRelay.relayUrl(request.url.toString(), ref)
             ?: return cause?.let { throw it } ?: chain.proceed(request)
 
         return try {

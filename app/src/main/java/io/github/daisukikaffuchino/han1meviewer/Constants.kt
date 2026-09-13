@@ -105,29 +105,31 @@ object HanimeConstants {
     const val NJAV_URL = "https://njavtv.com/"
 
     /**
-     * 好色TV（hsex.tv）—— 第三个数据源，mod 26.5 新增。
+     * Pornhub（pornhub.com）—— 第三个数据源，mod 26.6 新增。
      *
-     * 中文站（国产 / 自拍 / 素人），同样是**独立数据源**：走自己的网络层与解析器
-     * （[io.github.daisukikaffuchino.han1meviewer.logic.hsex.HsexNetwork]）。
+     * 它是本工程**唯一一个必须全程走自建 TLS 中转**的站点：站点本体与它的 CDN
+     * （`*.phncdn.com`）在大陆都是 **SNI 阻断**，实测用真实 IP 直连也是 TLS RST，
+     * 普通代理同样无效。详见 [io.github.daisukikaffuchino.han1meviewer.logic.network.CdnRelay]。
+     *
      * 之所以在这里也留一项，理由与 [NJAV_HOSTNAME] 相同 ——
      * 「数据源」与「域名」在 UI 上必须始终指向同一个站点。
      */
-    const val HSEX_HOSTNAME = "hsex.tv"
-    const val HSEX_URL = "https://hsex.tv/"
+    const val PORN_HUB_HOSTNAME = "pornhub.com"
+    const val PORN_HUB_URL = "https://www.pornhub.com/"
 
-    /** 已知站点集合：hanime 各镜像 + nJAV + 好色TV。用于校准历史遗留的域名设置。 */
-    val ALL_HOSTNAMES = HANIME_HOSTNAME + NJAV_HOSTNAME + HSEX_HOSTNAME
-    val ALL_URLS = HANIME_URL + NJAV_URL + HSEX_URL
+    /** 已知站点集合：hanime 各镜像 + nJAV + Pornhub。用于校准历史遗留的域名设置。 */
+    val ALL_HOSTNAMES = HANIME_HOSTNAME + NJAV_HOSTNAME + PORN_HUB_HOSTNAME
+    val ALL_URLS = HANIME_URL + NJAV_URL + PORN_HUB_URL
 
     /**
      * 站点的显示名 → 数据源。
      *
-     * njavtv.com 与 hsex.tv 各走独立数据源，其余 hanime 各镜像都归
+     * njavtv.com 与 pornhub.com 各走独立数据源，其余 hanime 各镜像都归
      * [io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource.Hanime1]。
      */
     fun siteSourceOf(url: String): SiteSource = when {
         url.contains(NJAV_HOSTNAME, ignoreCase = true) -> SiteSource.Njav
-        url.contains(HSEX_HOSTNAME, ignoreCase = true) -> SiteSource.Hsex
+        url.contains(PORN_HUB_HOSTNAME, ignoreCase = true) -> SiteSource.Pornhub
         else -> SiteSource.Hanime1
     }
 }

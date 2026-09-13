@@ -166,14 +166,13 @@
     <string name="site_source_hanime">hanime1.me</string>
     <string name="site_source_njav">nJAV</string>
     <string name="site_source_njav_with_host">nJAV (njavtv.com)</string>
-    <string name="site_source_hsex_with_host">Hsex.tv (Chinese amateur)</string>
-    <!-- 好色TV（hsex.tv）首页栏目名。注意：下面的 hsex_* 只做**显示**，
-         真正的「检索标记」是中文字面量（见 HsexParser.MARKER_TO_PATH），两者别混。 -->
-    <string name="hsex_latest">Latest</string>
-    <string name="hsex_ranking">Ranking</string>
-    <string name="hsex_weekly">7-Day Ranking</string>
-    <string name="hsex_long">Long videos</string>
-    <string name="hsex_5min">5 minutes</string>
+    <string name="site_source_pornhub_with_host">Pornhub (pornhub.com)</string>
+    <!-- Pornhub 首页栏目名。注意：下面的 ph_* 只做**显示**，
+         真正的「检索标记」是中文字面量（见 PhParser.MARKER_TO_QUERY），两者别混。 -->
+    <string name="ph_latest">Latest</string>
+    <string name="ph_popular">Most viewed</string>
+    <string name="ph_top_rated">Top rated</string>
+    <string name="ph_japanese">Japanese</string>
     <string name="site_source_restart_confirm">Switching the data source needs to restart the app. Continue?</string>
     <string name="custom_mirror_site">Custom Mirror Site</string>
     <string name="enable_custom_mirror_site">Enable custom mirror site</string>

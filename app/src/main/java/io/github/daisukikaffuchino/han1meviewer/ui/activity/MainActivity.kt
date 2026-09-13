@@ -211,7 +211,7 @@ class MainActivity : BaseActivity() {
     }
 
     /**
-     * 抽屉头部「切换站点」：hanime 里番 → nJAV → 好色TV → 回到 hanime，三站循环。
+     * 抽屉头部「切换站点」：hanime 里番 → nJAV → Pornhub → 回到 hanime，三站循环。
      *
      * ⚠️ **必须同时写 `siteSource` 与 `domainName`**：只改域名不写数据源，网络层
      * 仍会按旧站点分流 —— 这正是 mod.5 里「点 nJAV 切不过去」的根因。
@@ -238,17 +238,17 @@ class MainActivity : BaseActivity() {
                         useCustomMirrorSite = false,
                     )
 
-                    // nJAV → 好色TV（两者都是 AV 数据源，域名必须跟着换）
+                    // nJAV → Pornhub（两者都是 AV 数据源，域名必须跟着换）
                     SiteSource.Njav -> it.copy(
-                        domainName = HanimeConstants.HSEX_URL,
+                        domainName = HanimeConstants.PORN_HUB_URL,
                         // 保留 selectedBaseUrl —— 它是「回 hanime 时用哪个镜像」的备忘，
                         // 在 AV 数据源之间来回切不该把它冲掉。
-                        siteSource = SiteSource.Hsex,
+                        siteSource = SiteSource.Pornhub,
                         useCustomMirrorSite = false,
                     )
 
-                    // 好色TV → 回到 hanime 里番
-                    SiteSource.Hsex -> it.copy(
+                    // Pornhub → 回到 hanime 里番
+                    SiteSource.Pornhub -> it.copy(
                         domainName = comebackSite,
                         selectedBaseUrl = comebackSite,
                         siteSource = SiteSource.Hanime1,

@@ -223,8 +223,9 @@ class HanimeDownloadWorker(
      * 下载这些源时要带的请求头。
      *
      * 按**当前数据源**分流，见 [io.github.daisukikaffuchino.han1meviewer.logic.PlaybackHeaders]：
-     * nJAV 的 `surrit.com` / `fourhoi.com` 需要 `Referer`，好色TV 的 `*.hdcdn.online`
-     * 与 hanime 的直链都不需要。**分片请求也必须带** —— 防盗链是按域名判的，
+     * nJAV 的 `surrit.com` / `fourhoi.com` 需要 `Referer`，hanime 的直链与 Pornhub 的
+     * `*.phncdn.com` 都不需要（Pornhub 那个 Referer 是**中转服务器**补的，
+     * 客户端加不了也带不过去）。**分片请求也必须带** —— 防盗链是按域名判的，
      * 不是按主清单判的。
      */
     private val downloadHeaders: Map<String, String>

@@ -95,19 +95,23 @@ enum class VideoLandscapeLayoutStyle(val value: String) {
  *
  * - [Hanime1]：hanime1.me 及其镜像（里番），默认值，行为与旧版完全一致。
  * - [Njav]：nJAV（njavtv.com，日本 AV）。
- * - [Hsex]：好色TV（hsex.tv，国产 / 自拍 / 素人，mod 26.5 新增）。
+ * - [Pornhub]：Pornhub（pornhub.com，mod 26.6 新增）。
  *
  * 后两者与 hanime 共用同一套 UI 与模型，只是在仓库层分流；
  * 账号相关功能（登录 / 我的清单 / 评论 / 订阅）**仍然只支持 [Hanime1]**。
+ *
+ * ⚠️ [Pornhub] 与另外两个还有一个本质区别：它的域名在大陆是 **SNI 阻断**，
+ * 全程必须走自建 TLS 中转，**没有直连模式**（见
+ * [io.github.daisukikaffuchino.han1meviewer.logic.network.CdnRelay]）。
  */
 enum class SiteSource(val value: String) {
     Hanime1("hanime1"),
     Njav("njav"),
-    Hsex("hsex");
+    Pornhub("pornhub");
 
     val isNjav: Boolean get() = this == Njav
 
-    val isHsex: Boolean get() = this == Hsex
+    val isPornhub: Boolean get() = this == Pornhub
 
     /** 非 hanime 的「AV 型」站点 —— 首页栏目名与筛选条件都要换成 AV 那套。 */
     val isAvSite: Boolean get() = this != Hanime1

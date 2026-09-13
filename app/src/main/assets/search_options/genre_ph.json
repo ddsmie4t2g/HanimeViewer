@@ -1,0 +1,42 @@
+[
+  {
+    "lang": {
+      "zh-rCN": "全部",
+      "en": "All",
+      "zh-rTW": "全部"
+    },
+    "search_key": "全部"
+  },
+  {
+    "lang": {
+      "zh-rCN": "最新",
+      "en": "Latest",
+      "zh-rTW": "最新"
+    },
+    "search_key": "最新"
+  },
+  {
+    "lang": {
+      "zh-rCN": "最多观看",
+      "en": "Most viewed",
+      "zh-rTW": "最多觀看"
+    },
+    "search_key": "最多觀看"
+  },
+  {
+    "lang": {
+      "zh-rCN": "最高评分",
+      "en": "Top rated",
+      "zh-rTW": "最高評分"
+    },
+    "search_key": "最高評分"
+  },
+  {
+    "lang": {
+      "zh-rCN": "日本",
+      "en": "Japanese",
+      "zh-rTW": "日本"
+    },
+    "search_key": "日本"
+  }
+]

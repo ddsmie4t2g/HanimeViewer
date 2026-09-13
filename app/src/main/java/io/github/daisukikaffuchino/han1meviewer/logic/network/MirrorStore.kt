@@ -66,11 +66,17 @@ object MirrorStore {
             label = "nJAV",
             builtIn = true,
         ),
-        // 好色TV 同上（mod 26.5 新增的第三个数据源）。
+        // Pornhub 同上（mod 26.6 新增的第三个数据源）。
+        //
+        // ⚠️ 它和其他几项有一个重要区别：**探测它「通不通」没有意义**。
+        // 它的域名在大陆是 SNI 阻断（换了 IP 也不通），App 里真正走的是自建中转，
+        // 所以这里列出来只是为了让用户能一眼看到「第三个数据源是哪个站」，
+        // 不要拿它的探测结果去判断「这个站能不能用」—— 那要看的是「网络设置 → CDN 中转」
+        // 那台 VPS 的状态。
         MirrorNode(
-            id = PREFIX_BUILT_IN + HanimeConstants.HSEX_HOSTNAME,
-            url = HanimeConstants.HSEX_URL,
-            label = "好色TV",
+            id = PREFIX_BUILT_IN + HanimeConstants.PORN_HUB_HOSTNAME,
+            url = HanimeConstants.PORN_HUB_URL,
+            label = "Pornhub",
             builtIn = true,
         ),
     )

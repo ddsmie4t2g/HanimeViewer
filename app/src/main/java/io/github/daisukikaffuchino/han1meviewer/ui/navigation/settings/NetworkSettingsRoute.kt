@@ -512,7 +512,7 @@ fun NetworkSettingsRouteScreen(embedded: Boolean = false) {
                 pendingSiteSourceSwitch = true
                 pendingDomainValue = when {
                     source.isNjav -> HanimeConstants.NJAV_URL
-                    source.isHsex -> HanimeConstants.HSEX_URL
+                    source.isPornhub -> HanimeConstants.PORN_HUB_URL
                     else -> SettingsRepository.selectedBaseUrl
                         .takeIf { it.isNotBlank() && it in HanimeConstants.HANIME_URL }
                         ?: HanimeConstants.HANIME_URL[0]

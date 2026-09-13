@@ -21,8 +21,8 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.NjavActress
 import io.github.daisukikaffuchino.han1meviewer.logic.model.OnlineWatchHistorySort
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoCommentArgs
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoComments
-import io.github.daisukikaffuchino.han1meviewer.logic.hsex.HsexNetwork
-import io.github.daisukikaffuchino.han1meviewer.logic.hsex.HsexParser
+import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhNetwork
+import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhParser
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavNetwork
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavParser
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HanimeNetwork
@@ -62,7 +62,7 @@ object NetworkRepo {
     fun getHomePage(): Flow<WebsiteState<HomePage>> =
         when {
             SettingsRepository.isNjavSite -> njavHomePageFlow()
-            SettingsRepository.isHsexSite -> hsexHomePageFlow()
+            SettingsRepository.isPornhubSite -> phHomePageFlow()
             else -> websiteIOFlow(
                 request = { HanimeNetwork.hanimeService.getHomePage(SettingsRepository.homeUrl) },
                 action = Parser::homePageVer2
@@ -81,9 +81,9 @@ object NetworkRepo {
                 url = resolveNjavListUrl(page, query, genre, sort, tags, actressPath),
             )
 
-            SettingsRepository.isHsexSite -> hsexListFlow(
+            SettingsRepository.isPornhubSite -> phListFlow(
                 page = page,
-                url = resolveHsexListUrl(page, query, genre, sort, tags),
+                url = resolvePhListUrl(page, query, genre, sort, tags),
             )
 
             else -> pageIOFlow(
@@ -101,7 +101,7 @@ object NetworkRepo {
     fun getHanimeVideo(videoCode: String): Flow<VideoLoadingState<HanimeVideo>> =
         when {
             SettingsRepository.isNjavSite -> njavVideoFlow(videoCode)
-            SettingsRepository.isHsexSite -> hsexVideoFlow(videoCode)
+            SettingsRepository.isPornhubSite -> phVideoFlow(videoCode)
             else -> videoIOFlow(
                 request = { HanimeNetwork.hanimeService.getHanimeVideo(videoCode) },
                 action = Parser::hanimeVideoVer2
@@ -110,9 +110,9 @@ object NetworkRepo {
 
     fun getHanimePreview(date: String): Flow<WebsiteState<HanimePreview>> =
         when {
-            // nJAV / 好色TV 都没有「新番预告」这种月历页，日历里返回空态而不是报错。
+            // nJAV / Pornhub 都没有「新番预告」这种月历页，日历里返回空态而不是报错。
             SettingsRepository.isNjavSite -> flowOf(NjavParser.emptyPreview())
-            SettingsRepository.isHsexSite -> flowOf(HsexParser.emptyPreview())
+            SettingsRepository.isPornhubSite -> flowOf(PhParser.emptyPreview())
             else -> websiteIOFlow(
                 request = { HanimeNetwork.hanimeService.getHanimePreview(date) },
                 action = Parser::hanimePreview
@@ -145,8 +145,8 @@ object NetworkRepo {
         month: Int,
         page: Int,
     ): Flow<PageLoadingState<MutableList<HanimeInfo>>> =
-        if (SettingsRepository.isNjavSite || SettingsRepository.isHsexSite) {
-            // nJAV / 好色TV 都没有「按上市月份」归档接口，日历在该数据源下只展示空态。
+        if (SettingsRepository.isNjavSite || SettingsRepository.isPornhubSite) {
+            // nJAV / Pornhub 都没有「按上市月份」归档接口，日历在该数据源下只展示空态。
             flowOf<PageLoadingState<MutableList<HanimeInfo>>>(PageLoadingState.NoMoreData)
         } else {
             pageIOFlow(
@@ -732,67 +732,69 @@ object NetworkRepo {
 
     //</editor-fold>
 
-    //<editor-fold desc="好色TV (hsex.tv) 数据源">
+    //<editor-fold desc="Pornhub (pornhub.com) 数据源">
 
     /**
-     * 好色TV 首页：并行抓取若干栏目页，再拼成一个 [HomePage]。
+     * Pornhub 首页：并行请求若干检索条件，再拼成一个 [HomePage]。
      *
      * 与 [njavHomePageFlow] 同一套思路：单个栏目失败不影响整体
      * （`runCatching` 兜成空列表），免得一个栏目抽风就让整个首页报错。
+     *
+     * ⚠️ 四个栏目是**四个独立请求**（每个约 140 KB 的 JSON，且都要过自建中转），
+     * 所以别再加栏目了 —— 每多一个栏目就是首页首屏多等一次境外往返。
      */
-    private fun hsexHomePageFlow(): Flow<WebsiteState<HomePage>> = flow {
+    private fun phHomePageFlow(): Flow<WebsiteState<HomePage>> = flow {
         val sections = coroutineScope {
-            HsexParser.HOME_SECTIONS.map { (key, path) ->
+            PhNetwork.HOME_SECTIONS.map { (key, query) ->
                 async(Dispatchers.IO) {
                     key to runCatching {
-                        val response = HsexNetwork.service.get(HsexNetwork.listUrl(path, 1))
+                        val response = PhNetwork.service.get(PhNetwork.apiUrl(page = 1, query = query))
                         if (response.isSuccessful) {
-                            HsexParser.videoList(response.body()?.string().orEmpty())
+                            PhParser.videoList(response.body()?.string().orEmpty())
                         } else {
-                            throw ParseException("好色TV: HTTP ${response.code()} - $path")
+                            throw ParseException("Pornhub: HTTP ${response.code()} - $key")
                         }
                     }.getOrDefault(mutableListOf<HanimeInfo>())
                 }
             }.awaitAll().toMap()
         }
-        emit(HsexParser.homePage(sections))
+        emit(PhParser.homePage(sections))
     }.catch { e ->
-        emit(WebsiteState.Error(handleHsexException(e)))
+        emit(WebsiteState.Error(handlePhException(e)))
     }.flowOn(Dispatchers.IO)
 
-    /** 好色TV 列表页（分类 / 搜索）通用管线。 */
-    private fun hsexListFlow(
+    /** Pornhub 列表页（分类 / 搜索）通用管线。 */
+    private fun phListFlow(
         page: Int,
         url: String,
     ): Flow<PageLoadingState<MutableList<HanimeInfo>>> = flow {
-        val response = HsexNetwork.service.get(url)
+        val response = PhNetwork.service.get(url)
         if (!response.isSuccessful) {
-            throw ParseException("好色TV: HTTP ${response.code()} - $url")
+            throw ParseException("Pornhub: HTTP ${response.code()} - $url")
         }
-        // 翻页判据要 page：站点没有 rel=next，只能看「有没有比当前页更大的页码」。
-        emit(HsexParser.pageState(response.body()?.string().orEmpty(), page))
+        // 翻页判据要 page：接口不返回总页数，只能看这一页给满没有。
+        emit(PhParser.pageState(response.body()?.string().orEmpty(), page))
     }.catch { e ->
-        emit(PageLoadingState.Error(handleHsexException(e)))
+        emit(PageLoadingState.Error(handlePhException(e)))
     }.flowOn(Dispatchers.IO)
 
-    private fun hsexVideoFlow(videoCode: String): Flow<VideoLoadingState<HanimeVideo>> = flow {
-        val response = HsexNetwork.service.get(HsexNetwork.detailUrl(videoCode))
+    private fun phVideoFlow(videoCode: String): Flow<VideoLoadingState<HanimeVideo>> = flow {
+        val response = PhNetwork.service.get(PhNetwork.detailUrl(videoCode))
         if (!response.isSuccessful) {
-            throw ParseException("好色TV: HTTP ${response.code()} - $videoCode")
+            throw ParseException("Pornhub: HTTP ${response.code()} - $videoCode")
         }
-        emit(HsexParser.video(response.body()?.string().orEmpty()))
+        emit(PhParser.video(response.body()?.string().orEmpty()))
     }.catch { e ->
-        emit(VideoLoadingState.Error(handleHsexException(e)))
+        emit(VideoLoadingState.Error(handlePhException(e)))
     }.flowOn(Dispatchers.IO)
 
     /**
-     * 把 hanime 风格的检索条件翻译成好色TV 的列表 URL。
+     * 把 hanime 风格的检索条件翻译成 Pornhub 的接口地址。
      *
-     * 站点只有「关键词搜索」一种检索方式：没有女优页，也没有可拼接的分类 / 标签参数。
-     * 所以除关键词之外的条件一律靠 [HsexParser.pathForMarker] 映射到固定分类页
-     * （最新 / 排行榜 / 七日排行 / 长片 / 5分钟），都映射不上就兜底到「最新」。
+     * 有关键词就搜索；否则把 [genre] / [tags] / [sort] 里的标记交给
+     * [PhParser.queryForMarker] 映射成排序或标签条件，都映射不上就兜底到「最新」。
      */
-    private fun resolveHsexListUrl(
+    private fun resolvePhListUrl(
         page: Int,
         query: String?,
         genre: String?,
@@ -800,30 +802,33 @@ object NetworkRepo {
         tags: Set<String>,
     ): String {
         val keyword = query?.trim().orEmpty()
-        if (keyword.isNotEmpty()) return HsexNetwork.searchUrl(keyword, page)
+        if (keyword.isNotEmpty()) {
+            return PhNetwork.apiUrl(page, PhNetwork.PhQuery(keyword = keyword))
+        }
 
-        val path = sequenceOf(genre).plus(tags.asSequence()).plus(sequenceOf(sort))
-            .firstNotNullOfOrNull { HsexParser.pathForMarker(it) }
+        val mapped = sequenceOf(genre).plus(tags.asSequence()).plus(sequenceOf(sort))
+            .firstNotNullOfOrNull { PhParser.queryForMarker(it) }
 
-        return HsexNetwork.listUrl(path ?: "list", page)
+        return PhNetwork.apiUrl(page, mapped ?: PhNetwork.PhQuery(ordering = "newest"))
     }
 
     /**
-     * 好色TV 专用的异常处理。
+     * Pornhub 专用的异常处理。
      *
      * 与 [handleNjavException] 同一原则：**有多少信息就给多少**。
      * 通用 [handleException] 会把所有 [ParseException] 的 message 一律换成
-     * `parse_error_msg`，而这条信息本身往往就是唯一线索，替换掉等于把线索抹掉。
+     * `parse_error_msg`，而这条信息本身往往就是唯一线索（尤其这个数据源
+     * 全程依赖自建中转，报错里「中转不通」和「解析失败」必须能一眼分开）。
      */
-    internal fun handleHsexException(e: Throwable): Throwable {
+    internal fun handlePhException(e: Throwable): Throwable {
         if (e is CancellationException) throw e
         e.printStackTrace()
         val detail = e.message?.takeIf { it.isNotBlank() }
         return ParseException(
             when {
-                detail != null && detail.startsWith("好色TV") -> detail
-                detail != null -> "好色TV 加载失败（${e::class.java.simpleName}）：$detail"
-                else -> "好色TV 加载失败（${e::class.java.simpleName}）"
+                detail != null && detail.startsWith("Pornhub") -> detail
+                detail != null -> "Pornhub 加载失败（${e::class.java.simpleName}）：$detail"
+                else -> "Pornhub 加载失败（${e::class.java.simpleName}）"
             }
         )
     }

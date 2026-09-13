@@ -75,14 +75,14 @@ object SettingsRepository : SettingsStore {
     }
     val homeUrl get() = if (current.useCustomMirrorSite && current.customMirrorSite.isNotBlank()) current.customMirrorSite else baseUrl
     val useCustomMirrorSite get() = current.useCustomMirrorSite
-    /** 当前数据源（hanime1.me / nJAV / 好色TV）。 */
+    /** 当前数据源（hanime1.me / nJAV / Pornhub）。 */
     val siteSource: SiteSource get() = current.siteSource
     /** 便捷判断：当前是否走 nJAV 数据源。 */
     val isNjavSite get() = current.siteSource.isNjav
-    /** 便捷判断：当前是否走好色TV（hsex.tv）数据源。 */
-    val isHsexSite get() = current.siteSource.isHsex
+    /** 便捷判断：当前是否走 Pornhub（pornhub.com）数据源。 */
+    val isPornhubSite get() = current.siteSource.isPornhub
     /**
-     * 当前是否是非 hanime 的「AV 型」站点（nJAV 或好色TV）。
+     * 当前是否是非 hanime 的「AV 型」站点（nJAV 或 Pornhub）。
      *
      * 首页栏目名、筛选条件这些**站点无关**的界面文案按它切换，
      * 具体走哪一家再由各自的网络层分流。

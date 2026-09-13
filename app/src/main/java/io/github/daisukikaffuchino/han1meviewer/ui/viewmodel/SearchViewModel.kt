@@ -129,11 +129,11 @@ class SearchViewModel(
 
     val genres by unsafeLazy {
         loadAssetAs<List<SearchOption>>(
-            // 每个数据源一套分类：好色TV 只有「最新 / 排行榜 / 七日排行 / 长片 / 5分钟」
-            // 这几个固定栏目（见 HsexParser.MARKER_TO_PATH），拿里番或 nJAV 的分类
+            // 每个数据源一套分类：Pornhub 只有「最新 / 最多观看 / 最高评分 / 日本」
+            // 这几个排序与标签（见 PhParser.MARKER_TO_QUERY），拿里番或 nJAV 的分类
             // 过来都是点了没反应的死选项。
             when {
-                SettingsRepository.isHsexSite -> "search_options/genre_hsex.json"
+                SettingsRepository.isPornhubSite -> "search_options/genre_ph.json"
                 SettingsRepository.isNjavSite -> "search_options/genre_av.json"
                 else -> "search_options/genre.json"
             }

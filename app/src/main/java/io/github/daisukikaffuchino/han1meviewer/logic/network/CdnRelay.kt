@@ -62,6 +62,22 @@ import javax.net.ssl.X509TrustManager
  * 别人拿不到私钥就冒充不了这台中转。因此 [trustManager] 是「系统 CA + 内置证书」的组合：
  * 其它域名照旧走系统信任，只有这一个 IP 多认一张证书。
  *
+ * ## 中转还会**改写 HLS 清单**（Pornhub 专有，但影响所有走中转的 HLS）
+ *
+ * Pornhub 的主清单里子清单是**相对路径**（`index-v1-a1.m3u8?validfrom=…`），
+ * 子清单里的分片也是相对的（`seg-1-v1-a1.ts?…`）。而客户端是从
+ * `https://<中转>/r/<secret>/<base64url(原URL)>` 取的清单 —— 这是一条**单段路径**，
+ * 相对解析的结果是 `https://<中转>/r/<secret>/index-v1-a1.m3u8`，
+ * 中转把 `index-v1-a1.m3u8` 当 base64 解，直接 400，**第二个请求就死**。
+ *
+ * hanime 没踩到是因为它给的是渐进式 `.mp4`（没有相对引用）；nJAV 的 surrit 清单
+ * 恰好写的是绝对地址。所以这是**服务端**修掉的：中转见 `.m3u8` 就缓冲整份，
+ * 把每个 URI 行（含 `URI="…"` 属性）用 `urljoin` 还原成**原站绝对地址**再返回。
+ * 然后本类的 [CdnRelayInterceptor] 再把它们一个个改回中转 —— 正好闭环。
+ *
+ * ⚠️ 这条也说明：**不能用「本地直连能播」来推断手机能播**，
+ * 相对清单在中转这条路上是必须显式处理的。
+ *
  * ## 与 [interceptor.ImageRelayInterceptor] 的关系
  *
  * 两者都是「直连优先、失败才走中转」，但中转目的地不同：
@@ -103,7 +119,62 @@ object CdnRelay {
     private val BLOCKED_HOSTS = setOf(
         "hembed.com",   // hanime 全部视频（vdownload.hembed.com）与全部封面图
         "fourhoi.com",  // nJAV 封面
+        "pornhub.com",  // Pornhub 站点本体（HTML / JSON API）
+        "phncdn.com",   // Pornhub 全部封面与视频 CDN（pix-*.phncdn.com / ev-h.phncdn.com …）
     )
+
+    /**
+     * **不做直连尝试、直接中转**的域名。
+     *
+     * 其余域名走的是「直连优先、失败才中转」（见 [CdnRelayInterceptor]），因为海外用户
+     * 直连反而更快。但 Pornhub 这两个域名不一样：实测 2026-09-13，本机（大陆）对
+     * `www.pornhub.com` 与 `*.phncdn.com` **用真实 IP 直连也是立即 RST**
+     * （0.1 s / 0.3 s，TLS 握手阶段就被打断），属于 SNI 阻断 ——
+     * 也就是说直连**在任何大陆网络下都不会成功**。
+     *
+     * 那就没必要先撞一次墙：每撞一次白等约 0.1–2 s，而看一个视频要发上百个请求
+     * （m3u8、每个分片、每张封面），累计就是几十秒的纯浪费。
+     *
+     * > ⚠️ 别把 `hembed.com` 之类也搬进来 —— 它们的直连**在海外是通的**，
+     * > 强制中转只会让海外用户体验变差（多绕一趟美国）。
+     */
+    private val ALWAYS_RELAY_HOSTS = setOf(
+        "pornhub.com",
+        "phncdn.com",
+    )
+
+    /**
+     * 走中转时**替客户端补的 `Referer`**，按被访问域名取。
+     *
+     * Pornhub 的视频 CDN 有一条反直觉的规则（实测）：**主清单与子清单不要 Referer，
+     * 但 `.ts` 分片不带 Referer 会 404**（带上 → `200` + 真 TS）。
+     *
+     * 麻烦的是分片请求由播放器发出，播放器只会把**中转地址**当作自己的 Referer ——
+     * 那个值对 Pornhub 毫无意义。所以这里把「该用哪个 Referer」当成中转 URL 的一个参数
+     * 带过去（服务器侧 `?ref=`），由服务器在向上游取的时候填上。
+     */
+    private val RELAY_REFERERS = mapOf(
+        "phncdn.com" to "https://www.pornhub.com/",
+    )
+
+    fun isRelayHost(host: String): Boolean {
+        val lower = host.lowercase().removeSuffix(".")
+        return BLOCKED_HOSTS.any { lower == it || lower.endsWith(".$it") }
+    }
+
+    /** 该域名是否**跳过直连**、直接中转。 */
+    fun mustRelay(host: String): Boolean {
+        val lower = host.lowercase().removeSuffix(".")
+        return ALWAYS_RELAY_HOSTS.any { lower == it || lower.endsWith(".$it") }
+    }
+
+    /** 该域名走中转时要补的 Referer；没有就返回 null（服务器原样转发客户端的头）。 */
+    fun refererFor(host: String): String? {
+        val lower = host.lowercase().removeSuffix(".")
+        return RELAY_REFERERS.entries
+            .firstOrNull { lower == it.key || lower.endsWith("." + it.key) }
+            ?.value
+    }
 
     /**
      * 会话级的「直连必死」记忆。
@@ -115,11 +186,6 @@ object CdnRelay {
      * 不落盘：网络环境会变（换 Wi-Fi、开/关代理），下一次启动重新探一次最稳。
      */
     private val directIsKnownDead = ConcurrentHashMap.newKeySet<String>()
-
-    fun isRelayHost(host: String): Boolean {
-        val lower = host.lowercase().removeSuffix(".")
-        return BLOCKED_HOSTS.any { lower == it || lower.endsWith(".$it") }
-    }
 
     fun isKnownDead(host: String): Boolean = directIsKnownDead.contains(host.lowercase())
 
@@ -143,7 +209,18 @@ object CdnRelay {
      * ⚠️ 9.0 起端点由 [RelayNodeStore.activeNode] 决定。这里是**每个请求都会走**的热路径，
      * 所以 `activeNode()` 特意做了「只有内置节点时直接返回、读设置都不读」的短路。
      */
-    fun relayUrl(original: String): String? {
+    fun relayUrl(original: String): String? = relayUrl(original, ref = null)
+
+    /**
+     * 同上，但额外要求服务器在向上游取的时候使用 [ref] 作为 `Referer`。
+     *
+     * 为什么需要它：Pornhub 的 `.ts` 分片**不带 Referer 会 404**，而分片请求是播放器发出的，
+     * 它只知道自己请求的是中转地址，没法凭空造出一个 `https://www.pornhub.com/`。
+     * 于是把 Referer 作为参数拼在中转 URL 的查询串上（服务器侧见 `?ref=`）。
+     *
+     * 传 null 时不带这个参数，服务器就原样转发客户端自己的 `Referer`（hembed / fourhoi 走这条）。
+     */
+    fun relayUrl(original: String, ref: String?): String? {
         // 先确认确实是个合法 URL：不然后面会带一个「永远取不到」的中转请求出去，
         // 报错还会显示成中转的问题，排查时容易被带偏。
         original.toHttpUrlOrNull() ?: return null
@@ -152,7 +229,9 @@ object CdnRelay {
             original.toByteArray(Charsets.UTF_8),
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
         )
-        return "${node.baseUrl}/$PATH_ROOT/${node.secret}/$encoded".toHttpUrlOrNull()?.toString()
+        return "${node.baseUrl}/$PATH_ROOT/${node.secret}/$encoded"
+            .let { if (ref.isNullOrBlank()) it else "$it?ref=$ref" }
+            .toHttpUrlOrNull()?.toString()
     }
 
     /**

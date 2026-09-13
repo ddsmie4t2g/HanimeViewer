@@ -2,7 +2,7 @@ package io.github.daisukikaffuchino.han1meviewer
 
 import android.webkit.CookieManager
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
-import io.github.daisukikaffuchino.han1meviewer.logic.hsex.HsexNetwork
+import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhNetwork
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavNetwork
 import androidx.core.text.parseAsHtml
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HCookieJar
@@ -32,12 +32,12 @@ val Throwable.pienization: CharSequence get() = "🥺\n$localizedMessage"
  * |---|---|---|
  * | hanime | 站内数字 id | `…/watch?v={code}` |
  * | nJAV | 番号 slug（`venx-381`） | `njavtv.com/{slug}` |
- * | 好色TV | 纯数字 id（`1240261`） | `hsex.tv/video-{id}.htm` |
+ * | Pornhub | `viewkey`（`6a85019b12880`） | `pornhub.com/view_video.php?viewkey={code}` |
  */
 fun getHanimeVideoLink(videoCode: String) =
     when {
         SettingsRepository.isNjavSite -> NjavNetwork.detailUrl(videoCode)
-        SettingsRepository.isHsexSite -> HsexNetwork.detailUrl(videoCode)
+        SettingsRepository.isPornhubSite -> PhNetwork.detailUrl(videoCode)
         else -> HANIME_BASE_URL + "watch?v=" + videoCode
     }
 
@@ -48,7 +48,9 @@ fun getHanimeVideoLink(videoCode: String) =
 fun getHanimeSearchLink(artist: String) =
     when {
         SettingsRepository.isNjavSite -> NjavNetwork.searchUrl(artist, 1)
-        SettingsRepository.isHsexSite -> HsexNetwork.searchUrl(artist, 1)
+        SettingsRepository.isPornhubSite ->
+            PhNetwork.apiUrl(1, PhNetwork.PhQuery(keyword = artist))
+
         else -> HANIME_BASE_URL + "search?query=" + artist
     }
 /**
@@ -71,12 +73,12 @@ fun getHanimeSearchShareText(artist: String): String = buildString {
 /**
  * 獲取 Hanime 影片**官方**下載地址
  *
- * nJAV 与好色TV 都没有官方下载页，退化成详情页链接。
+ * nJAV 与 Pornhub 都没有官方下载页，退化成详情页链接。
  */
 fun getHanimeVideoDownloadLink(videoCode: String) =
     when {
         SettingsRepository.isNjavSite -> NjavNetwork.detailUrl(videoCode)
-        SettingsRepository.isHsexSite -> HsexNetwork.detailUrl(videoCode)
+        SettingsRepository.isPornhubSite -> PhNetwork.detailUrl(videoCode)
         else -> HANIME_BASE_URL + "download?v=" + videoCode
     }
 

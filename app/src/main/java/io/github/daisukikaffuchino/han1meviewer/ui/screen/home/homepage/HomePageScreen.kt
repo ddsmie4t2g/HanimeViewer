@@ -101,9 +101,9 @@ fun HomePageScreen(
         WindowInsets.statusBars.getTop(this).toDp() + 72.dp
     }
     // 非 hanime 数据源下首页内容是 AV，分类标题也要跟着换成 AV 那一套；
-    // 好色TV 的栏目名与 nJAV 完全不同，所以再单开一个开关。
+    // Pornhub 的栏目名与 nJAV 完全不同，所以再单开一个开关。
     val isAVSite = SettingsRepository.isAvSite
-    val isHsexSite = SettingsRepository.isHsexSite
+    val isPornhubSite = SettingsRepository.isPornhubSite
     LaunchedEffect(Unit) {
         viewModel.initializeHomePage()
     }
@@ -234,7 +234,7 @@ fun HomePageScreen(
                                     updateAnnouncement = updateAnnouncement,
                                     updateActionState = updateActionState,
                                     isAVSite = isAVSite,
-                                    isHsexSite = isHsexSite,
+                                    isPornhubSite = isPornhubSite,
                                     onEvent = onEvent,
                                     onCloseAnnouncement = viewModel::dismissAnnouncements,
                                     contentTopPadding = contentTopPadding,

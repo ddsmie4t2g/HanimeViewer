@@ -1,8 +1,8 @@
 {
-  "versionName": "26.3.2-mod.26.5",
-  "versionCode": 260941,
-  "downloadUrl": "https://github.com/ddsmie4t2g/HanimeViewer/releases/download/v26.3.2-mod.26.5/Han1meViewer-v26.3.2-mod.26.5.apk",
-  "updateDescription": "## 26.5 —— 适配第三个站点：好色TV（hsex.tv）\n\n- **新增「好色TV（hsex.tv）」数据源** —— 在网络设置 → 数据源里可选，抽屉头部的「切换站点」也改成三站循环（里番 → nJAV → 好色TV）。\n- **首页按它的真实栏目组织**：最新 / 排行榜 / 七日排行 / 长片 / 5 分钟，共 5 个栏目，每栏目 24 条。\n- **搜索**走站点原生关键词搜索，支持翻页（每页 20 条）。\n- **播放**：详情页给的是静态 HLS 主列表，**三条 CDN 线路（cdn / shark / fdc）做成了可切换项**——站点每个视频只有一档画质，所以「清晰度」那个槽位拿来当线路开关，某条线路卡住时可以直接换。\n- **下载**：复用既有的 HLS 分片下载（TS 分片、支持断点续传）。\n- **DNS 防投毒**：系统 DNS 对 hsex.tv 与其视频 CDN 均返回污染 IP，已内置真实 IP（站点走 Cloudflare，视频 CDN 是裸 IP，两边各钉一份）。\n\n### 说明\n\n- 好色TV 没有女优索引、也没有分类筛选接口，所以这两项在它下面不提供（选了也只有死选项）。\n- 账号相关功能（登录 / 我的清单 / 评论 / 订阅）仍然只支持主站 hanime。\n",
+  "versionName": "26.3.2-mod.26.6",
+  "versionCode": 260942,
+  "downloadUrl": "https://github.com/ddsmie4t2g/HanimeViewer/releases/download/v26.3.2-mod.26.6/Han1meViewer-v26.3.2-mod.26.6.apk",
+  "updateDescription": "## 26.6 —— 适配第三个站点：Pornhub\n\n- **新增「Pornhub」数据源** —— 网络设置 → 数据源里可选，抽屉头部的「切换站点」也改成三站循环（里番 → nJAV → Pornhub）。\n- **首页四个栏目**：最新 / 最多观看 / 最高评分 / 日本，每栏目 30 条。\n- **搜索**走站点原生关键词搜索，支持翻页（每页 30 条），并可按「最新 / 最多观看 / 最高评分 / 日本」筛选。\n- **列表走 JSON 接口**（约 140 KB/页），不抓列表页 HTML（1.2–1.6 MB）—— 这些流量全都要过自建中转，差 10 倍没有理由不用 JSON。\n- **播放**：详情页给的是 HLS，240P / 480P / 720P / 1080P 可选，**默认 480P**（中转链路实测约 2.4 Mbps，480P 有余量，720P 已在临界点；想冲高可以在清晰度菜单里自己选）。\n- **下载**：复用既有的 HLS 分片下载（TS 分片、支持断点续传）。\n\n### 中转这一版修了什么（这是它能用的前提）\n\nPornhub 与它的 CDN 是 **SNI 阻断** —— 换 IP、换 DNS 都没用，连代理也救不了（代理是明文隧道，墙在里面就能读到 SNI）。所以它的全部流量都走自建 TLS 中转。为此中转做了三处扩展：\n\n- 域名白名单加入 `pornhub.com` / `phncdn.com`，且这两个域名**跳过直连尝试**直接中转（直连必然失败，先撞一次墙纯属白等）。\n- Pornhub 的 `.ts` 分片**不带 Referer 会 404**，而分片请求是播放器发的，它只会把自己的中转地址当 Referer。于是 Referer 改由中转在服务端补（`?ref=`），而且必须**最后生效** —— 客户端若自带 Referer，之前会把它覆盖掉，分片立刻 404。\n- Pornhub 的清单里子清单与分片都是**相对路径**，而中转地址是单段路径，播放器按它做相对解析必然拿到垃圾地址。中转现在会把 `.m3u8` 里的相对地址**改写回原站绝对地址**再返回。\n\n### 说明\n\n- 账号相关功能（登录 / 我的清单 / 评论 / 订阅）仍然只支持主站 hanime。\n",
   "forceUpdate": false,
   "isShowAnnouncement": false,
   "announcement": ""

@@ -166,14 +166,13 @@
     <string name="site_source_hanime">hanime1.me</string>
     <string name="site_source_njav">nJAV</string>
     <string name="site_source_njav_with_host">nJAV（njavtv.com）</string>
-    <string name="site_source_hsex_with_host">好色TV（hsex.tv）</string>
-    <!-- 好色TV 首頁欄目名。下面的 hsex_* 只做**顯示**，
-         真正的「檢索標記」是中文字面量（見 HsexParser.MARKER_TO_PATH），兩者別混。 -->
-    <string name="hsex_latest">最新</string>
-    <string name="hsex_ranking">排行榜</string>
-    <string name="hsex_weekly">七日排行</string>
-    <string name="hsex_long">長片</string>
-    <string name="hsex_5min">5 分鐘</string>
+    <string name="site_source_pornhub_with_host">Pornhub（pornhub.com）</string>
+    <!-- Pornhub 首頁欄目名。下面的 ph_* 只做**顯示**，
+         真正的「檢索標記」是中文字面量（見 PhParser.MARKER_TO_QUERY），兩者別混。 -->
+    <string name="ph_latest">最新</string>
+    <string name="ph_popular">最多觀看</string>
+    <string name="ph_top_rated">最高評分</string>
+    <string name="ph_japanese">日本</string>
     <string name="site_source_restart_confirm">切換資料來源需要重啟應用程式，確定要繼續嗎？</string>
     <string name="custom_mirror_site">自訂鏡像站</string>
     <string name="enable_custom_mirror_site">啟用自訂鏡像站</string>
