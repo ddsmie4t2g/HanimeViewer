@@ -66,6 +66,13 @@ object MirrorStore {
             label = "nJAV",
             builtIn = true,
         ),
+        // 好色TV 同上（mod 26.5 新增的第三个数据源）。
+        MirrorNode(
+            id = PREFIX_BUILT_IN + HanimeConstants.HSEX_HOSTNAME,
+            url = HanimeConstants.HSEX_URL,
+            label = "好色TV",
+            builtIn = true,
+        ),
     )
 
     /** 默认镜像（出厂优先项）的 id，UI 用它标「默认」。 */

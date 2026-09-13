@@ -75,10 +75,19 @@ object SettingsRepository : SettingsStore {
     }
     val homeUrl get() = if (current.useCustomMirrorSite && current.customMirrorSite.isNotBlank()) current.customMirrorSite else baseUrl
     val useCustomMirrorSite get() = current.useCustomMirrorSite
-    /** 当前数据源（hanime1.me / nJAV）。 */
+    /** 当前数据源（hanime1.me / nJAV / 好色TV）。 */
     val siteSource: SiteSource get() = current.siteSource
     /** 便捷判断：当前是否走 nJAV 数据源。 */
     val isNjavSite get() = current.siteSource.isNjav
+    /** 便捷判断：当前是否走好色TV（hsex.tv）数据源。 */
+    val isHsexSite get() = current.siteSource.isHsex
+    /**
+     * 当前是否是非 hanime 的「AV 型」站点（nJAV 或好色TV）。
+     *
+     * 首页栏目名、筛选条件这些**站点无关**的界面文案按它切换，
+     * 具体走哪一家再由各自的网络层分流。
+     */
+    val isAvSite get() = current.siteSource.isAvSite
     val customMirrorSite get() = current.customMirrorSite
     val appendCustomMirrorPath get() = current.appendCustomMirrorPath
     /** 用户自建镜像池（JSON）。内置镜像不在这里，见 [io.github.daisukikaffuchino.han1meviewer.logic.network.MirrorStore]。 */

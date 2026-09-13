@@ -21,6 +21,8 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.NjavActress
 import io.github.daisukikaffuchino.han1meviewer.logic.model.OnlineWatchHistorySort
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoCommentArgs
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoComments
+import io.github.daisukikaffuchino.han1meviewer.logic.hsex.HsexNetwork
+import io.github.daisukikaffuchino.han1meviewer.logic.hsex.HsexParser
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavNetwork
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavParser
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HanimeNetwork
@@ -58,11 +60,14 @@ object NetworkRepo {
     //<editor-fold desc="Hanime">
 
     fun getHomePage(): Flow<WebsiteState<HomePage>> =
-        if (SettingsRepository.isNjavSite) njavHomePageFlow()
-        else websiteIOFlow(
-            request = { HanimeNetwork.hanimeService.getHomePage(SettingsRepository.homeUrl) },
-            action = Parser::homePageVer2
-        )
+        when {
+            SettingsRepository.isNjavSite -> njavHomePageFlow()
+            SettingsRepository.isHsexSite -> hsexHomePageFlow()
+            else -> websiteIOFlow(
+                request = { HanimeNetwork.hanimeService.getHomePage(SettingsRepository.homeUrl) },
+                action = Parser::homePageVer2
+            )
+        }
 
     fun getHanimeSearchResult(
         page: Int, query: String?, genre: String?,
@@ -70,13 +75,18 @@ object NetworkRepo {
         duration: String?, tags: Set<String>, brands: Set<String>,
         actressPath: String? = null,
     ): Flow<PageLoadingState<MutableList<HanimeInfo>>> =
-        if (SettingsRepository.isNjavSite) {
-            njavListFlow(
+        when {
+            SettingsRepository.isNjavSite -> njavListFlow(
                 page = page,
                 url = resolveNjavListUrl(page, query, genre, sort, tags, actressPath),
             )
-        } else {
-            pageIOFlow(
+
+            SettingsRepository.isHsexSite -> hsexListFlow(
+                page = page,
+                url = resolveHsexListUrl(page, query, genre, sort, tags),
+            )
+
+            else -> pageIOFlow(
                 request = {
                     HanimeNetwork.hanimeService.getHanimeSearchResult(
                         page, query, genre, sort,
@@ -89,18 +99,21 @@ object NetworkRepo {
         }
 
     fun getHanimeVideo(videoCode: String): Flow<VideoLoadingState<HanimeVideo>> =
-        if (SettingsRepository.isNjavSite) njavVideoFlow(videoCode)
-        else videoIOFlow(
-            request = { HanimeNetwork.hanimeService.getHanimeVideo(videoCode) },
-            action = Parser::hanimeVideoVer2
-        )
+        when {
+            SettingsRepository.isNjavSite -> njavVideoFlow(videoCode)
+            SettingsRepository.isHsexSite -> hsexVideoFlow(videoCode)
+            else -> videoIOFlow(
+                request = { HanimeNetwork.hanimeService.getHanimeVideo(videoCode) },
+                action = Parser::hanimeVideoVer2
+            )
+        }
 
     fun getHanimePreview(date: String): Flow<WebsiteState<HanimePreview>> =
-        if (SettingsRepository.isNjavSite) {
-            // nJAV 没有「新番预告」这种月历页，日历里返回空态而不是报错。
-            flowOf(NjavParser.emptyPreview())
-        } else {
-            websiteIOFlow(
+        when {
+            // nJAV / 好色TV 都没有「新番预告」这种月历页，日历里返回空态而不是报错。
+            SettingsRepository.isNjavSite -> flowOf(NjavParser.emptyPreview())
+            SettingsRepository.isHsexSite -> flowOf(HsexParser.emptyPreview())
+            else -> websiteIOFlow(
                 request = { HanimeNetwork.hanimeService.getHanimePreview(date) },
                 action = Parser::hanimePreview
             )
@@ -132,8 +145,8 @@ object NetworkRepo {
         month: Int,
         page: Int,
     ): Flow<PageLoadingState<MutableList<HanimeInfo>>> =
-        if (SettingsRepository.isNjavSite) {
-            // nJAV 没有「按上市月份」归档接口，日历在该数据源下只展示空态。
+        if (SettingsRepository.isNjavSite || SettingsRepository.isHsexSite) {
+            // nJAV / 好色TV 都没有「按上市月份」归档接口，日历在该数据源下只展示空态。
             flowOf<PageLoadingState<MutableList<HanimeInfo>>>(PageLoadingState.NoMoreData)
         } else {
             pageIOFlow(
@@ -716,6 +729,104 @@ object NetworkRepo {
     }.catch { e ->
         emit(PageLoadingState.Error(handleNjavException(e)))
     }.flowOn(Dispatchers.IO)
+
+    //</editor-fold>
+
+    //<editor-fold desc="好色TV (hsex.tv) 数据源">
+
+    /**
+     * 好色TV 首页：并行抓取若干栏目页，再拼成一个 [HomePage]。
+     *
+     * 与 [njavHomePageFlow] 同一套思路：单个栏目失败不影响整体
+     * （`runCatching` 兜成空列表），免得一个栏目抽风就让整个首页报错。
+     */
+    private fun hsexHomePageFlow(): Flow<WebsiteState<HomePage>> = flow {
+        val sections = coroutineScope {
+            HsexParser.HOME_SECTIONS.map { (key, path) ->
+                async(Dispatchers.IO) {
+                    key to runCatching {
+                        val response = HsexNetwork.service.get(HsexNetwork.listUrl(path, 1))
+                        if (response.isSuccessful) {
+                            HsexParser.videoList(response.body()?.string().orEmpty())
+                        } else {
+                            throw ParseException("好色TV: HTTP ${response.code()} - $path")
+                        }
+                    }.getOrDefault(mutableListOf<HanimeInfo>())
+                }
+            }.awaitAll().toMap()
+        }
+        emit(HsexParser.homePage(sections))
+    }.catch { e ->
+        emit(WebsiteState.Error(handleHsexException(e)))
+    }.flowOn(Dispatchers.IO)
+
+    /** 好色TV 列表页（分类 / 搜索）通用管线。 */
+    private fun hsexListFlow(
+        page: Int,
+        url: String,
+    ): Flow<PageLoadingState<MutableList<HanimeInfo>>> = flow {
+        val response = HsexNetwork.service.get(url)
+        if (!response.isSuccessful) {
+            throw ParseException("好色TV: HTTP ${response.code()} - $url")
+        }
+        // 翻页判据要 page：站点没有 rel=next，只能看「有没有比当前页更大的页码」。
+        emit(HsexParser.pageState(response.body()?.string().orEmpty(), page))
+    }.catch { e ->
+        emit(PageLoadingState.Error(handleHsexException(e)))
+    }.flowOn(Dispatchers.IO)
+
+    private fun hsexVideoFlow(videoCode: String): Flow<VideoLoadingState<HanimeVideo>> = flow {
+        val response = HsexNetwork.service.get(HsexNetwork.detailUrl(videoCode))
+        if (!response.isSuccessful) {
+            throw ParseException("好色TV: HTTP ${response.code()} - $videoCode")
+        }
+        emit(HsexParser.video(response.body()?.string().orEmpty()))
+    }.catch { e ->
+        emit(VideoLoadingState.Error(handleHsexException(e)))
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * 把 hanime 风格的检索条件翻译成好色TV 的列表 URL。
+     *
+     * 站点只有「关键词搜索」一种检索方式：没有女优页，也没有可拼接的分类 / 标签参数。
+     * 所以除关键词之外的条件一律靠 [HsexParser.pathForMarker] 映射到固定分类页
+     * （最新 / 排行榜 / 七日排行 / 长片 / 5分钟），都映射不上就兜底到「最新」。
+     */
+    private fun resolveHsexListUrl(
+        page: Int,
+        query: String?,
+        genre: String?,
+        sort: String?,
+        tags: Set<String>,
+    ): String {
+        val keyword = query?.trim().orEmpty()
+        if (keyword.isNotEmpty()) return HsexNetwork.searchUrl(keyword, page)
+
+        val path = sequenceOf(genre).plus(tags.asSequence()).plus(sequenceOf(sort))
+            .firstNotNullOfOrNull { HsexParser.pathForMarker(it) }
+
+        return HsexNetwork.listUrl(path ?: "list", page)
+    }
+
+    /**
+     * 好色TV 专用的异常处理。
+     *
+     * 与 [handleNjavException] 同一原则：**有多少信息就给多少**。
+     * 通用 [handleException] 会把所有 [ParseException] 的 message 一律换成
+     * `parse_error_msg`，而这条信息本身往往就是唯一线索，替换掉等于把线索抹掉。
+     */
+    internal fun handleHsexException(e: Throwable): Throwable {
+        if (e is CancellationException) throw e
+        e.printStackTrace()
+        val detail = e.message?.takeIf { it.isNotBlank() }
+        return ParseException(
+            when {
+                detail != null && detail.startsWith("好色TV") -> detail
+                detail != null -> "好色TV 加载失败（${e::class.java.simpleName}）：$detail"
+                else -> "好色TV 加载失败（${e::class.java.simpleName}）"
+            }
+        )
+    }
 
     //</editor-fold>
 

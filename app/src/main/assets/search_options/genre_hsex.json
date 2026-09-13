@@ -1,0 +1,50 @@
+[
+  {
+    "lang": {
+      "zh-rCN": "全部",
+      "en": "All",
+      "zh-rTW": "全部"
+    },
+    "search_key": "全部"
+  },
+  {
+    "lang": {
+      "zh-rCN": "最新",
+      "en": "Latest",
+      "zh-rTW": "最新"
+    },
+    "search_key": "最新"
+  },
+  {
+    "lang": {
+      "zh-rCN": "排行榜",
+      "en": "Ranking",
+      "zh-rTW": "排行榜"
+    },
+    "search_key": "排行榜"
+  },
+  {
+    "lang": {
+      "zh-rCN": "七日排行",
+      "en": "7-Day Ranking",
+      "zh-rTW": "七日排行"
+    },
+    "search_key": "七日排行"
+  },
+  {
+    "lang": {
+      "zh-rCN": "长片",
+      "en": "Long videos",
+      "zh-rTW": "長片"
+    },
+    "search_key": "長片"
+  },
+  {
+    "lang": {
+      "zh-rCN": "5 分钟",
+      "en": "5 minutes",
+      "zh-rTW": "5 分鐘"
+    },
+    "search_key": "5分鐘"
+  }
+]

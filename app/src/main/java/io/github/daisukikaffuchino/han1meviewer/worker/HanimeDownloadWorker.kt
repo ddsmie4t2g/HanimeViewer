@@ -34,7 +34,7 @@ import io.github.daisukikaffuchino.han1meviewer.logic.entity.download.HanimeDown
 import io.github.daisukikaffuchino.han1meviewer.logic.hls.HlsPlaylist
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HProxySelector
 import io.github.daisukikaffuchino.han1meviewer.logic.network.ServiceCreator
-import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavNetwork
+import io.github.daisukikaffuchino.han1meviewer.logic.PlaybackHeaders
 import io.github.daisukikaffuchino.han1meviewer.logic.state.DownloadState
 import io.github.daisukikaffuchino.han1meviewer.util.HImageMeower
 import io.github.daisukikaffuchino.han1meviewer.util.SafFileManager
@@ -222,11 +222,13 @@ class HanimeDownloadWorker(
     /**
      * 下载这些源时要带的请求头。
      *
-     * `surrit.com` / `fourhoi.com` 需要 `Referer: https://njavtv.com/`。
-     * 对 hanime 的直链它返回空表，所以老路径一行行为都没变。
-     * **分片请求也必须带** —— 防盗链是按域名判的，不是按主清单判的。
+     * 按**当前数据源**分流，见 [io.github.daisukikaffuchino.han1meviewer.logic.PlaybackHeaders]：
+     * nJAV 的 `surrit.com` / `fourhoi.com` 需要 `Referer`，好色TV 的 `*.hdcdn.online`
+     * 与 hanime 的直链都不需要。**分片请求也必须带** —— 防盗链是按域名判的，
+     * 不是按主清单判的。
      */
-    private val downloadHeaders: Map<String, String> get() = NjavNetwork.playbackHeadersFor(downloadUrl)
+    private val downloadHeaders: Map<String, String>
+        get() = PlaybackHeaders.forUrl(downloadUrl)
 
     /**
      * HLS 专用 client：沿用下载链路的限速 / UA / DNS / 代理，**但解除 HTTP/1.1 锁定**。

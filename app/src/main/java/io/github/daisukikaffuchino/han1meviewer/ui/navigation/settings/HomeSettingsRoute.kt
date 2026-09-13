@@ -838,8 +838,8 @@ private fun buildHomeSettingsUiState(
         hiddenHomeCategoryKeys = hiddenHomeCategoryKeys,
         // 分类标题用「AV 那一套」还是「里番那一套」。
         // mod 7.0 前判据是「域名 == javchu」，javchu 移除后改成看数据源 ——
-        // nJAV 就是眼下唯一的日本 AV 源。
-        useAvHomeCategoryTitles = SettingsRepository.isNjavSite,
+        // nJAV / 好色TV 这类 AV 型站点都用 AV 那一套。
+        useAvHomeCategoryTitles = SettingsRepository.isAvSite,
         alwaysShowUpdateCard = SettingsRepository.alwaysShowUpdateCard,
         displayDensityPercent = SettingsRepository.displayDensity.percent,
     )

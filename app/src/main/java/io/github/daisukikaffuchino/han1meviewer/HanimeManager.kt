@@ -2,6 +2,7 @@ package io.github.daisukikaffuchino.han1meviewer
 
 import android.webkit.CookieManager
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
+import io.github.daisukikaffuchino.han1meviewer.logic.hsex.HsexNetwork
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavNetwork
 import androidx.core.text.parseAsHtml
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HCookieJar
@@ -23,22 +24,33 @@ val Throwable.pienization: CharSequence get() = "🥺\n$localizedMessage"
 // base
 
 /**
- * 獲取 Hanime 影片地址
+ * 獲取影片地址（分享 / 複製連結 / 「用瀏覽器打開」都用它）。
  *
- * ⚠️ nJAV 数据源下 `videoCode` 是番号 slug（如 `venx-381`），对应
- * `https://njavtv.com/cn/{slug}`，**不是** hanime 的 `watch?v=` 形式。
+ * 每个数据源的 `videoCode` 含义不同，**不能共用一套拼接规则**：
+ *
+ * | 数据源 | `videoCode` | 地址 |
+ * |---|---|---|
+ * | hanime | 站内数字 id | `…/watch?v={code}` |
+ * | nJAV | 番号 slug（`venx-381`） | `njavtv.com/{slug}` |
+ * | 好色TV | 纯数字 id（`1240261`） | `hsex.tv/video-{id}.htm` |
  */
 fun getHanimeVideoLink(videoCode: String) =
-    if (SettingsRepository.isNjavSite) NjavNetwork.detailUrl(videoCode)
-    else HANIME_BASE_URL + "watch?v=" + videoCode
+    when {
+        SettingsRepository.isNjavSite -> NjavNetwork.detailUrl(videoCode)
+        SettingsRepository.isHsexSite -> HsexNetwork.detailUrl(videoCode)
+        else -> HANIME_BASE_URL + "watch?v=" + videoCode
+    }
 
 
 /**
- * 獲取 Hanime 搜索地址
+ * 獲取搜索地址
  */
 fun getHanimeSearchLink(artist: String) =
-    if (SettingsRepository.isNjavSite) NjavNetwork.searchUrl(artist, 1)
-    else HANIME_BASE_URL + "search?query=" + artist
+    when {
+        SettingsRepository.isNjavSite -> NjavNetwork.searchUrl(artist, 1)
+        SettingsRepository.isHsexSite -> HsexNetwork.searchUrl(artist, 1)
+        else -> HANIME_BASE_URL + "search?query=" + artist
+    }
 /**
  * 獲取 Hanime 影片分享文本
  */
@@ -59,11 +71,14 @@ fun getHanimeSearchShareText(artist: String): String = buildString {
 /**
  * 獲取 Hanime 影片**官方**下載地址
  *
- * nJAV 没有官方下载页，退化成详情页链接。
+ * nJAV 与好色TV 都没有官方下载页，退化成详情页链接。
  */
 fun getHanimeVideoDownloadLink(videoCode: String) =
-    if (SettingsRepository.isNjavSite) NjavNetwork.detailUrl(videoCode)
-    else HANIME_BASE_URL + "download?v=" + videoCode
+    when {
+        SettingsRepository.isNjavSite -> NjavNetwork.detailUrl(videoCode)
+        SettingsRepository.isHsexSite -> HsexNetwork.detailUrl(videoCode)
+        else -> HANIME_BASE_URL + "download?v=" + videoCode
+    }
 
 val videoUrlRegex = Regex(
     """(?:(?:https?:)?//[^\s"'<>/]+|hanime(?:1|one)\.(?:com|me))?(?:/[^/?#\s"'<>]+)*/watch\?(?:[^#\s"'<>]*&)?v=(\d+)"""

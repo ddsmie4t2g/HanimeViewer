@@ -104,19 +104,32 @@ object HanimeConstants {
     const val NJAV_HOSTNAME = "njavtv.com"
     const val NJAV_URL = "https://njavtv.com/"
 
-    /** 已知站点集合：hanime 各镜像 + nJAV。用于校准历史遗留的域名设置。 */
-    val ALL_HOSTNAMES = HANIME_HOSTNAME + NJAV_HOSTNAME
-    val ALL_URLS = HANIME_URL + NJAV_URL
+    /**
+     * 好色TV（hsex.tv）—— 第三个数据源，mod 26.5 新增。
+     *
+     * 中文站（国产 / 自拍 / 素人），同样是**独立数据源**：走自己的网络层与解析器
+     * （[io.github.daisukikaffuchino.han1meviewer.logic.hsex.HsexNetwork]）。
+     * 之所以在这里也留一项，理由与 [NJAV_HOSTNAME] 相同 ——
+     * 「数据源」与「域名」在 UI 上必须始终指向同一个站点。
+     */
+    const val HSEX_HOSTNAME = "hsex.tv"
+    const val HSEX_URL = "https://hsex.tv/"
+
+    /** 已知站点集合：hanime 各镜像 + nJAV + 好色TV。用于校准历史遗留的域名设置。 */
+    val ALL_HOSTNAMES = HANIME_HOSTNAME + NJAV_HOSTNAME + HSEX_HOSTNAME
+    val ALL_URLS = HANIME_URL + NJAV_URL + HSEX_URL
 
     /**
      * 站点的显示名 → 数据源。
      *
-     * njavtv.com 走独立数据源，其余 hanime 各镜像都归
+     * njavtv.com 与 hsex.tv 各走独立数据源，其余 hanime 各镜像都归
      * [io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource.Hanime1]。
      */
-    fun siteSourceOf(url: String): SiteSource =
-        if (url.contains(NJAV_HOSTNAME, ignoreCase = true)) SiteSource.Njav
-        else SiteSource.Hanime1
+    fun siteSourceOf(url: String): SiteSource = when {
+        url.contains(NJAV_HOSTNAME, ignoreCase = true) -> SiteSource.Njav
+        url.contains(HSEX_HOSTNAME, ignoreCase = true) -> SiteSource.Hsex
+        else -> SiteSource.Hanime1
+    }
 }
 
 val HANIME_LOGIN_URL: String

@@ -211,18 +211,14 @@ class MainActivity : BaseActivity() {
     }
 
     /**
-     * 抽屉头部「切换站点」：hanime 里番 ⇄ nJAV，两站循环。
+     * 抽屉头部「切换站点」：hanime 里番 → nJAV → 好色TV → 回到 hanime，三站循环。
      *
-     * mod 7.0 之前这里是个三态循环（hanime → javchu(AV) → nJAV），javchu 整站被移除后
-     * 就只剩两态了。三态时期最坑的是「切进 nJAV 就回不来」—— 旧实现只在 hanime 与
-     * javchu 之间二选一，而且只改 domainName、不写 siteSource，
-     * 于是切过去之后网络层仍按 hanime 分流。现在只有两个状态，判据直接看
-     * [SettingsRepository.isNjavSite]（数据源），不再靠比 URL 猜。
+     * ⚠️ **必须同时写 `siteSource` 与 `domainName`**：只改域名不写数据源，网络层
+     * 仍会按旧站点分流 —— 这正是 mod.5 里「点 nJAV 切不过去」的根因。
+     * 判据一律读 [SettingsRepository.siteSource]，不去比 URL 猜。
      */
     private fun confirmSiteSwitch() {
         showSiteSwitchConfirm = false
-        val njavSite = HanimeConstants.NJAV_URL
-        val onNjav = SettingsRepository.isNjavSite
         // 回 hanime 时用哪个镜像：优先用户之前记下的那个，但必须真的是 hanime 镜像
         // （selectedBaseUrl 有可能是历史遗留值，否则就回不到「里番」了）。
         val comebackSite = SettingsRepository.selectedBaseUrl
@@ -231,22 +227,31 @@ class MainActivity : BaseActivity() {
 
         lifecycleScope.launch {
             SettingsRepository.update {
-                if (onNjav) {
-                    // nJAV → 回到 hanime 里番
-                    it.copy(
-                        domainName = comebackSite,
-                        selectedBaseUrl = comebackSite,
-                        siteSource = SiteSource.Hanime1,
-                    )
-                } else {
+                when (SettingsRepository.siteSource) {
                     // hanime 里番（含自定义镜像）→ nJAV
-                    it.copy(
-                        domainName = njavSite,
+                    SiteSource.Hanime1 -> it.copy(
+                        domainName = HanimeConstants.NJAV_URL,
                         // 记下「来的时候在哪个 hanime 镜像」，方便切回去
                         selectedBaseUrl = comebackSite,
                         siteSource = SiteSource.Njav,
                         // 自定义镜像只指向某一个站点，跟不过去，切换站点时关掉。
                         useCustomMirrorSite = false,
+                    )
+
+                    // nJAV → 好色TV（两者都是 AV 数据源，域名必须跟着换）
+                    SiteSource.Njav -> it.copy(
+                        domainName = HanimeConstants.HSEX_URL,
+                        // 保留 selectedBaseUrl —— 它是「回 hanime 时用哪个镜像」的备忘，
+                        // 在 AV 数据源之间来回切不该把它冲掉。
+                        siteSource = SiteSource.Hsex,
+                        useCustomMirrorSite = false,
+                    )
+
+                    // 好色TV → 回到 hanime 里番
+                    SiteSource.Hsex -> it.copy(
+                        domainName = comebackSite,
+                        selectedBaseUrl = comebackSite,
+                        siteSource = SiteSource.Hanime1,
                     )
                 }
             }

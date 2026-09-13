@@ -7,20 +7,35 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.HomePage
  * 将首页原始数据转换为 UI 可直接展示的分类行数据。
  *
  * @param homePage 仓库层返回的首页原始数据。
+ * @param isAVSite 是否是非 hanime 的「AV 型」站点（nJAV / 好色TV）。
+ * @param isHsexSite 是否走好色TV（hsex.tv）—— 它虽同属 AV 型，但栏目名完全不同，
+ *   而且要单独覆盖，所以格外单开一个开关而不是塞进 [isAVSite]。
  * @return 当前站点类型下存在视频内容的分类行列表。
  */
-fun buildCategoryList(homePage: HomePage, isAVSite: Boolean): List<HomeCategory> {
+fun buildCategoryList(
+    homePage: HomePage,
+    isAVSite: Boolean,
+    isHsexSite: Boolean = false,
+): List<HomeCategory> {
     return listOfNotNull(
         HomeCategory(
             key = HOME_CATEGORY_LATEST_HANIME,
-            titleRes = if (isAVSite) R.string.latest_av else R.string.latest_hanime,
-            genre = if (isAVSite) "日本AV" else "裏番",
+            titleRes = when {
+                isHsexSite -> R.string.hsex_latest
+                isAVSite -> R.string.latest_av
+                else -> R.string.latest_hanime
+            },
+            genre = when {
+                isHsexSite -> "最新"
+                isAVSite -> "日本AV"
+                else -> "裏番"
+            },
             videos = homePage.ecchiAnime
         ),
         HomeCategory(
             key = HOME_CATEGORY_LATEST_RELEASE,
-            titleRes = R.string.latest_release,
-            sort = "最新上市",
+            titleRes = if (isHsexSite) R.string.hsex_ranking else R.string.latest_release,
+            sort = if (isHsexSite) "排行榜" else "最新上市",
             videos = homePage.latestRelease
         ),
         HomeCategory(
@@ -31,8 +46,8 @@ fun buildCategoryList(homePage: HomePage, isAVSite: Boolean): List<HomeCategory>
         ),
         HomeCategory(
             key = HOME_CATEGORY_WATCHING_NOW,
-            titleRes = R.string.they_watched,
-            sort = "他們在看",
+            titleRes = if (isHsexSite) R.string.hsex_weekly else R.string.they_watched,
+            sort = if (isHsexSite) "七日排行" else "他們在看",
             videos = homePage.watchingNow
         ),
         HomeCategory(
@@ -44,8 +59,16 @@ fun buildCategoryList(homePage: HomePage, isAVSite: Boolean): List<HomeCategory>
         ),
         HomeCategory(
             key = HOME_CATEGORY_MOTION_ANIME,
-            titleRes = if (isAVSite) R.string.hd_uncensored else R.string.category_motion_anime,
-            genre = if (isAVSite) "高清無碼" else "Motion Anime",
+            titleRes = when {
+                isHsexSite -> R.string.hsex_long
+                isAVSite -> R.string.hd_uncensored
+                else -> R.string.category_motion_anime
+            },
+            genre = when {
+                isHsexSite -> "長片"
+                isAVSite -> "高清無碼"
+                else -> "Motion Anime"
+            },
             sort = "最新上傳",
             videos = homePage.motionAnime
         ),
@@ -72,9 +95,17 @@ fun buildCategoryList(homePage: HomePage, isAVSite: Boolean): List<HomeCategory>
         ),
         HomeCategory(
             key = HOME_CATEGORY_AI_GENERATED,
-            titleRes = if (isAVSite) R.string.chinese_subtitle else R.string.ai_generated,
+            titleRes = when {
+                isHsexSite -> R.string.hsex_5min
+                isAVSite -> R.string.chinese_subtitle
+                else -> R.string.ai_generated
+            },
             genre = if (isAVSite) null else "AI生成",
-            tags = if (isAVSite) "中文字幕" else null,
+            tags = when {
+                isHsexSite -> "5分鐘"
+                isAVSite -> "中文字幕"
+                else -> null
+            },
             sort = "最新上傳",
             videos = homePage.aiGenerated
         ),

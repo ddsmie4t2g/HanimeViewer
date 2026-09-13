@@ -59,7 +59,7 @@ import io.github.daisukikaffuchino.han1meviewer.logic.exception.ParseException
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeVideo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SearchOption
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoLandscapeLayoutStyle
-import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavNetwork
+import io.github.daisukikaffuchino.han1meviewer.logic.PlaybackHeaders
 import io.github.daisukikaffuchino.han1meviewer.logic.state.VideoLoadingState
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
 import io.github.daisukikaffuchino.han1meviewer.ui.activity.MainActivity
@@ -144,14 +144,18 @@ fun VideoRouteHostScreen(
     val stringLongPressShare = remember(activity) {
         activity.getString(R.string.long_press_share_to_copy)
     }
-    // tag 搜索的候选分类：nJAV 用 AV 那套（genre_av.json），hanime 用里番那套。
-    // 判据 mod 7.0 起从「域名 == javchu」改成看数据源 —— javchu 已移除，nJAV 是唯一 AV 源。
-    val genres = remember(SettingsRepository.isNjavSite, SettingsRepository.baseUrl) {
+    // tag 搜索的候选分类：每个数据源一套 —— 好色TV 用它的固定栏目，
+    // nJAV 用 AV 那套（genre_av.json），hanime 用里番那套。
+    // 判据 mod 7.0 起从「域名 == javchu」改成看数据源。
+    val genres = remember(
+        SettingsRepository.siteSource,
+        SettingsRepository.baseUrl,
+    ) {
         loadAssetAs<List<SearchOption>>(
-            if (SettingsRepository.isNjavSite) {
-                "search_options/genre_av.json"
-            } else {
-                "search_options/genre.json"
+            when {
+                SettingsRepository.isHsexSite -> "search_options/genre_hsex.json"
+                SettingsRepository.isNjavSite -> "search_options/genre_av.json"
+                else -> "search_options/genre.json"
             }
         ).orEmpty()
     }
@@ -479,7 +483,7 @@ fun VideoRouteHostScreen(
                                 label = label,
                                 uri = link.link,
                                 // surrit.com 有防盗链，必须把 Referer 透传给 HLS 的分片请求。
-                                headers = NjavNetwork.playbackHeadersFor(link.link),
+                                headers = PlaybackHeaders.forUrl(link.link),
                                 mimeType = link.subtype?.let { "video/$it" },
                             )
                         }
@@ -696,7 +700,7 @@ fun VideoRouteHostScreen(
                         PlaybackQuality(
                             label,
                             link.link,
-                            headers = NjavNetwork.playbackHeadersFor(link.link),
+                            headers = PlaybackHeaders.forUrl(link.link),
                             mimeType = link.subtype?.let { "video/$it" },
                         )
                     }

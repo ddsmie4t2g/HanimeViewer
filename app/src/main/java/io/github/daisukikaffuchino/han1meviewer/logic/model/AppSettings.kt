@@ -94,14 +94,23 @@ enum class VideoLandscapeLayoutStyle(val value: String) {
  * 数据源：决定首页 / 搜索 / 播放页的数据从哪个站点来。
  *
  * - [Hanime1]：hanime1.me 及其镜像（里番），默认值，行为与旧版完全一致。
- * - [Njav]：nJAV（njavtv.com，日本 AV）。与 hanime 共用同一套 UI 与模型，
- *   只是在仓库层分流；账号相关功能（登录 / 我的清单 / 评论）仍然只支持 [Hanime1]。
+ * - [Njav]：nJAV（njavtv.com，日本 AV）。
+ * - [Hsex]：好色TV（hsex.tv，国产 / 自拍 / 素人，mod 26.5 新增）。
+ *
+ * 后两者与 hanime 共用同一套 UI 与模型，只是在仓库层分流；
+ * 账号相关功能（登录 / 我的清单 / 评论 / 订阅）**仍然只支持 [Hanime1]**。
  */
 enum class SiteSource(val value: String) {
     Hanime1("hanime1"),
-    Njav("njav");
+    Njav("njav"),
+    Hsex("hsex");
 
     val isNjav: Boolean get() = this == Njav
+
+    val isHsex: Boolean get() = this == Hsex
+
+    /** 非 hanime 的「AV 型」站点 —— 首页栏目名与筛选条件都要换成 AV 那套。 */
+    val isAvSite: Boolean get() = this != Hanime1
 
     companion object {
         fun fromValue(value: String?): SiteSource =

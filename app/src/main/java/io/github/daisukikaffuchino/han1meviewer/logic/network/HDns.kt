@@ -84,14 +84,29 @@ class HDns : Dns {
          * > 站点若换 IP，需要更新这张表。候选来源：`doh.pub` 的 `njavtv.com` A 记录。
          * > 已排除 `199.96.63.53`（阿里 DoH 返回，实测超时，是污染结果）。
          */
-        private val javIpsByHost: Map<String, List<String>> = mapOf(
+        private val builtInIpsByHost: Map<String, List<String>> = mapOf(
             "njavtv.com" to listOf("104.26.7.251", "104.26.6.251", "172.67.70.97"),
             // 视频源（surrit.com）：系统解析本来是对的（Cloudflare 真实 IP），内置一份是为了
             // 「哪天被投毒了也不至于能解析地址却播不了」。
             // ⚠️ 2026-09-12 复核：doh.pub 给的是 `104.18.53.139` + `104.18.49.25`，
             // 其中 `104.18.49.25` **已经连不上了**（connect 超时），所以只保留可用的那个；
-            // 万一它也失效，[lookupBuiltInJav] 的系统 DNS 尾巴会接手。
+            // 万一它也失效，[lookupBuiltInIps] 的系统 DNS 尾巴会接手。
             "surrit.com" to listOf("104.18.53.139"),
+
+            // ── 好色TV（hsex.tv，mod 26.5 新增的第三个数据源）────────────────────
+            // 实测 2026-09-13：系统 DNS 对这几个域名**同样返回投毒 IP**
+            // （`10.255.255.155`，一个真正的内网地址），所以必须无条件走内置表。
+            //
+            // 前两个是站点自身（Cloudflare，靠 SNI 路由，直接钉住即可）；
+            // 后面三个是**视频 CDN 的三条线路** —— 它们是裸 IP、不走 Cloudflare，
+            // 也就是说「能打开页面」和「能播放」在这里是两套解析，两边都得钉。
+            //
+            // > 站点若换 IP，需要更新这张表。候选来源：`doh.pub` 的 A 记录。
+            "hsex.tv" to listOf("104.21.29.101", "172.67.148.192"),
+            "i.hdcdn.online" to listOf("172.67.158.215", "104.21.41.11"),
+            "cdn.hdcdn.online" to listOf("23.237.196.138"),
+            "fdc.hdcdn.online" to listOf("23.237.196.140", "23.237.196.138"),
+            "shark.hdcdn.online" to listOf("64.32.8.146"),
         )
 
         /**
@@ -150,8 +165,8 @@ class HDns : Dns {
             }
         }
 
-        // nJAV 系：DNS 已被投毒，无条件走内置 IP（理由见 javIpsByHost 的注释）。
-        lookupBuiltInJav(hostname)?.let { return it }
+        // nJAV 系：DNS 已被投毒，无条件走内置 IP（理由见 builtInIpsByHost 的注释）。
+        lookupBuiltInIps(hostname)?.let { return it }
 
         if (SettingsRepository.useBuiltInHosts && HANIME_HOSTNAME.contains(hostname)) {
             val customIps = resolveCustomIps()
@@ -182,11 +197,11 @@ class HDns : Dns {
      *
      * ⚠️ **内置 IP 后面要接上系统 DNS 的结果**。内置表是「防投毒」用的，但它同时
      * 切断了「表过期时的退路」：OkHttp 只看本函数返回的地址，内置 IP 全连不上不会
-     * 自动改问系统 DNS。`surrit.com` 就已经出现过一半 IP 失效（见 [javIpsByHost]）。
+     * 自动改问系统 DNS。`surrit.com` 就已经出现过一半 IP 失效（见 [builtInIpsByHost]）。
      * 追加在尾部，正常路径仍然只走内置 IP，代价是「多绕一次」而不是「彻底不通」。
      */
-    private fun lookupBuiltInJav(hostname: String): List<InetAddress>? {
-        val ips = javIpsByHost[hostname.lowercase()] ?: return null
+    private fun lookupBuiltInIps(hostname: String): List<InetAddress>? {
+        val ips = builtInIpsByHost[hostname.lowercase()] ?: return null
         val pinned = ips.mapNotNull { ip ->
             runCatching {
                 InetAddress.getByAddress(hostname, InetAddress.getByName(ip).address)
@@ -254,7 +269,7 @@ class HDns : Dns {
         }
 
         // nJAV 系直接给内置 IP，别去问系统 DNS（只会拿到污染结果）
-        javIpsByHost[host.lowercase()]?.let { return it.distinct() }
+        builtInIpsByHost[host.lowercase()]?.let { return it.distinct() }
 
         if (SettingsRepository.useBuiltInHosts && HANIME_HOSTNAME.contains(host)) {
             val customIps = resolveCustomIps()

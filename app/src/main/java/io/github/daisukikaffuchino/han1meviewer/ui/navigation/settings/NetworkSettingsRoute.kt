@@ -510,10 +510,10 @@ fun NetworkSettingsRouteScreen(embedded: Boolean = false) {
                 // 保证切换结果肉眼可见。
                 pendingSiteSource = source
                 pendingSiteSourceSwitch = true
-                pendingDomainValue = if (source.isNjav) {
-                    HanimeConstants.NJAV_URL
-                } else {
-                    SettingsRepository.selectedBaseUrl
+                pendingDomainValue = when {
+                    source.isNjav -> HanimeConstants.NJAV_URL
+                    source.isHsex -> HanimeConstants.HSEX_URL
+                    else -> SettingsRepository.selectedBaseUrl
                         .takeIf { it.isNotBlank() && it in HanimeConstants.HANIME_URL }
                         ?: HanimeConstants.HANIME_URL[0]
                 }

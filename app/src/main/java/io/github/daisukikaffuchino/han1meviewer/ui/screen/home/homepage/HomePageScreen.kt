@@ -100,10 +100,10 @@ fun HomePageScreen(
     val contentTopPadding = with(density) {
         WindowInsets.statusBars.getTop(this).toDp() + 72.dp
     }
-    // nJAV 数据源下首页内容是日本 AV，分类标题也要跟着切成 AV 那一套。
-    // （mod 7.0 前这里还有个 `baseUrl == javchu` 的条件，javchu 整站已移除，
-    //   nJAV 是现在唯一的 AV 源。）
-    val isAVSite = SettingsRepository.isNjavSite
+    // 非 hanime 数据源下首页内容是 AV，分类标题也要跟着换成 AV 那一套；
+    // 好色TV 的栏目名与 nJAV 完全不同，所以再单开一个开关。
+    val isAVSite = SettingsRepository.isAvSite
+    val isHsexSite = SettingsRepository.isHsexSite
     LaunchedEffect(Unit) {
         viewModel.initializeHomePage()
     }
@@ -234,6 +234,7 @@ fun HomePageScreen(
                                     updateAnnouncement = updateAnnouncement,
                                     updateActionState = updateActionState,
                                     isAVSite = isAVSite,
+                                    isHsexSite = isHsexSite,
                                     onEvent = onEvent,
                                     onCloseAnnouncement = viewModel::dismissAnnouncements,
                                     contentTopPadding = contentTopPadding,

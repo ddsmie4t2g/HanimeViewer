@@ -166,6 +166,14 @@
     <string name="site_source_hanime">hanime1.me</string>
     <string name="site_source_njav">nJAV</string>
     <string name="site_source_njav_with_host">nJAV（njavtv.com）</string>
+    <string name="site_source_hsex_with_host">好色TV（hsex.tv）</string>
+    <!-- 好色TV 首页栏目名。下面的 hsex_* 只做**显示**，
+         真正的「检索标记」是中文字面量（见 HsexParser.MARKER_TO_PATH），两者别混。 -->
+    <string name="hsex_latest">最新</string>
+    <string name="hsex_ranking">排行榜</string>
+    <string name="hsex_weekly">七日排行</string>
+    <string name="hsex_long">长片</string>
+    <string name="hsex_5min">5 分钟</string>
     <string name="site_source_restart_confirm">切换数据源需要重启应用，确定继续吗？</string>
     <string name="custom_mirror_site">自定义镜像站</string>
     <string name="enable_custom_mirror_site">启用自定义镜像站</string>

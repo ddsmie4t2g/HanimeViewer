@@ -45,6 +45,7 @@ fun HomePageContent(
     onCloseAnnouncement: () -> Unit,
     contentTopPadding: Dp,
     modifier: Modifier = Modifier,
+    isHsexSite: Boolean = false,
     listState: LazyListState = rememberLazyListState()
 ) {
     val banners = remember(data.page.banner) {
@@ -54,8 +55,8 @@ fun HomePageContent(
         data.announcements.filter { it.isActive }
     }
 
-    val categories = remember(data.page, isAVSite) {
-        buildCategoryList(data.page, isAVSite)
+    val categories = remember(data.page, isAVSite, isHsexSite) {
+        buildCategoryList(data.page, isAVSite, isHsexSite)
     }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
