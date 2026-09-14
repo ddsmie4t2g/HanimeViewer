@@ -306,6 +306,11 @@ object NjavParser {
      * 只认「`<li>` 里既有 `<h4>`、又有指向 `/actresses/xxx` 的链接」的条目：
      * 导航菜单里同样有大量 `<li><a href="…">`，靠这两个条件就能滤干净。
      * `/actresses/ranking` 这类「不是具体某个人」的保留路径由 [ACTRESS_RESERVED] 挡掉。
+     *
+     * ⭐ **女优排行页 `/cn/actresses/ranking` 也用这一个函数**：实测它的卡片与一览页
+     * **完全同构**（同样的 `<li>` / `<h4>` / `fourhoi.com/actress/<id>-t.jpg`），
+     * 唯一区别是角标从「5669 条影片 / 2008 出道」换成 `第 N 名` —— 由 [ACTRESS_RANK] 认。
+     * 两个页面共用一份解析，站点改版时只需要修一处。
      */
     fun actressList(body: String): MutableList<NjavActress> {
         val doc = Jsoup.parse(body)
@@ -325,10 +330,25 @@ object NjavParser {
                         ?.replace(",", "")?.toIntOrNull(),
                     debutYear = ACTRESS_DEBUT_YEAR.find(text)?.groupValues?.get(1)?.toIntOrNull(),
                     path = path,
+                    // 排行页的角标 `第 1 名`；一览页没有这一块，解析出来就是 null。
+                    rank = ACTRESS_RANK.find(text)?.groupValues?.get(1)?.toIntOrNull(),
                 )
             )
         }
         return result.values.toMutableList()
+    }
+
+    /**
+     * 女优**排行页**的周期标题（H1 `女优排行 SEP 2026` 里的 `SEP 2026`）。
+     *
+     * 站点只给「当月」这一份排行（页面上没有周期切换链接，只有语言变体），
+     * 所以把标题里的月份抠出来当副标题，让用户知道这是哪个月的榜。
+     * 抠不到返回 null（界面就不画）。
+     */
+    fun actressRankingPeriod(body: String): String? {
+        val doc = Jsoup.parse(body)
+        val title = doc.selectFirst("h1")?.text()?.trim().orEmpty()
+        return ACTRESS_RANKING_PERIOD.find(title)?.groupValues?.get(1)?.trim()
     }
 
     /**
@@ -365,6 +385,17 @@ object NjavParser {
 
     /** 卡片上的「2008 出道」。 */
     private val ACTRESS_DEBUT_YEAR = Regex("""(\d{4})\s*出道""")
+
+    /**
+     * 排行页卡片上的 `第 1 名`。
+     *
+     * ⚠️ 一览页**没有**这个角标（那里是「5669 条影片 / 2008 出道」），所以这个正则
+     * 在一览页恒不匹配 —— 两个页面共用 [actressList]，靠的就是这一点。
+     */
+    private val ACTRESS_RANK = Regex("""第\s*(\d+)\s*名""")
+
+    /** 排行页 H1「女优排行 SEP 2026」→ `SEP 2026`。 */
+    private val ACTRESS_RANKING_PERIOD = Regex("""女优排行\s*(.+)""")
 
     //</editor-fold>
 

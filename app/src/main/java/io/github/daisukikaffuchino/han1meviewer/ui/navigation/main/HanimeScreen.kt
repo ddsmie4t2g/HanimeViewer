@@ -23,6 +23,16 @@ object MyPlaylistRoute : HanimeScreen
 @Serializable
 object SubscriptionRoute : HanimeScreen
 
+/**
+ * **女优一览 / 女优排行**（26.8.2）。
+ *
+ * 站点首页导航里「女优」那一组的两个页面，收在同一个屏幕的两个标签下
+ * （一览 `/cn/actresses`、排行 `/cn/actresses/ranking`）。只与 nJAV 有关，
+ * 抽屉里的入口也只在当前数据源是 nJAV 时才出现。
+ */
+@Serializable
+object ActressGalleryRoute : HanimeScreen
+
 @Serializable
 object DailyCheckInRoute : HanimeScreen
 

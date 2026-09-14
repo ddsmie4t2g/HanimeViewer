@@ -1,8 +1,6 @@
 package io.github.daisukikaffuchino.han1meviewer.ui.screen.search
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,7 +20,6 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -46,10 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -59,11 +53,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil3.compose.AsyncImage
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.NjavActress
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageLoadingState
+import io.github.daisukikaffuchino.han1meviewer.ui.component.ActressGridCard
 import io.github.daisukikaffuchino.han1meviewer.ui.component.IconButton
 import io.github.daisukikaffuchino.han1meviewer.ui.component.content.EmptyContent
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.rememberRandomLoadingHint
@@ -268,7 +262,7 @@ fun NjavActressPickerDialog(
                         verticalArrangement = Arrangement.spacedBy(SpacingNormal),
                     ) {
                         items(filtered, key = { it.path }) { actress ->
-                            ActressCard(
+                            ActressGridCard(
                                 actress = actress,
                                 selected = actress.path == selectedPath,
                                 onClick = { onSelect(actress) },
@@ -350,69 +344,4 @@ private fun LoadMoreFooter(isLoading: Boolean, onLoadMore: () -> Unit) {
             }
         }
     }
-}
-
-@Composable
-private fun ActressCard(
-    actress: NjavActress,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(
-                if (selected) {
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                } else {
-                    Color.Transparent
-                }
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp, horizontal = 4.dp),
-    ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-            modifier = Modifier.size(68.dp),
-        ) {
-            AsyncImage(
-                model = actress.avatarUrl,
-                contentDescription = actress.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Text(
-            text = actress.name,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-        actressSubtitle(actress)?.let { subtitle ->
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
-        }
-    }
-}
-
-/** 「5668 部影片 · 2008 出道」；两个字段都可能解析不出来。 */
-@Composable
-private fun actressSubtitle(actress: NjavActress): String? {
-    val parts = listOfNotNull(
-        actress.videoCount?.let { stringResource(R.string.actress_video_count, it) },
-        actress.debutYear?.let { stringResource(R.string.actress_debut_year, it) },
-    )
-    return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }

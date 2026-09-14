@@ -7,6 +7,8 @@ import io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistProfile
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
+import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
+import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavActressCache
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageLoadingState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -117,29 +119,51 @@ class ArtistViewModel : ViewModel() {
     }
 
     /**
-     * nJAV 的头像补齐（26.8）。
+     * nJAV 的头像补齐（26.8 新增，26.8.2 提速）。
      *
      * 视频详情页只给女优名字、女优页顶部也是首字占位符 ⇒ 从 nJAV 关注过来的作者**天生没有头像**，
      * 关注列表里就是一排空白。这里按名字去**女优索引**里找一次（最多 3 页），
      * 找到就补进页面头部，并且 —— 如果这个人已在关注表里 —— **顺手写回关注表**，
      * 让「关注列表」也有头像（一次补齐，之后不必再找）。
+     *
+     * ⭐ 26.8.2 的顺序刻意是「**同步查本地缓存 → 不行才联网**」：
+     * 缓存是同步的（读内存里的那份设置），命中时头像和资料头**同帧**就画出来了，
+     * 不会出现「先占位符、过一秒才变头像」的闪动。用户报的正是这一点。
      */
     private fun resolveMissingAvatarIfNeeded() {
         val artist = _state.value.artist
-        if (artist.siteSource != io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource.Njav) return
+        if (artist.siteSource != SiteSource.Njav) return
         if (artist.avatar.isNotBlank() || artist.name.isBlank()) return
+
+        // 1) 本地缓存：浏览过女优一览 / 排行之后必中，0 网络、0 延迟。
+        NjavActressCache.find(artist.name)?.let { cached ->
+            applyResolvedAvatar(cached.avatarUrl, cached.videoCount)
+            return
+        }
+
+        // 2) 未命中才联网（内部并行翻页 + 回填缓存，见 NetworkRepo.findNjavActress）。
         viewModelScope.launch {
             val found = runCatching { NetworkRepo.findNjavActress(artist.name) }.getOrNull() ?: return@launch
-            val avatar = found.avatarUrl.trim()
-            if (avatar.isEmpty()) return@launch
-            val enriched = _state.value.artist.copy(
-                avatar = avatar,
-                videoCount = _state.value.artist.videoCount.ifBlank {
-                    found.videoCount?.let { "$it 部影片" }.orEmpty()
-                },
-            )
-            _state.value = _state.value.copy(artist = enriched)
-            // 已在关注表里 → 写回，让关注列表也拿到头像。
+            applyResolvedAvatar(found.avatarUrl, found.videoCount)
+        }
+    }
+
+    /** 把查到的头像 / 作品数贴进页面头部，并在已关注时写回关注表。 */
+    private fun applyResolvedAvatar(avatarUrl: String, videoCount: Int?) {
+        val avatar = avatarUrl.trim()
+        if (avatar.isEmpty()) return
+        val current = _state.value.artist
+        if (current.avatar == avatar) return
+        val enriched = current.copy(
+            avatar = avatar,
+            videoCount = current.videoCount.ifBlank {
+                videoCount?.let { "$it 部影片" }.orEmpty()
+            },
+        )
+        _state.value = _state.value.copy(artist = enriched)
+        // 已在关注表里 → 写回，让关注列表也拿到头像。
+        // ⚠️ 写回是挂起操作（要落盘），所以必须回到协程里；界面上的头像**不等它**。
+        viewModelScope.launch {
             runCatching {
                 if (FollowedArtistStore.isFollowed(enriched.followKey)) {
                     FollowedArtistStore.toggle(enriched)   // 已关注 → 先删

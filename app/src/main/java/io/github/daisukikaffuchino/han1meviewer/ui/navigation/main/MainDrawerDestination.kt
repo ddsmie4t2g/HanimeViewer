@@ -66,6 +66,17 @@ enum class MainDrawerDestination(
         // 只叫「我的订阅」会让人以为关注的东西不在这儿 —— 用户报的正是这一点。
         titleRes = R.string.follow_and_subscribe,
     ),
+    /**
+     * **女优一览 / 女优排行**（26.8.2）—— 站点首页导航里「女优」那一组的两个页面。
+     *
+     * ⚠️ 只对 **nJAV** 有意义（数据源是 nJAV 的公开页面）。所以它是抽屉里唯一
+     * **按当前站点显示 / 隐藏**的条目 —— 见 `MainActivityScaffold.showActressGallery`。
+     */
+    ActressGallery(
+        route = ActressGalleryRoute,
+        iconRes = R.drawable.ic_move_group,
+        titleRes = R.string.actress,
+    ),
     WatchHistory(
         route = WatchHistoryRoute,
         iconRes = R.drawable.ic_history,

@@ -20,12 +20,14 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.HomePage
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ModifiedPlaylistArgs
 import io.github.daisukikaffuchino.han1meviewer.logic.model.MyListType
 import io.github.daisukikaffuchino.han1meviewer.logic.model.NjavActress
+import io.github.daisukikaffuchino.han1meviewer.logic.model.NjavActressRanking
 import io.github.daisukikaffuchino.han1meviewer.logic.model.OnlineWatchHistorySort
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoCommentArgs
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoComments
 import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhNetwork
 import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhParser
+import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavActressCache
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavNetwork
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavParser
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HanimeNetwork
@@ -714,19 +716,69 @@ object NetworkRepo {
      * 在已加载的条目上做。索引默认按作品数从多到少排，**叫得出名字的女优都在前几页**，
      * 所以「先加载几页 + 本地过滤」实际够用。
      */
-    fun getNjavActressIndex(page: Int): Flow<PageLoadingState<MutableList<NjavActress>>> = flow {
-        val url = NjavNetwork.actressIndexUrl(page)
+    /**
+     * ⭐ **女优一览**（`/cn/actresses`）的第 [page] 页。
+     *
+     * 每页 **24 人**、默认按作品数倒序；站点**没有名字检索**（`?q=` 被忽略），
+     * 所以名字过滤只能由 UI 在已加载的条目上做。
+     *
+     * ⭐ 26.8.2 起**顺手把整页写进 [NjavActressCache]** —— 一次请求就是 24 个头像，
+     * 这是「关注列表里女优没有头像」这件事最划算的一次性解法（见 [findNjavActress]）。
+     *
+     * @param sort `videos`（影片，默认）/ `debut`（出道）；null = 站点默认
+     */
+    fun getNjavActressIndex(
+        page: Int,
+        sort: String? = null,
+    ): Flow<PageLoadingState<MutableList<NjavActress>>> = flow {
+        val url = NjavNetwork.actressIndexUrl(page, sort)
         val response = NjavNetwork.service.get(url)
         if (!response.isSuccessful) {
             throw ParseException("nJAV: HTTP ${response.code()} - $url")
         }
         val body = response.body()?.string().orEmpty()
         val list = NjavParser.actressList(body)
+        if (list.isNotEmpty()) NjavActressCache.rememberAll(list)
         emit(
             if (list.isEmpty() && !NjavParser.hasNextPage(body)) {
                 PageLoadingState.NoMoreData
             } else {
                 PageLoadingState.Success(list)
+            }
+        )
+    }.catch { e ->
+        emit(PageLoadingState.Error(handleNjavException(e)))
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * ⭐ **女优排行**（`/cn/actresses/ranking`）—— 26.8.2 新增。
+     *
+     * 站点给的是**当月**榜：固定 100 条、没有 `?page=`，卡片结构与
+     * [getNjavActressIndex] 完全同构（解析共用 [NjavParser.actressList]），
+     * 多出来的东西只有两样：H1 里的周期文案，以及每张卡片的 `第 N 名` 角标。
+     *
+     * 同样顺手写进 [NjavActressCache]（一次请求 100 位，其中 96 位带头像 ——
+    站点对少数新女优只给首字占位符）。
+     */
+    fun getNjavActressRanking(): Flow<PageLoadingState<NjavActressRanking>> = flow {
+        val url = NjavNetwork.actressRankingUrl()
+        val response = NjavNetwork.service.get(url)
+        if (!response.isSuccessful) {
+            throw ParseException("nJAV: HTTP ${response.code()} - $url")
+        }
+        val body = response.body()?.string().orEmpty()
+        val list = NjavParser.actressList(body)
+        if (list.isNotEmpty()) NjavActressCache.rememberAll(list)
+        emit(
+            if (list.isEmpty()) {
+                PageLoadingState.NoMoreData
+            } else {
+                PageLoadingState.Success(
+                    NjavActressRanking(
+                        period = NjavParser.actressRankingPeriod(body).orEmpty(),
+                        actresses = list,
+                    )
+                )
             }
         )
     }.catch { e ->
@@ -907,30 +959,83 @@ object NetworkRepo {
     }
 
     /**
-     * 按名字在 nJAV 的**女优索引**里找一位女优（26.8）。
+     * ⭐ **预热女优索引缓存**（26.8.2）：抓前 [pages] 页，把里面的女优**整页**写进
+     * [NjavActressCache]，返回新增 / 更新的条数。
+     *
+     * ## 为什么要有这个「不为了找某个人」的接口
+     *
+     * 「关注列表里一堆 nJAV 女优没有头像」这件事，逐个按名字去索引页翻代价太大
+     * （每人 1 页，还只能翻前 3 页）。而索引页**一页就是 24 个人**、
+     * 排行页更是一页 100 个 —— 所以正解是「抓一页 → 一次补一批人」。
+     *
+     * 调用方是订阅页（`SubscriptionScreen`）：进页面发现 nJAV 关注者缺头像时才跑一次，
+     * 跑完用 [NjavActressCache.avatarOf] 回填关注表。
+     *
+     * 全程容错：任何一页失败都不抛，返回实际拿到的条数（0 表示什么都没拿到）。
+     */
+    suspend fun warmUpNjavActressCache(pages: Int = 1): Int {
+        if (pages <= 0) return 0
+        var total = 0
+        for (page in 1..pages) {
+            val list = runCatching {
+                val response = NjavNetwork.service.get(NjavNetwork.actressIndexUrl(page))
+                if (!response.isSuccessful) return@runCatching emptyList<NjavActress>()
+                NjavParser.actressList(response.body()?.string().orEmpty())
+            }.getOrDefault(emptyList())
+            if (list.isEmpty()) break
+            total += NjavActressCache.rememberAll(list)
+        }
+        return total
+    }
+
+    /**
+     * 按名字在 nJAV 的**女优索引**里找一位女优（26.8 新增，26.8.2 改成「缓存优先 + 并行翻页」）。
      *
      * 为什么需要它：nJAV 的视频详情页只有女优的名字与链接，**没有头像**（女优页顶部那个
      * 圆圈也是首字占位符，不是图片）—— 真头像只在索引页的
      * `fourhoi.com/actress/<id>-t.jpg` 里。所以「关注了某个女优之后关注列表没有头像」
      * 这件事，只能回索引页按名字把她找出来。
      *
-     * 代价与边界：索引页每页 52 位、按作品数倒序，**没有名字检索**（`?q=` 被忽略），
-     * 所以这里最多翻 [maxPages] 页（默认 3 页 ≈ 156 位，叫得出名字的都在前面）。
+     * ## ⭐ 26.8.2 的两处提速（用户报的「头像不能很快显示出来」）
+     *
+     * 1. **先查 [NjavActressCache]（0 网络）**。浏览过一次女优一览 / 排行，
+     *    或者此前补过任何一个人的头像，这里就必中；命中时连内存都不用出。
+     * 2. 未命中才翻页，而且**并行翻** [maxPages] 页。之前的串行版本在
+     *    「第 3 页才找到」时要连着等 3 次往返，并行只要 1 次的时间。
+     *
+     * 无论找没找到都会把翻到的整页写进缓存 —— 一次请求带回来的是 24 个人，
+     * 只为了找 1 个而丢掉另外 51 个太亏了（这就是「关注列表头像一次性补齐」的来源）。
+     *
+     * 代价与边界：索引页每页 24 位、按作品数倒序，**没有名字检索**（`?q=` 被忽略），
+     * 所以未命中时最多翻 [maxPages] 页（默认 3 页 = 72 位，叫得出名字的都在前面）。
      * 找不到就返回 null —— 界面显示占位符，不做无上限的翻页。
      */
     suspend fun findNjavActress(name: String, maxPages: Int = 3): NjavActress? {
         val target = name.trim()
         if (target.isEmpty()) return null
-        for (page in 1..maxPages) {
-            val result = runCatching {
-                val response = NjavNetwork.service.get(NjavNetwork.actressIndexUrl(page))
-                if (!response.isSuccessful) return@runCatching emptyList()
-                NjavParser.actressList(response.body()?.string().orEmpty())
-            }.getOrDefault(emptyList())
-            result.firstOrNull { it.name.equals(target, ignoreCase = true) }?.let { return it }
-            if (result.isEmpty()) break
+
+        // 1) 本地缓存：这是绝大多数调用的终点（浏览过一览/排行之后必中）。
+        NjavActressCache.find(target)?.let { return it }
+
+        // 2) 并行翻页。`runCatching` 保证「某一页挂了」不会把拼页整个炸掉 ——
+        //    一页失败时仍然可以用其它页的结果。
+        val pages = coroutineScope {
+            (1..maxPages).map { page ->
+                async {
+                    runCatching {
+                        val response = NjavNetwork.service.get(NjavNetwork.actressIndexUrl(page))
+                        if (!response.isSuccessful) return@runCatching emptyList<NjavActress>()
+                        NjavParser.actressList(response.body()?.string().orEmpty())
+                    }.getOrDefault(emptyList())
+                }
+            }.awaitAll()
         }
-        return null
+
+        // 3) 回填缓存（整页都留），再按页码顺序找目标。
+        NjavActressCache.rememberAll(pages.flatten())
+        return pages.firstNotNullOfOrNull { list ->
+            list.firstOrNull { NjavActressCache.matches(it.name, target) }
+        }
     }
 
     /**

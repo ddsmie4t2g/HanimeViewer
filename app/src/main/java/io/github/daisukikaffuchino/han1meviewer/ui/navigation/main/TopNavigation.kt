@@ -193,6 +193,14 @@ fun TopNavigation(
                 onNavigateToVideo = onNavigateToVideo,
             )
         }
+        entry<ActressGalleryRoute>(metadata = pageTransition()) {
+            ActressGalleryRouteScreen(
+                navigateBack = onBack,
+                onNavigateToArtist = { artist ->
+                    backStack.add(ArtistRoute(ArtistRef.encode(artist)))
+                },
+            )
+        }
         entry<DailyCheckInRoute> {
             DailyCheckInRouteScreen(
                 activity = activity,

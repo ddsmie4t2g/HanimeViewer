@@ -1,5 +1,7 @@
 package io.github.daisukikaffuchino.han1meviewer.logic.njav
 
+import io.github.daisukikaffuchino.han1meviewer.logic.model.NjavActress
+import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -204,4 +206,204 @@ class NjavParserActressTest {
     fun ignoresLinksThatAreNotActressPages() {
         assertNull(NjavParser.actressList("<ul>$navItem$rankingItem</ul>").firstOrNull())
     }
+
+    // ---------- 女优排行（26.8.2） ----------
+
+    /**
+     * 排行页（`/cn/actresses/ranking`）的卡片。
+     *
+     * 夹具取自 2026-09-14 线上抓的 `_probe_ranking.html` **第一张卡**，一字未改结构。
+     * 与一览页唯一的区别：`<p>5669 条影片</p>` 那两行换成了 `第 1 名` 的角标。
+     */
+    private val cardRankOne = """
+        <li>
+            <div class="space-y-4">
+                <a href="https://njavtv.com/dm20/cn/actresses/%E7%80%AC%E6%88%B8%E7%92%B0%E5%A5%88" class="text-nord13">
+                    <div class="overflow-hidden mx-auto h-20 w-20 rounded-full lg:w-24 lg:h-24">
+                        <img src="https://fourhoi.com/actress/1099472-t.jpg" alt="瀬户环奈" class="object-cover object-top w-full h-full">
+                    </div>
+                </a>
+                <div class="space-y-2">
+                    <a href="https://njavtv.com/dm20/cn/actresses/%E7%80%AC%E6%88%B8%E7%92%B0%E5%A5%88" class="text-nord13">
+                        <h4 class="text-nord13 truncate">瀬户环奈</h4>
+                        <span class="mt-1 text-white bg-yellow-600 inline-flex items-center px-2.5 py-0.5 rounded-md text-sm font-medium">
+                            第 1 名
+                        </span>
+                    </a>
+                </div>
+            </div>
+        </li>
+    """.trimIndent()
+
+    /** 第二张卡：名次是两位数、且角标里带空格（`第 12 名`），正则必须允许空格。 */
+    private val cardRankTwelve = """
+        <li>
+            <div class="space-y-4">
+                <a href="https://njavtv.com/dm99/cn/actresses/JULIA" class="text-nord13">
+                    <div class="overflow-hidden mx-auto h-20 w-20 rounded-full lg:w-24 lg:h-24">
+                        <img src="https://fourhoi.com/actress/152-t.jpg" alt="JULIA" class="object-cover object-top w-full h-full">
+                    </div>
+                </a>
+                <div class="space-y-2">
+                    <a href="https://njavtv.com/dm99/cn/actresses/JULIA" class="text-nord13">
+                        <h4 class="text-nord13 truncate">JULIA</h4>
+                        <span class="mt-1">第 12 名</span>
+                    </a>
+                </div>
+            </div>
+        </li>
+    """.trimIndent()
+
+    private val rankingPage = """
+        <html><body>
+        <h1 class="text-center text-2xl text-nord4 font-light mb-6">
+            女优排行 SEP 2026
+        </h1>
+        <ul class="mx-auto grid grid-cols-2 gap-4">$cardRankOne$cardRankTwelve</ul>
+        </body></html>
+    """.trimIndent()
+
+    /**
+     * ⭐ 排行与一览**共用** [NjavParser.actressList]：两页的卡片结构完全同构，
+     * 差别只有那行小字。这条测试钉住「排行页也能被同一个解析器吃下」。
+     */
+    @Test
+    fun parsesActressRankingWithSameParserAsIndex() {
+        val actresses = NjavParser.actressList(rankingPage)
+
+        assertEquals(listOf("瀬户环奈", "JULIA"), actresses.map { it.name })
+        assertEquals(1, actresses[0].rank)
+        assertEquals(12, actresses[1].rank)
+        assertEquals("https://fourhoi.com/actress/1099472-t.jpg", actresses[0].avatarUrl)
+        assertEquals(
+            "actresses/%E7%80%AC%E6%88%B8%E7%92%B0%E5%A5%88",
+            actresses[0].path,
+        )
+        // 排行页没有「作品数 / 出道年」，必须是 null 而不是 0 —— 否则界面会画「0 部影片」。
+        assertNull(actresses[0].videoCount)
+        assertNull(actresses[0].debutYear)
+    }
+
+    /**
+     * 一览页**不能**解析出名次。
+     *
+     * 一览页的卡片里没有 `第 N 名` 角标，但它的正文里有一堆别的数字 ——
+     * 如果 [NjavParser.actressList] 把名次放松成「任意数字」，这里就会红。
+     */
+    @Test
+    fun indexPageHasNoRank() {
+        val actresses = NjavParser.actressList(indexPage)
+
+        assertTrue(actresses.isNotEmpty())
+        assertTrue(actresses.all { it.rank == null })
+    }
+
+    /** 周期标题：`女优排行 SEP 2026` → `SEP 2026`。站点只给当月一份榜。 */
+    @Test
+    fun parsesRankingPeriod() {
+        assertEquals("SEP 2026", NjavParser.actressRankingPeriod(rankingPage))
+        assertNull(NjavParser.actressRankingPeriod(indexPage))
+    }
+
+    /**
+     * ⚠️ **排行页里有几位女优站点只画首字占位符**（实测 100 位里 4 位）：
+     *
+     * ```html
+     * <div class="bg-nord9 text-4xl ... rounded-full">
+     *   <div class="flex ...">乙</div>
+     * </div>
+     * ```
+     *
+     * 也就是**根本没有 `<img>`**。这条测试守住两点：
+     * 1. 头像解析成**空串**，不是 `""` 之外的任何垃圾值（比如把占位符那个字当成地址）；
+     * 2. 名次照样要解析出来 —— 名次来自 `<span>第 13 名</span>`，与有没有头像无关。
+     *
+     * 夹具取自线上 `_probe_ranking.html` 的第 13 名（乙爱丽丝）。
+     */
+    @Test
+    fun rankingCardWithoutImageYieldsEmptyAvatar() {
+        val card = """
+            <li>
+                <div class="space-y-4">
+                    <a href="https://njavtv.com/dm303/cn/actresses/%E4%B9%99%E3%82%A2%E3%83%AA%E3%82%B9" class="text-nord13">
+                        <div class="bg-nord9 text-4xl text-nord4 mx-auto h-20 w-20 rounded-full lg:w-24 lg:h-24">
+                            <div class="flex flex-col justify-center content-center h-full text-center">乙</div>
+                        </div>
+                    </a>
+                    <div class="space-y-2">
+                        <a href="https://njavtv.com/dm303/cn/actresses/%E4%B9%99%E3%82%A2%E3%83%AA%E3%82%B9" class="text-nord13">
+                            <h4 class="text-nord13 truncate">乙爱丽丝</h4>
+                            <span class="text-nord10 inline-flex items-center px-2.5 py-0.5 rounded-md text-sm font-medium">
+                                第 13 名
+                            </span>
+                        </a>
+                    </div>
+                </div>
+            </li>
+        """.trimIndent()
+
+        val actresses = NjavParser.actressList("<ul>$card</ul>")
+
+        assertEquals(1, actresses.size)
+        assertEquals("乙爱丽丝", actresses[0].name)
+        assertEquals("", actresses[0].avatarUrl)
+        assertEquals(13, actresses[0].rank)
+    }
+
+    @Test
+    fun resolvesRankingUrl() {
+        assertEquals("https://njavtv.com/cn/actresses/ranking", NjavNetwork.actressRankingUrl())
+        // 一览页的排序是站点自己的 `?sort=`（`videos` / `debut`），与详情页那套不是一回事。
+        assertEquals(
+            "https://njavtv.com/cn/actresses?sort=debut",
+            NjavNetwork.actressIndexUrl(1, NjavNetwork.ACTRESS_SORT_DEBUT),
+        )
+        assertEquals(
+            "https://njavtv.com/cn/actresses?page=2&sort=videos",
+            NjavNetwork.actressIndexUrl(2, NjavNetwork.ACTRESS_SORT_VIDEOS),
+        )
+        // 不传排序就是不传，别硬塞一个默认值上去（站点默认是「影片」）。
+        assertEquals("https://njavtv.com/cn/actresses", NjavNetwork.actressIndexUrl(1, null))
+    }
+
+    // ---------- 女优缓存（26.8.2） ----------
+
+    /**
+     * 缓存按键去空白 + 大小写归一。
+     *
+     * 这条守的是「同一个人两种写法」：视频详情页给的名字可能带空格（`JULIA `），
+     * 而索引页给的是紧挨着的 —— 归一之后必须认成同一个人。
+     */
+    @Test
+    fun cacheMatchesNamesIgnoringCaseAndSpaces() {
+        assertTrue(NjavActressCache.matches("波多野结衣", " 波多野结衣 "))
+        assertTrue(NjavActressCache.matches("JULIA", "julia"))
+        assertTrue(!NjavActressCache.matches("JULIA", "JULIA2"))
+    }
+
+    /**
+     * 存进去 → 取出来。
+     *
+     * ⚠️ 单测里 `SettingsRepository` 没装过 store，所以**落盘那一步会被静默跳过**
+     * （见 [NjavActressCache] 的 `runCatching`）；这里验的是进程内的那份。
+     * 顺带守住「空头像不进缓存」——存了等于存了个 miss，会让 `find` 白跑一趟。
+     */
+    @Test
+    fun cachesActressWithAvatarOnly() = runBlocking {
+        val portrait = NjavActress(
+            name = "缓存用测试女优",
+            avatarUrl = "https://fourhoi.com/actress/999999-t.jpg",
+            videoCount = 12,
+            debutYear = 2011,
+            path = "actresses/%E7%BC%93%E5%AD%98",
+            rank = null,
+        )
+        NjavActressCache.rememberAll(listOf(portrait, portrait.copy(name = "无头像的人", avatarUrl = "")))
+
+        assertEquals("https://fourhoi.com/actress/999999-t.jpg", NjavActressCache.avatarOf(" 缓存用测试女优 "))
+        assertEquals(12, NjavActressCache.find("缓存用测试女优")?.videoCount)
+        assertTrue(NjavActressCache.find("无头像的人") == null)
+        assertTrue(NjavActressCache.avatarOf("从来没存过的人").isEmpty())
+    }
+
 }

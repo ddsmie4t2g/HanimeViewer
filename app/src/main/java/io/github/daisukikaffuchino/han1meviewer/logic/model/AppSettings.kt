@@ -199,6 +199,17 @@ data class AppSettings(
      */
     val followedArtistsJson: String = "",
     /**
+     * **nJAV 女优索引的本地缓存**（JSON，见 `logic/njav/NjavActressCache`）。
+     *
+     * 26.8.2 新增。nJAV 的头像只存在于女优一览 / 排行页的卡片里，而索引页没有
+     * 名字检索 ⇒ 每次要头像都得去翻索引页（1~3 个 180 KB 的页面请求）。
+     * 这里把「已经翻到过的女优」按名字存下来，之后取头像就是一次本地查询。
+     *
+     * ⚠️ 与 [followedArtistsJson] **刻意分开**：关注表是用户数据（要同步到自建账号），
+     * 这份只是**缓存**（丢了重新抓，换个账号也不该带过去）。
+     */
+    val njavActressCacheJson: String = "",
+    /**
      * **自建账号**的本地状态（JSON）：`{token, username, revision, lastSyncAt}`。
      *
      * 26.7.0 新增。与 hanime 的登录**完全无关** —— 那是站点账号（cookie），这是

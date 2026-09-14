@@ -40,4 +40,25 @@ data class NjavActress(
     val debutYear: Int?,
     /** 形如 `actresses/%E6%B3%A2%E5%A4%9A%E9%87%8E%E7%B5%90%E8%A1%A3`。 */
     val path: String,
+    /**
+     * 名次（**女优排行页** `第 N 名` 角标里的 N）。
+     *
+     * 一览页没有名次（那里给的是「5668 条影片 / 2008 出道」），所以这个字段
+     * 在一览页恒为 null —— 两个页面的卡片结构同构，只有这处角标不一样。
+     */
+    val rank: Int? = null,
 )
+
+/**
+ * **女优排行**页（`/cn/actresses/ranking`）的一整页。
+ *
+ * 站点只给「当月」一份榜：固定 100 条、没有 `?page=`，H1 形如 `女优排行 SEP 2026`。
+ * 所以这个模型没有「有没有下一页」的概念 —— 拉到就是全部。
+ *
+ * @param period H1 里那个周期文案（`SEP 2026`）；抠不到时为空串，界面就不画。
+ */
+data class NjavActressRanking(
+    val period: String = "",
+    val actresses: List<NjavActress> = emptyList(),
+)
+

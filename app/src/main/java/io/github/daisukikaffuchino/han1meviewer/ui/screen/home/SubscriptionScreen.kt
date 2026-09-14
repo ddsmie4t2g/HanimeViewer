@@ -29,11 +29,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
+import io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.account.AccountRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionVideosItem
+import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavActressCache
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
 import io.github.daisukikaffuchino.han1meviewer.ui.component.ChoiceDialog
 import io.github.daisukikaffuchino.han1meviewer.ui.component.IconButton
@@ -117,6 +119,28 @@ fun SubscriptionScreen(
         if (!isLoggedIn && AccountRepository.isLoggedIn && AccountRepository.isSyncStale()) {
             AccountRepository.sync()
         }
+    }
+
+    /**
+     * ⭐ 26.8.2：**把 nJAV 关注者缺的头像补上**。
+     *
+     * nJAV 的**视频详情页给不出女优头像**（真头像只在女优一览 / 排行页的卡片里），
+     * 所以从详情页关注过来的人在关注列表里是一排空白 —— 用户报的正是这一点。
+     *
+     * 做法刻意是「**一次请求补一批人**」：索引页一页 24 个人，抓一页就够覆盖绝大多数
+     * 关注者，比「按名字一个个去翻」便宜一两个数量级。抓到之后写回关注表，
+     * 关注表一变（`settings.followedArtistsJson`）上面的 `localFollowed` 就会重算，
+     * 头像自然出现 —— 不需要额外的界面状态。
+     *
+     * 只做一次、且只在**真的缺头像**时才发请求：进页面就无条件拉一页太浪费。
+     */
+    var avatarBackfillDone by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (avatarBackfillDone) return@LaunchedEffect
+        avatarBackfillDone = true
+        if (FollowedArtistStore.countMissingNjavAvatars() == 0) return@LaunchedEffect
+        NetworkRepo.warmUpNjavActressCache(pages = 1)
+        FollowedArtistStore.fillMissingAvatars { name -> NjavActressCache.avatarOf(name) }
     }
 
     LaunchedEffect(state, isLoggedIn) {

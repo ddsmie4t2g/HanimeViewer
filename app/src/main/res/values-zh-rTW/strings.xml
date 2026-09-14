@@ -1037,6 +1037,15 @@
     <string name="actress_list_failed">女優列表載入失敗</string>
     <string name="actress_video_count">%1$d 部影片</string>
     <string name="actress_debut_year">%1$d 出道</string>
+    <string name="browse_section">瀏覽</string>
+    <string name="actress_gallery_title">女優一覽</string>
+    <string name="actress_tab_index">一覽</string>
+    <string name="actress_tab_ranking">排行</string>
+    <string name="actress_rank_badge">第 %1$d 名</string>
+    <string name="actress_ranking_period">%1$s 榜</string>
+    <string name="actress_sort_label">排序</string>
+    <string name="actress_sort_videos">影片</string>
+    <string name="actress_sort_debut">出道</string>
     <!-- 一鍵網路自癒：測鏡像與中轉、自動落到最快、複測確認 -->
     <string name="self_heal">一鍵網路自癒</string>
     <string name="self_heal_summary">替鏡像站與中轉節點測速，自動切到最快的那條，再複測確認</string>

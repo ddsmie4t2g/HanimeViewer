@@ -1068,6 +1068,15 @@ Recommendations are as follows:\n
     <string name="actress_list_failed">Failed to load the actress list</string>
     <string name="actress_video_count">%1$d videos</string>
     <string name="actress_debut_year">Debuted %1$d</string>
+    <string name="browse_section">Browse</string>
+    <string name="actress_gallery_title">Actress gallery</string>
+    <string name="actress_tab_index">Gallery</string>
+    <string name="actress_tab_ranking">Ranking</string>
+    <string name="actress_rank_badge">No.%1$d</string>
+    <string name="actress_ranking_period">Ranking of %1$s</string>
+    <string name="actress_sort_label">Sort</string>
+    <string name="actress_sort_videos">Videos</string>
+    <string name="actress_sort_debut">Debut</string>
     <!-- One-tap network self-heal: probes mirrors + relay nodes, applies the fastest, then verifies -->
     <string name="self_heal">One-tap network self-heal</string>
     <string name="self_heal_summary">Test mirror sites and relay nodes, switch to the fastest ones automatically, then verify</string>

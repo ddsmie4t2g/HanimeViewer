@@ -227,6 +227,18 @@ object SettingsRepository : SettingsStore {
     suspend fun setRelayNodesJson(value: String) = update { it.copy(relayNodesJson = value) }
     /** 本地关注列表（JSON）。只有 Pornhub / nJAV 这类没有订阅接口的站点会用到。 */
     suspend fun setFollowedArtistsJson(value: String) = update { it.copy(followedArtistsJson = value) }
+
+    /**
+     * nJAV 女优索引缓存（见 `logic/njav/NjavActressCache`）。
+     *
+     * ⚠️ 读写都包了一层「没装 store 就当空」——`SettingsRepository.store` 是 `lateinit`，
+     * 在 **JVM 单测**里没装过，直接读会抛 `UninitializedPropertyAccessException`。
+     */
+    val njavActressCacheJson get() = runCatching { current.njavActressCacheJson }.getOrDefault("")
+
+    suspend fun setNjavActressCacheJson(value: String) =
+        runCatching { update { it.copy(njavActressCacheJson = value) } }.getOrNull()
+
     /** 自建账号本地状态（JSON）：token / 用户名 / 云端 revision / 上次同步时间。 */
     suspend fun setAccountJson(value: String) = update { it.copy(accountJson = value) }
     suspend fun setActiveRelayNodeId(value: String) = update { it.copy(activeRelayNodeId = value) }

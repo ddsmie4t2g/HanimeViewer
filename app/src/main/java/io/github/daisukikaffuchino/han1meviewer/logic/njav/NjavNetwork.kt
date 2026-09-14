@@ -62,7 +62,35 @@ object NjavNetwork {
      * 只有 `?page` / `?sort` / `?height` / `?cup` / `?age` / `?debut` 生效），
      * 所以名字过滤只能由 UI 在已加载的条目上做。
      */
-    fun actressIndexUrl(page: Int): String = listUrl(ACTRESSES_SEGMENT, page)
+    fun actressIndexUrl(page: Int, sort: String? = null): String {
+        val base = listUrl(ACTRESSES_SEGMENT, page)
+        val value = sort?.takeIf { it.isNotBlank() } ?: return base
+        val separator = if (base.contains('?')) "&" else "?"
+        return "$base${separator}sort=$value"
+    }
+
+    /**
+     * 女优一览页的排序取值（26.8.2）。
+     *
+     * | 菜单 | 取值 |
+     * |---|---|
+     * | 影片（默认） | [ACTRESS_SORT_VIDEOS] |
+     * | 出道 | [ACTRESS_SORT_DEBUT] |
+     */
+    const val ACTRESS_SORT_VIDEOS = "videos"
+    const val ACTRESS_SORT_DEBUT = "debut"
+
+    /**
+     * **女优排行**页 `/cn/actresses/ranking`（26.8.2）。
+     *
+     * 站点只给「当月」一份榜（页面上没有周期切换链接，只有语言变体），
+     * H1 形如 `女优排行 SEP 2026`，100 条、带 `第 N 名` 角标。
+     * 卡片结构与 [actressIndexUrl] 完全同构，所以解析共用
+     * [NjavParser.actressList]，只有周期标题要另外抠（[NjavParser.actressRankingPeriod]）。
+     *
+     * ⚠️ 这个地址**没有 `?page=`**：排行就是固定的一页 100 条。
+     */
+    fun actressRankingUrl(): String = listUrl("$ACTRESSES_SEGMENT/ranking")
 
     /**
      * 某位女优的影片列表页 `/cn/actresses/<编码后的名字>` 的第 n 页。

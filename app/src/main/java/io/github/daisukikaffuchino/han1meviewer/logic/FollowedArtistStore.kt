@@ -141,6 +141,45 @@ object FollowedArtistStore {
         return all.any { it.key == k }
     }
 
+    /**
+     * 有多少位 **nJAV** 关注者还缺头像（26.8.2）。
+     *
+     * 判据刻意只算 nJAV：nJAV 的**视频详情页给不出女优头像**（真头像只在女优一览 /
+     * 排行页的卡片里），所以这批人是「天生没有头像」，需要专门去补；
+     * 而 hanime / Pornhub 的详情页本来就带头像，为空只说明站点没给，补不了也不该补。
+     */
+    fun countMissingNjavAvatars(): Int = all.count { item ->
+        item.avatar.isBlank() && item.toArtistRef().siteSource == SiteSource.Njav
+    }
+
+    /**
+     * 用女优索引缓存把 nJAV 关注者的**空头像**补上（26.8.2），返回补了几条。
+     *
+     * 为什么不在这里发网络请求：取数属于仓库层的职责，而且「一次请求拿一页 52 个头像」
+     * 这件事只有调用方知道该不该做（见 `NetworkRepo.warmUpNjavActressCache`）。
+     * 这里只负责「拿现成的一批头像，把关注表补全并落盘」。
+     *
+     * ⚠️ 只补**空头像**，绝不覆盖已有的（用户可能已经从别处拿到了同一张图，
+     * 或者站点换了图而旧的那张还能用）。
+     *
+     * @param avatarOf 按名字查头像；没有就返回空串
+     */
+    suspend fun fillMissingAvatars(avatarOf: (String) -> String): Int {
+        val list = all
+        var filled = 0
+        val updated = list.map { item ->
+            if (item.avatar.isNotBlank()) return@map item
+            val ref = item.toArtistRef()
+            if (ref.siteSource != SiteSource.Njav) return@map item
+            val avatar = avatarOf(ref.name).trim()
+            if (avatar.isEmpty()) return@map item
+            filled++
+            item.copy(avatar = avatar)
+        }
+        if (filled > 0) save(updated)
+        return filled
+    }
+
     /** 关注页要的形态（订阅页的作者格子用的就是它）。 */
     val asSubscriptionItems: List<SubscriptionItem>
         get() = all.map { SubscriptionItem(artistName = it.name, avatar = it.avatar) }

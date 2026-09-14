@@ -1051,6 +1051,15 @@
     <string name="actress_list_failed">女优列表加载失败</string>
     <string name="actress_video_count">%1$d 部影片</string>
     <string name="actress_debut_year">%1$d 出道</string>
+    <string name="browse_section">浏览</string>
+    <string name="actress_gallery_title">女优一览</string>
+    <string name="actress_tab_index">一览</string>
+    <string name="actress_tab_ranking">排行</string>
+    <string name="actress_rank_badge">第 %1$d 名</string>
+    <string name="actress_ranking_period">%1$s 榜</string>
+    <string name="actress_sort_label">排序</string>
+    <string name="actress_sort_videos">影片</string>
+    <string name="actress_sort_debut">出道</string>
     <!-- 一键网络自愈：测镜像与中转、自动落到最快、复测确认 -->
     <string name="self_heal">一键网络自愈</string>
     <string name="self_heal_summary">给镜像站和中转节点测速，自动切到最快的那条，再复测确认</string>

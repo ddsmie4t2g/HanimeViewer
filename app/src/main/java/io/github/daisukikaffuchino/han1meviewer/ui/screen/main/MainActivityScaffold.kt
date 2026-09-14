@@ -65,6 +65,13 @@ fun MainActivityScaffold(
     isLoading: Boolean,
     currentSite: String,
     checkInEnabled: Boolean,
+    /**
+     * 抽屉里是否显示「女优」入口（26.8.2）。
+     *
+     * 女优一览 / 排行是 nJAV 的公开页面，别的数据源下这一页没有意义 —— 所以它是
+     * 抽屉里唯一按当前站点显示 / 隐藏的条目。判据在调用方（`SiteSource == Njav`）。
+     */
+    showActressGallery: Boolean,
     onAvatarClick: () -> Unit,
     onAvatarLongClick: () -> Unit,
     onSwitchSiteClick: () -> Unit,
@@ -99,6 +106,7 @@ fun MainActivityScaffold(
             isLoading = isLoading,
             currentSite = currentSite,
             checkInEnabled = checkInEnabled,
+            showActressGallery = showActressGallery,
             onAvatarClick = onAvatarClick,
             onAvatarLongClick = onAvatarLongClick,
             onSwitchSiteClick = onSwitchSiteClick,
@@ -158,6 +166,13 @@ private fun MainDrawerContent(
     isLoading: Boolean,
     currentSite: String,
     checkInEnabled: Boolean,
+    /**
+     * 抽屉里是否显示「女优」入口（26.8.2）。
+     *
+     * 女优一览 / 排行是 nJAV 的公开页面，别的数据源下这一页没有意义 —— 所以它是
+     * 抽屉里唯一按当前站点显示 / 隐藏的条目。判据在调用方（`SiteSource == Njav`）。
+     */
+    showActressGallery: Boolean,
     onAvatarClick: () -> Unit,
     onAvatarLongClick: () -> Unit,
     onSwitchSiteClick: () -> Unit,
@@ -215,6 +230,16 @@ private fun MainDrawerContent(
             selectedDestination = selectedDestination,
             onItemClick = { onDrawerItemSelected(it) },
         )
+        // ⭐ 浏览入口（26.8.2）：目前只有「女优一览 / 女优排行」，而那是 nJAV 的页面，
+        // 所以整段只在当前站点是 nJAV 时出现 —— 免得在 hanime / Pornhub 下摆一个点不动的入口。
+        if (showActressGallery) {
+            MainDrawerSection(
+                titleRes = R.string.browse_section,
+                items = listOf(MainDrawerDestination.ActressGallery),
+                selectedDestination = selectedDestination,
+                onItemClick = { onDrawerItemSelected(it) },
+            )
+        }
         Spacer(modifier = Modifier.height(16.dp))
     }
 }
@@ -339,6 +364,7 @@ private fun MainActivityScaffoldPreview() {
             isLoading = false,
             currentSite = "https://hanime1.me/",
             checkInEnabled = true,
+            showActressGallery = true,
             onAvatarClick = {},
             onAvatarLongClick = {},
             onSwitchSiteClick = {},
