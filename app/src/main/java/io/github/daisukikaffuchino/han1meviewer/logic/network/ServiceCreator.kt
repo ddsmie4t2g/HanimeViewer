@@ -69,12 +69,29 @@ object ServiceCreator {
         getchuClient = buildGetchuClient()
     }
 
+    /**
+     * getchu（新番预告 / 发售表）专用 client。
+     *
+     * ⚠️ **必须**挂 [CdnRelay] 的信任链与 [CdnRelayInterceptor]：`www.getchu.com`
+     * 从大陆直连必失败（TLS 握手就被打断），唯一可行路径是自建中转
+     * （`getchu.com` 在 [CdnRelay.BLOCKED_HOSTS] 里）。
+     *
+     * 拦截器顺序有讲究：[CdnRelayInterceptor] 放在 [GetchuInterceptor] **之后**。
+     * 请求头（UA / Referer / Cookie / Accept）由 GetchuInterceptor 补，
+     * CdnRelayInterceptor 只换 URL。顺序反过来的话 URL 已经被换成中转地址，
+     * 再按「原始 host」补头就会补错，中转侧也拿不到 getchu 要的 `Referer`。
+     */
     private fun buildGetchuClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
+            .sslSocketFactory(CdnRelay.sslContext.socketFactory, CdnRelay.trustManager)
             .addInterceptor(UrlLoggingInterceptor())
             .addInterceptor(GetchuInterceptor())
+            .addInterceptor(CdnRelayInterceptor())
             .cookieJar(CookieJar.NO_COOKIES)
+            // 发售表一页 ~29 张封面全在同一个 host（中转）上，默认「5 并发」要排 6 轮。
+            .connectionPool(NetworkTuning.connectionPool)
+            .dispatcher(NetworkTuning.dispatcher)
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)
             .dns(dns)
@@ -107,6 +124,9 @@ object ServiceCreator {
             // 顺序反过来会让限速把那一次直连失败的重试也算进配额，纯属浪费。
             .addInterceptor(CdnRelayInterceptor())
             .addNetworkInterceptor(NjavPlaybackInterceptor())
+            // 下载与 HLS 分片同样落在中转这一个 host 上，共用连接池才能真正复用 socket。
+            .connectionPool(NetworkTuning.connectionPool)
+            .dispatcher(NetworkTuning.dispatcher)
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)
             .dns(dns)
@@ -124,6 +144,9 @@ object ServiceCreator {
             .addInterceptor(CloudflareInterceptor(applicationContext))
             .cache(cache)
             .cookieJar(HCookieJar())
+            // 首页一屏 ~30 张封面全走中转（同一个 host），默认 5 并发要排 6 轮。
+            .connectionPool(NetworkTuning.connectionPool)
+            .dispatcher(NetworkTuning.dispatcher)
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)
             .dns(dns)

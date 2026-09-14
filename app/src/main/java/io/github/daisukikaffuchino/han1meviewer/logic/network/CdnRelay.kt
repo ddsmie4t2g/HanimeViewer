@@ -127,6 +127,17 @@ object CdnRelay {
         "fourhoi.com",  // nJAV 封面
         "pornhub.com",  // Pornhub 站点本体（HTML / JSON API）
         "phncdn.com",   // Pornhub 全部封面与视频 CDN（pix-*.phncdn.com / ev-h.phncdn.com …）
+
+        // 「新番预告 / 发售表」的数据源（`all/month_title.html`，EUC-JP 的 HTML）。
+        //
+        // 26.8.4 补：它以前不在表里 ⇒ 整页走直连，而这条直连**从大陆从来没成功过**。
+        // 用户看到的因此是「连接被中断，可能是当前网络不稳定或服务器主动断开」——
+        // 文案把「域名级不可达」说成了线路抖动，重试多少次都一样。
+        //
+        // ⚠️ 这里**刻意不放**进 ALWAYS_RELAY_HOSTS：getchu 在海外能直连，
+        // 海外用户不该被强绕一趟美国。代价只是大陆用户进程内第一次请求白撞一次 RST，
+        // 之后 [isKnownDead] 记着，后面全走中转。
+        "getchu.com",
     )
 
     /**

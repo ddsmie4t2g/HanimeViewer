@@ -48,6 +48,7 @@ import io.github.daisukikaffuchino.han1meviewer.ui.component.isFirstPageEmpty
 import io.github.daisukikaffuchino.han1meviewer.ui.component.isFirstPageError
 import io.github.daisukikaffuchino.han1meviewer.ui.component.isFirstPageLoading
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.HomePageTopBar
+import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.HomeTopBarAction
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.AppUpdateActionState
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.AppUpdateCard
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.AnnouncementCard
@@ -257,6 +258,14 @@ fun HomePageScreen(
             onOpenDrawer = { onEvent(HomeUiEvent.OpenDrawer) },
             onSearchClick = { onEvent(HomeUiEvent.OpenSearchPage()) },
             onNavigateToPreview = { onEvent(HomeUiEvent.NavigateToPreview) },
+            onNavigateToActressGallery = { onEvent(HomeUiEvent.NavigateToActressGallery) },
+            // 右上角按数据源变脸（见 HomeTopBarAction）：
+            // nJAV 的主浏览入口是「女优一览 / 排行」，hanime 才是日历，Pornhub 两者都没有。
+            topBarAction = when {
+                isNjavSite -> HomeTopBarAction.Browse
+                isPornhubSite -> HomeTopBarAction.None
+                else -> HomeTopBarAction.Preview
+            },
             containerColor = topBarContainerColor,
             showNavigationIcon = showNavigationIcon,
             modifier = Modifier.zIndex(1f),

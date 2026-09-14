@@ -30,6 +30,12 @@ object ImageNetworkClient {
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .sslSocketFactory(CdnRelay.sslContext.socketFactory, CdnRelay.trustManager)
+            // ⭐ 这里是「加载慢」的最大一处：封面/头像**全部**经过本 client，
+            // 而被封域名对客户端来说全是同一个 host（中转）。
+            // OkHttp 默认 maxRequestsPerHost = 5 ⇒ 一屏 30 张封面要排 6 轮，
+            // 每轮一个完整往返（大陆↔洛杉矶 ~180 ms）。共用调优过的池与调度器即可。
+            .connectionPool(NetworkTuning.connectionPool)
+            .dispatcher(NetworkTuning.dispatcher)
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)
             .dns(HDns())

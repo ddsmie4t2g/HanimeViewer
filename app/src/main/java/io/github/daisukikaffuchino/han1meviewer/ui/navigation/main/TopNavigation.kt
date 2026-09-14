@@ -149,6 +149,7 @@ fun TopNavigation(
                     showNavigationIcon = showHomeNavigationIcon,
                     onOpenDrawer = onOpenDrawer,
                     onNavigateToPreview = { backStack.add(PreviewRoute) },
+                    onNavigateToActressGallery = { backStack.add(ActressGalleryRoute) },
                     onNavigateToSearch = { query -> backStack.add(SearchRoute(query = query)) },
                     onNavigateToSearchAdvanced = { params ->
                         backStack.add(
@@ -530,6 +531,7 @@ fun TopNavigation(
                 onNavigateToGetchuPreview = {
                     backStack.add(GetchuPreviewRoute)
                 },
+                onNavigateToGetchuDetail = { id -> backStack.add(GetchuPreviewDetailRoute(id)) },
                 onNavigateToPreviewComment = { date, dateCode ->
                     backStack.add(PreviewCommentRoute(date, dateCode))
                 },

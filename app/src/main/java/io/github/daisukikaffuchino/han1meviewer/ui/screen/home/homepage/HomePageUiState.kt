@@ -10,6 +10,13 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.Announcement
 sealed interface HomeUiEvent {
     data object OpenDrawer : HomeUiEvent
     data object NavigateToPreview : HomeUiEvent
+    /**
+     * 右上角「浏览」入口（女优一览 / 女优排行，仅 nJAV 数据源显示）。
+     *
+     * 以前这个入口是抽屉里的一项，第 6 项往下要滚动才看得见 —— 而它是 nJAV 的
+     * 主浏览入口，藏在那儿等于没有。现在挪到右上角（见 [HomeTopBarAction]）。
+     */
+    data object NavigateToActressGallery : HomeUiEvent
     data class OpenSearchPage(val query: String = "") : HomeUiEvent
     data class NavigateToSearchAdvanced(val params: Map<String, String>) : HomeUiEvent
     data class OpenVideo(val videoCode: String) : HomeUiEvent

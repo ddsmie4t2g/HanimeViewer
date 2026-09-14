@@ -28,10 +28,40 @@ import io.github.daisukikaffuchino.han1meviewer.ui.preview.ComponentPreview
 import io.github.daisukikaffuchino.han1meviewer.ui.theme.HanimeDefaults
 
 /**
- * 渲染首页顶部栏，包含抽屉入口、搜索入口和新番列表入口。
+ * 首页右上角那个「功能入口」按钮的形态。
+ *
+ * 三个数据源的可用页面本来就不同，所以它不是装饰，而是**按站点切换的导航**：
+ *
+ * | 数据源 | 按钮 | 去向 |
+ * |---|---|---|
+ * | hanime | 📅 日历 / 新番 | [PreviewRoute]（Getchu 发售表 + 按上市月归档） |
+ * | nJAV | 👥 浏览（女优一览 / 女优排行） | [ActressGalleryRoute] |
+ * | Pornhub | **不显示** | —— |
+ *
+ * 为什么 Pornhub 干脆不给：日历页读的是 hanime 按月归档与 Getchu 预告，
+ * Pornhub 下点进去只有一整页空态（`getHanimeArchiveByMonth` 对 AV 站直接返回
+ * NoMoreData），摆在那里只会让人以为坏了。
+ */
+enum class HomeTopBarAction {
+    /** 日历 / 新番（hanime） */
+    Preview,
+
+    /** 浏览 —— 女优一览 / 排行（nJAV） */
+    Browse,
+
+    /** 什么都不放（Pornhub） */
+    None,
+}
+
+/**
+ * 渲染首页顶部栏，包含抽屉入口、搜索入口，以及一个**按数据源变脸**的功能入口
+ * （日历 / 浏览 / 无，见 [HomeTopBarAction]）。
+ *
  * @param onOpenDrawer 点击抽屉按钮时调用。
  * @param onSearchClick 点击搜索框时调用。
- * @param onNavigateToPreview 点击新番按钮时调用。
+ * @param onNavigateToPreview 点击「日历 / 新番」时调用。
+ * @param onNavigateToActressGallery 点击「浏览」时调用。
+ * @param topBarAction 右上角放哪个入口。
  * @param modifier 应用于顶部栏根布局的修饰符。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,6 +70,8 @@ fun HomePageTopBar(
     onOpenDrawer: () -> Unit,
     onSearchClick: () -> Unit,
     onNavigateToPreview: () -> Unit,
+    onNavigateToActressGallery: () -> Unit,
+    topBarAction: HomeTopBarAction,
     modifier: Modifier = Modifier,
     showNavigationIcon: Boolean = true,
     containerColor: Color = HanimeDefaults.Colors.pageSurface,
@@ -69,11 +101,22 @@ fun HomePageTopBar(
                         contentDescription = stringResource(R.string.global_search),
                     )
                 }
-                IconButton(onClick = onNavigateToPreview) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_newspaper),
-                        contentDescription = stringResource(R.string.hanime_list),
-                    )
+                when (topBarAction) {
+                    HomeTopBarAction.Preview -> IconButton(onClick = onNavigateToPreview) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_newspaper),
+                            contentDescription = stringResource(R.string.hanime_list),
+                        )
+                    }
+
+                    HomeTopBarAction.Browse -> IconButton(onClick = onNavigateToActressGallery) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_move_group),
+                            contentDescription = stringResource(R.string.browse_section),
+                        )
+                    }
+
+                    HomeTopBarAction.None -> Unit
                 }
             }
         },
@@ -152,7 +195,23 @@ private fun HomePageTopBarPreview() {
         HomePageTopBar(
             onOpenDrawer = {},
             onSearchClick = {},
-            onNavigateToPreview = {}
+            onNavigateToPreview = {},
+            onNavigateToActressGallery = {},
+            topBarAction = HomeTopBarAction.Preview,
+        )
+    }
+}
+
+@Preview(showBackground = true, name = "首页顶栏（nJAV 浏览）")
+@Composable
+private fun HomePageTopBarBrowsePreview() {
+    ComponentPreview {
+        HomePageTopBar(
+            onOpenDrawer = {},
+            onSearchClick = {},
+            onNavigateToPreview = {},
+            onNavigateToActressGallery = {},
+            topBarAction = HomeTopBarAction.Browse,
         )
     }
 }
@@ -165,6 +224,8 @@ private fun HomePageTopBarLandPreview() {
             onOpenDrawer = {},
             onSearchClick = {},
             onNavigateToPreview = {},
+            onNavigateToActressGallery = {},
+            topBarAction = HomeTopBarAction.None,
             showNavigationIcon = false
         )
     }

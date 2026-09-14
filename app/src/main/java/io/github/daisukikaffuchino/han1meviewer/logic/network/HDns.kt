@@ -157,10 +157,12 @@ class HDns : Dns {
     }
 
     override fun lookup(hostname: String): List<InetAddress> {
+        // getchu：内置 IP 本身是真的，但它们以前是**光杆**返回的 —— 一旦这两条从用户
+        // 的网络不可达，OkHttp 不会再回头问系统 DNS，这个域名就彻底打不开
+        // （`GETCHU_HOSTNAME` 的失败曾经只表现为「连接被中断」）。
+        // 现在同样接上系统 DNS 尾巴（理由见 [pinnedWithSystemTail]）。
         if (hostname == GETCHU_HOSTNAME) {
-            return getchuIps.map {
-                InetAddress.getByAddress(hostname, InetAddress.getByName(it).address)
-            }
+            return pinnedWithSystemTail(hostname, getchuIps)
         }
 
         // nJAV 系 / 图片 CDN：DNS 已被投毒，无条件走内置 IP（理由见 builtInIpsByHost 的注释）。
