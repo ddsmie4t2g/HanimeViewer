@@ -39,11 +39,11 @@
     <string name="comment_not_found">Comments Not Found</string>
     <string name="hanime_list">New Anime List</string>
     <string name="latest_hanime_list_monthly">%s New Anime List</string>
-    <string name="preview_discontinued_notice">Since May 2026, Hanime1 has stopped updating new anime previews. The Release schedule tab above shows what Getchu has scheduled for this month; no VPN is required.</string>
+    <string name="preview_discontinued_notice">Since May 2026, Hanime1 has stopped updating new anime previews. The default "Already online" tab lists titles that are actually up on hanime for the selected month; the "Release schedule" tab shows what Getchu has scheduled. No VPN is required.</string>
     <string name="preview_month_not_updated">The site has not updated the preview for this month.</string>
     <string name="preview_archive_failed">Failed to load this month\'s releases</string>
     <string name="preview_archive_empty">Not on the site yet this month</string>
-    <string name="preview_archive_empty_hint">The site stopped posting previews, so this page now lists titles actually online in the selected month. Releases are uploaded by the site itself, often mid-month — check the Release schedule tab for what is scheduled.</string>
+    <string name="preview_archive_empty_hint">The site stopped posting previews, so this page lists what is actually online on hanime for the selected month (no longer limited to the Hentai genre tag — that filter made whole months come back empty). Uploads are up to the site and often land mid-month; check the Release schedule tab for what is scheduled.</string>
     <string name="preview_tab_getchu">Release schedule</string>
     <string name="preview_tab_hanime">Already online</string>
     <string name="preview_getchu_failed">Failed to load this month\'s release schedule</string>

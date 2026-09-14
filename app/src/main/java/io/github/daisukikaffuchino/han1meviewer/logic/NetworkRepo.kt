@@ -2,7 +2,6 @@ package io.github.daisukikaffuchino.han1meviewer.logic
 
 import io.github.daisukikaffuchino.utils.LogUtil
 import io.github.daisukikaffuchino.han1meviewer.EMPTY_STRING
-import io.github.daisukikaffuchino.han1meviewer.HANIME_GENRE_ANIME
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository.isAlreadyLogin
 import io.github.daisukikaffuchino.han1meviewer.R
@@ -137,14 +136,21 @@ object NetworkRepo {
      * 它返回的是**该月已经上市**的番剧，正好用来顶替停更月份的预告 ——
      * 打开 2026/8 列出的就是 8 月 1 日至 8 月底上线的那一批。
      *
+     * ⚠️ **不要再加 `genre=裏番`**（26.8.3 移除，见下）。
+     *
+     * 26.8.4 曾经在这里钉死 `genre = "裏番"`，理由是「这一页叫里番新番列表」。
+     * 但 `date=` 问的是「这部片子在本站的上市日在不在这个月」，而月度归档要回答的是
+     * 「用户以为已经出来的那批在不在」。实测（2026-09-14）：`2026 年 9 月 + 裏番`
+     * **0 条**，同月**不限类型 59 条**；而 Getchu 的 9 月发售表（用户真正在看的「9 月里番」）
+     * 有 29 部。也就是说「按上市月 + 只认里番标签」这个组合在站点侧会整月落空，
+     * 用户看到的就是「明明已经上了几部，这里说该月还没有已上线的番剧」。
+     * 去掉 genre 之后该月列出的就是站点自己给出的那一批，和其它月份行为一致，
+     * 也不会再出现「整整一个月空白」。
+     *
      * @param year 年份，如 2026
      * @param month 月份 (1-12)
      * @param page 页码，从 1 开始
      */
-    // 【月度归档】站方预告停更月份改用「按上市月份检索」。
-    // 注意必须带上 genre = "裏番"（genre.json 里「里番」的 search_key）：
-    // 不带 genre 的搜索结果会混进 3D动画 / MMD / Cosplay / AI生成 等其它分类，
-    // 而这个页面的标题就是「某月 里番新番列表」，只应记录里番。
     fun getHanimeArchiveByMonth(
         year: Int,
         month: Int,
@@ -158,7 +164,7 @@ object NetworkRepo {
                 request = {
                     HanimeNetwork.hanimeService.getHanimeSearchResult(
                         page = page,
-                        genre = HANIME_GENRE_ANIME,
+                        // genre 刻意留空：理由见上面的 KDoc（钉死「裏番」会让整个月落空）。
                         sort = "最新上市",
                         date = "$year 年 $month 月",
                     )

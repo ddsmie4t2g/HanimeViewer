@@ -213,7 +213,10 @@ const val GETCHU_BASE_URL = "https://www.getchu.com/"
 
 /**
  * 站内搜索「分类」筛选里「里番」对应的 search_key（见 assets/search_options/genre.json）。
- * 预告页的月度归档检索必须带上它，否则会把 3D动画 / MMD / Cosplay / AI生成 等
- * 其它分类一起塞进「里番新番列表」。
+ *
+ * ⚠️ 26.8.3 起**月度归档检索不再用它**（`NetworkRepo.getHanimeArchiveByMonth`）：
+ * 「按上市月 + 只认里番标签」在站点侧会整月落空（实测 2026-09：带它 0 条、不带 59 条），
+ * 用户看到的就是「明明上了几部，却写该月还没有已上线的番剧」。这个常量保留给
+ * 搜索页的「里番」筛选使用。
  */
 const val HANIME_GENRE_ANIME = "裏番"

@@ -8,13 +8,10 @@ import androidx.compose.ui.platform.LocalInspectionMode
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.ImageRequest
-import io.github.daisukikaffuchino.han1meviewer.logic.network.CdnRelay
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HProxyAuthenticator
 import io.github.daisukikaffuchino.han1meviewer.DESKTOP_USER_AGENT
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HDns
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HProxySelector
-import io.github.daisukikaffuchino.han1meviewer.logic.network.NetworkTuning
-import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.CdnRelayInterceptor
 import okhttp3.OkHttpClient
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
@@ -68,11 +65,8 @@ internal fun rememberGetchuImageLoader(): ImageLoader {
 }
 
 internal fun createGetchuImageLoader(context: Context): ImageLoader {
-    // ⚠️ 与 GetchuService 一样必须挂中转：封面图也在 `www.getchu.com` 上，
-    // 而那条直连从大陆不通 ⇒ 不挂的话就是「列表出来了、封面全是空白」。
     val imageClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .sslSocketFactory(CdnRelay.sslContext.socketFactory, CdnRelay.trustManager)
         .dns(HDns())
         .proxySelector(HProxySelector())
         .proxyAuthenticator(HProxyAuthenticator.http)
@@ -88,11 +82,6 @@ internal fun createGetchuImageLoader(context: Context): ImageLoader {
             }
             chain.proceed(builder.build())
         }
-        // 放在补头之后：先按原始 host 补头，再由它把 URL 换成中转地址。
-        .addInterceptor(CdnRelayInterceptor())
-        // 一页 ~29 张封面全落在中转这一个 host 上，共用池与调度器才有并发。
-        .connectionPool(NetworkTuning.connectionPool)
-        .dispatcher(NetworkTuning.dispatcher)
         .build()
     return ImageLoader.Builder(context)
         .components {

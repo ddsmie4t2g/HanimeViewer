@@ -128,10 +128,12 @@ fun PreviewScreen(
     /**
      * 日历页当前在哪个标签。
      *
-     * 默认停在**发售表**：用户点「日历 / 新番」想知道的是「这个月有什么」，
-     * 而站方自 202605 起停更预告后，「已上架」在当月常常是空的（详见 [PreviewTab]）。
+     * 默认停在**已上架**：用户点「日历 / 新番」想知道的是「这个月已经出来的里番有哪些」，
+     * 那是 hanime 的按上市月列表；Getchu 的发售表（还没发售的预定表）留在第二个标签里。
+     * 26.8.4 曾把默认放在发售表上，可那一版里「已上架」因为检索条件过窄整月为空，
+     * 于是用户点进来看到的不是他要的那批。
      */
-    var selectedTabOrdinal by rememberSaveable { mutableIntStateOf(PreviewTab.Getchu.ordinal) }
+    var selectedTabOrdinal by rememberSaveable { mutableIntStateOf(PreviewTab.Hanime.ordinal) }
     val selectedTab = PreviewTab.entries[selectedTabOrdinal]
     val currentDateCode = routeState.currentDateCode
     val selectedIndex = routeState.selectedIndex

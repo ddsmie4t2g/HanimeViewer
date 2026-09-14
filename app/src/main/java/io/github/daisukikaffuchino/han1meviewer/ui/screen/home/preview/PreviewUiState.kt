@@ -104,7 +104,7 @@ data class PreviewArchiveUiState(
  * @param imageViewerState 图片查看器状态，null 表示未打开
  * @param archiveState 【月度归档】非 null 表示当前月份已停更，页面展示的是
  *        「按上市月份检索」的结果，而不是站方预告。此时 [displayState] 不参与渲染。
- * @param selectedTab 顶部标签页：发售表（Getchu）/ 已上架（hanime）
+ * @param selectedTab 顶部标签页：已上架（hanime，默认）/ 发售表（Getchu）
  * @param getchuState Getchu 该月发售表的加载状态
  */
 data class PreviewUiState(
@@ -120,7 +120,7 @@ data class PreviewUiState(
     val monthHeaderState: PreviewMonthHeaderState,
     val imageViewerState: PreviewImageViewerState? = null,
     val archiveState: PreviewArchiveUiState? = null,
-    val selectedTab: PreviewTab = PreviewTab.Getchu,
+    val selectedTab: PreviewTab = PreviewTab.Hanime,
     val getchuState: PageState<GetchuPreview> = PageState.Loading,
 ) {
     /**
@@ -139,21 +139,24 @@ data class PreviewUiState(
  *
  * | 标签 | 含义 | 数据源 |
  * |---|---|---|
- * | [Getchu] | 该月**预定发售**的里番（发售表） | getchu.com `all/month_title.html` |
  * | [Hanime] | 该月**已经在 hanime 上架**的番剧 | hanime 站内检索 `date=yyyy 年 m 月` |
+ * | [Getchu] | 该月**预定发售**的里番（发售表） | getchu.com `all/month_title.html` |
  *
  * ⭐ 为什么必须分成两个标签（26.8.4 的根因）：以前只有「已上架」这一个列表，
- * 而站方自 202605 起停更了预告页，于是当月常常是空的（实测 2026-09-14：hanime
- * 的 9 月里番**一部都没上架**，最新的仍停在 2026-08-28）。用户看到空列表就会认为
- * 「明明上了几部却没显示」—— 他看的是 Getchu 的发售表，而那个数据源当时因为
- * getchu 没走中转，整页根本取不到。两个概念分开摆，就不会再互相冒充。
+ * 而站方自 202605 起停更了预告页，于是当月常常是空的。用户看到空列表就会认为
+ * 「明明上了几部却没显示」。
+ *
+ * ⭐ **26.8.3 起默认停在 [Hanime]**（两个标签的顺序也调成它在左）：用户点日历想问的是
+ * 「这个月已经出来的里番有哪些」，那是「已上架」而不是「还没发售的预定表」。
+ * 发售表仍然保留在第二个标签里。[Getchu] 里那一套（封面走中转、点封面进详情页）
+ * 一个字都没动 —— 改的只是**进门先看哪一个**。
  */
 enum class PreviewTab {
+    /** 已上架 —— 该月已在 hanime 上线的番剧（默认） */
+    Hanime,
+
     /** 发售表 —— 该月预定发售（Getchu） */
     Getchu,
-
-    /** 已上架 —— 该月已在 hanime 上线的番剧 */
-    Hanime,
 }
 
 /**

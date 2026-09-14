@@ -39,11 +39,11 @@
     <string name="comment_not_found">未发现评论</string>
     <string name="hanime_list">新番列表</string>
     <string name="latest_hanime_list_monthly">%s 里番新番列表</string>
-    <string name="preview_discontinued_notice">自 2026 年 5 月开始，Hanime1 站方的新番预告已经停更。本页上面的「发售表」标签展示 Getchu 该月预定发售的作品，无需 VPN。</string>
+    <string name="preview_discontinued_notice">自 2026 年 5 月开始，Hanime1 站方的新番预告已经停更。本页默认的「已上架」列出该月已经在 hanime 上线的番剧，「发售表」标签则展示 Getchu 该月预定发售的作品，均无需 VPN。</string>
     <string name="preview_month_not_updated">站方没有更新该月度的新番预告</string>
     <string name="preview_archive_failed">该月上线的番剧加载失败</string>
     <string name="preview_archive_empty">该月站方还没有上架番剧</string>
-    <string name="preview_archive_empty_hint">站方预告停更后，这里改为按上市月份列出已经在 hanime 上线的番剧。上架由站方决定、常在月中之后，想知道这个月预定发售什么请看「发售表」标签。</string>
+    <string name="preview_archive_empty_hint">站方预告停更后，这里改为按上市月份列出该月已经在 hanime 上线的番剧（不再只限「里番」标签，否则整月会落空）。上架由站方决定、常在月中之后；想知道这个月预定发售什么请看「发售表」标签。</string>
     <string name="preview_tab_getchu">发售表</string>
     <string name="preview_tab_hanime">已上架</string>
     <string name="preview_getchu_failed">该月发售表加载失败</string>

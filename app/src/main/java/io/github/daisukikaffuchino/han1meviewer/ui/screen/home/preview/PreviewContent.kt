@@ -432,10 +432,11 @@ fun PreviewContent(
 }
 
 /**
- * 日历页顶部的「发售表 / 已上架」标签行。
+ * 日历页顶部的「已上架 / 发售表」标签行。
  *
- * 用「发售表」而不是「Getchu」做标签名：多数用户不知道 getchu 是什么，
- * 但一看就知道「发售表 = 还没出的、预定几号卖」。
+ * ⚠️ 两个 `Tab` 的顺序必须与 [PreviewTab] 的**枚举顺序一致** ——
+ * [PrimaryTabRow] 用的是 `selectedTab.ordinal`，顺序错了高亮会跳到另一个标签上。
+ * 默认停在「已上架」：用户点日历想问的是「这个月已经出来的里番」。
  */
 @Composable
 private fun PreviewTabRow(
@@ -445,14 +446,14 @@ private fun PreviewTabRow(
 ) {
     PrimaryTabRow(selectedTabIndex = selectedTab.ordinal, modifier = modifier) {
         Tab(
-            selected = selectedTab == PreviewTab.Getchu,
-            onClick = { onSelectTab(PreviewTab.Getchu) },
-            text = { Text(stringResource(R.string.preview_tab_getchu)) },
-        )
-        Tab(
             selected = selectedTab == PreviewTab.Hanime,
             onClick = { onSelectTab(PreviewTab.Hanime) },
             text = { Text(stringResource(R.string.preview_tab_hanime)) },
+        )
+        Tab(
+            selected = selectedTab == PreviewTab.Getchu,
+            onClick = { onSelectTab(PreviewTab.Getchu) },
+            text = { Text(stringResource(R.string.preview_tab_getchu)) },
         )
     }
 }
@@ -460,14 +461,17 @@ private fun PreviewTabRow(
 /**
  * 「发售表」状态在 [PreviewUiState] 上的三个便捷判据。
  *
- * 把它们放在这里而不是写成一串 `is PageState.Loading && data == null`，
+ * 把它们放在这里而不是在调用点写成一长串状态判断，
  * 是因为调用点在一个很深的 `LazyColumn` DSL 里，那里的可读性本来就差。
+ *
+ * ⚠️ 别在这里追加 `&& data == null`：`Loading` / `Error` 状态下那个判据恒为真，
+ * 编译器会直接报 `Condition is always 'true'`（26.8.3 清掉了这条警告）。
  */
 private val PageState<GetchuPreview>.isGetchuLoading: Boolean
-    get() = this is PageState.Loading && dataOrNull == null
+    get() = this is PageState.Loading
 
 private val PageState<GetchuPreview>.isGetchuError: Boolean
-    get() = this is PageState.Error && dataOrNull == null
+    get() = this is PageState.Error
 
 private val PageState<GetchuPreview>.getchuData: GetchuPreview?
     get() = dataOrNull
