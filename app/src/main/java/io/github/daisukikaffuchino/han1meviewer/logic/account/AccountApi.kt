@@ -1,6 +1,8 @@
 package io.github.daisukikaffuchino.han1meviewer.logic.account
 
 import io.github.daisukikaffuchino.han1meviewer.logic.network.CdnRelay
+import io.github.daisukikaffuchino.han1meviewer.logic.network.HProxyAuthenticator
+import io.github.daisukikaffuchino.han1meviewer.logic.network.HProxySelector
 import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.UserAgentInterceptor
 import io.github.daisukikaffuchino.utils.unsafeLazy
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +72,10 @@ object AccountApi {
             .callTimeout(60, TimeUnit.SECONDS)
             .addInterceptor(UserAgentInterceptor)
             .sslSocketFactory(CdnRelay.sslContext.socketFactory, CdnRelay.trustManager)
+            // 显式挂代理选择器（与 [CdnRelay.probeClient] 一致：不写的话靠 ProxySelector.getDefault()
+            // 在启动时被换成 HProxySelector 的副作用，写出来才不会被后来人当成漏挂）。
+            .proxySelector(HProxySelector())
+            .proxyAuthenticator(HProxyAuthenticator.http)
             .build()
     }
 

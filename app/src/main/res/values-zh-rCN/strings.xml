@@ -435,6 +435,9 @@
     <string name="artist_page_title">作者</string>
     <string name="artist_page_works">作品</string>
     <string name="artist_page_loaded_count">已加载 %1$d 部</string>
+    <string name="artist_page_prev">上一页</string>
+    <string name="artist_page_next">下一页</string>
+    <string name="artist_page_page_indicator">第 %1$d / %2$d 页</string>
     <string name="artist_page_view_count">%1$s 次观看</string>
     <string name="artist_page_no_videos">没有取到该作者的作品</string>
     <string name="artist_page_search_result_hint">该站没有作者页，下面是按名字搜索的结果，可能混入同名作者的作品。</string>
@@ -780,6 +783,30 @@
     <string name="animation_2d">2D动画</string>
     <string name="start_from_beginning">从头开始</string>
     <string name="latest_av">最新AV</string>
+    <!-- nJAV 首页栏目：与站点真实导航一一对应（26.8） -->
+    <string name="njav_sec_chinese_subtitle">中文字幕</string>
+    <string name="njav_sec_new">最近更新</string>
+    <string name="njav_sec_release">新作上市</string>
+    <string name="njav_sec_uncensored">无码流出</string>
+    <string name="njav_sec_today">今日热门</string>
+    <string name="njav_sec_weekly">本週热门</string>
+    <string name="njav_sec_monthly">本月热门</string>
+    <string name="njav_sec_vr">VR</string>
+    <string name="njav_sort_title">排序</string>
+    <string name="njav_sort_default">站点默认</string>
+    <string name="njav_sort_released">发行日期</string>
+    <string name="njav_sort_updated">最近更新</string>
+    <string name="njav_sort_saved">收藏数</string>
+    <string name="njav_sort_today_views">今日浏览数</string>
+    <string name="njav_sort_weekly_views">本週浏览数</string>
+    <string name="njav_sort_monthly_views">本月浏览数</string>
+    <string name="njav_sort_views">总浏览数</string>
+    <string name="njav_filter_title">筛选</string>
+    <string name="njav_filter_all">所有</string>
+    <string name="njav_filter_individual">单人作品</string>
+    <string name="njav_filter_multiple">多人作品</string>
+    <string name="njav_filter_chinese_subtitle">中文字幕</string>
+
     <string name="amateur_nomask">素人业余</string>
     <string name="hd_uncensored">高清无码</string>
     <string name="ai_decensored">AI解码</string>
@@ -809,6 +836,7 @@
     <string name="network_timeout_text">超时</string>
     <string name="paused">已暂停</string>
     <string name="played">已观看</string>
+    <string name="video_uncensored">无码</string>
     <string name="local">本地</string>
     <string name="current_bucket">当前命中档位</string>
     <string name="select_all">全选</string>

@@ -92,6 +92,13 @@ class HDns : Dns {
             // 其中 `104.18.49.25` **已经连不上了**（connect 超时），所以只保留可用的那个；
             // 万一它也失效，[lookupBuiltInIps] 的系统 DNS 尾巴会接手。
             "surrit.com" to listOf("104.18.53.139"),
+            // nJAV 的**图片 CDN**（女优头像 / 封面，`fourhoi.com`）。
+            //
+            // ⚠️ 26.8 补：以前这张表里没有它，而它与 njavtv.com 一样会被投毒 ——
+            // 表现是「网页上女优一览每个人都有头像，App 里全是空白」。
+            // 下面两个 IP 取自实测可用解析（`104.20.20.131` / `172.66.169.100`），
+            // 尾部依旧有系统 DNS 兜底。
+            "fourhoi.com" to listOf("104.20.20.131", "172.66.169.100"),
             //
             // ── 关于 Pornhub（第三个数据源）───────────────────────────────────
             // 这里**没有**、也不需要它的条目：pornhub.com 与 *.phncdn.com 都是
@@ -156,19 +163,32 @@ class HDns : Dns {
             }
         }
 
-        // nJAV 系：DNS 已被投毒，无条件走内置 IP（理由见 builtInIpsByHost 的注释）。
+        // nJAV 系 / 图片 CDN：DNS 已被投毒，无条件走内置 IP（理由见 builtInIpsByHost 的注释）。
         lookupBuiltInIps(hostname)?.let { return it }
 
-        if (SettingsRepository.useBuiltInHosts && HANIME_HOSTNAME.contains(hostname)) {
-            val customIps = resolveCustomIps()
-            if (!customIps.isNullOrEmpty()) {
-                return customIps.map {
-                    InetAddress.getByAddress(hostname, InetAddress.getByName(it).address)
+        // 用户自填的 IP 仍然优先（这是「内置域名」开关唯一的专属作用）。
+        if (SettingsRepository.useBuiltInHosts &&
+            HANIME_HOSTNAME.any { it.equals(hostname, ignoreCase = true) }
+        ) {
+            resolveCustomIps()?.takeIf { it.isNotEmpty() }?.let { customIps ->
+                return customIps.mapNotNull { ip ->
+                    runCatching {
+                        InetAddress.getByAddress(hostname, InetAddress.getByName(ip).address)
+                    }.getOrNull()
                 }
             }
-            return cloudFlareIps.map {
-                InetAddress.getByAddress(hostname, InetAddress.getByName(it).address)
-            }
+        }
+
+        // ⭐ hanime 系：**无条件**使用内置 Cloudflare IP，不再要求用户先打开「内置域名」开关。
+        //
+        // 26.8 修的正是这里：以前这张表只在 `useBuiltInHosts` 打开时才生效，
+        // 而默认是关的 ⇒ 大多数用户实际上一直在走 DoH/系统 DNS。
+        // 实测（2026-09-13，中国移动）：系统 DNS 给 `hanime1.com` 的是 `104.244.46.85`（投毒），
+        // `hanime1.me` 是 `103.252.114.101`（投毒）——
+        // 于是**登录**（一次 POST + 一次 GET，全是纯 API 请求）第一个就撞在假 IP 上，
+        // 表现就是「不挂梯子登不上」。而这张内置表里的 8 个 IP 实测 **7/8 直接 200**。
+        if (HANIME_HOSTNAME.any { it.equals(hostname, ignoreCase = true) }) {
+            return pinnedWithSystemTail(hostname, cloudFlareIps)
         }
 
         val dohUrl = DohConfig.resolveUrl()
@@ -181,6 +201,23 @@ class HDns : Dns {
         }
 
         return Dns.SYSTEM.lookup(hostname)
+    }
+
+    /**
+     * 内置 IP 在前、系统 DNS 结果接在**尾部**。
+     *
+     * 为什么尾巴必须有：OkHttp 只看 [lookup] 返回的地址，内置表一旦整段过期，
+     * 它**不会**再回头问系统 DNS —— 「钉 IP」就会反噬成「这个域名彻底打不开」。
+     * 追加在尾部，正常路径仍走内置 IP，全部失败时还有一条退路。
+     */
+    private fun pinnedWithSystemTail(hostname: String, ips: List<String>): List<InetAddress> {
+        val pinned = ips.mapNotNull { ip ->
+            runCatching {
+                InetAddress.getByAddress(hostname, InetAddress.getByName(ip).address)
+            }.getOrNull()
+        }
+        val system = runCatching { Dns.SYSTEM.lookup(hostname) }.getOrDefault(emptyList())
+        return (pinned + system).distinctBy { it.hostAddress }
     }
 
     /**

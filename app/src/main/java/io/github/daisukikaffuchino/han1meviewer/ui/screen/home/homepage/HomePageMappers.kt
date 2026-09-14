@@ -28,6 +28,17 @@ fun buildCategoryList(
     homePage: HomePage,
     isAVSite: Boolean,
     isPornhubSite: Boolean = false,
+    /**
+     * 是否走 nJAV。
+     *
+     * ⭐ 26.8 新增：nJAV 的首页栏目改成**站点真实导航里的名字**（中文字幕 / 最近更新 /
+     * 新作上市 / 无码流出 / 今日热门 / 本週热门 / 本月热门 / VR），
+     * 不再借用 hanime 那套「最新AV / 他們在看 / 高清無碼」的措辞 ——
+     * 用户的原话是「显示的我也不是很满意，要扎根于实际网页」。
+     *
+     * 标记（genre/sort）直接用真实路径，见 [io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavParser.pathForMarker]。
+     */
+    isNjavSite: Boolean = false,
 ): List<HomeCategory> {
     return listOfNotNull(
         // ── 最新 ───────────────────────────────────────────────────────────
@@ -35,11 +46,13 @@ fun buildCategoryList(
             key = HOME_CATEGORY_LATEST_HANIME,
             titleRes = when {
                 isPornhubSite -> R.string.ph_latest
+                isNjavSite -> R.string.njav_sec_new
                 isAVSite -> R.string.latest_av
                 else -> R.string.latest_hanime
             },
             genre = when {
                 isPornhubSite -> "最新"
+                isNjavSite -> "new"
                 isAVSite -> "日本AV"
                 else -> "裏番"
             },
@@ -48,8 +61,16 @@ fun buildCategoryList(
         // ── 最多觀看（PH）/ 最新上市 ───────────────────────────────────────
         HomeCategory(
             key = HOME_CATEGORY_LATEST_RELEASE,
-            titleRes = if (isPornhubSite) R.string.ph_popular else R.string.latest_release,
-            sort = if (isPornhubSite) "最多觀看" else "最新上市",
+            titleRes = when {
+                isPornhubSite -> R.string.ph_popular
+                isNjavSite -> R.string.njav_sec_release
+                else -> R.string.latest_release
+            },
+            sort = when {
+                isPornhubSite -> "最多觀看"
+                isNjavSite -> "release"
+                else -> "最新上市"
+            },
             videos = homePage.latestRelease
         ),
         // ── 本週熱門（PH）/ 最新上傳 ───────────────────────────────────────
@@ -58,15 +79,31 @@ fun buildCategoryList(
         // 实测与不带 period 的一页 30 条**零重合**，是真的另一批内容。
         HomeCategory(
             key = HOME_CATEGORY_LATEST_UPLOAD,
-            titleRes = if (isPornhubSite) R.string.ph_weekly else R.string.latest_upload,
-            sort = if (isPornhubSite) "本週熱門" else "最新上傳",
+            titleRes = when {
+                isPornhubSite -> R.string.ph_weekly
+                isNjavSite -> R.string.njav_sec_weekly
+                else -> R.string.latest_upload
+            },
+            sort = when {
+                isPornhubSite -> "本週熱門"
+                isNjavSite -> "weekly-hot"
+                else -> "最新上傳"
+            },
             videos = homePage.latestHanime
         ),
         // ── 最高評分（PH）/ 他們在看 ───────────────────────────────────────
         HomeCategory(
             key = HOME_CATEGORY_WATCHING_NOW,
-            titleRes = if (isPornhubSite) R.string.ph_top_rated else R.string.they_watched,
-            sort = if (isPornhubSite) "最高評分" else "他們在看",
+            titleRes = when {
+                isPornhubSite -> R.string.ph_top_rated
+                isNjavSite -> R.string.njav_sec_today
+                else -> R.string.they_watched
+            },
+            sort = when {
+                isPornhubSite -> "最高評分"
+                isNjavSite -> "today-hot"
+                else -> "他們在看"
+            },
             videos = homePage.watchingNow
         ),
         // ── 素人（PH）/ 素人業餘（nJAV）/ 泡麵番 ──────────────────────────
@@ -74,11 +111,13 @@ fun buildCategoryList(
             key = HOME_CATEGORY_SHORT_EPISODE,
             titleRes = when {
                 isPornhubSite -> R.string.ph_amateur
+                isNjavSite -> R.string.njav_sec_vr
                 isAVSite -> R.string.amateur_nomask
                 else -> R.string.category_instant_noodle
             },
             genre = when {
                 isPornhubSite -> "素人"
+                isNjavSite -> "genres/VR"
                 isAVSite -> "素人業餘"
                 else -> "泡麵番"
             },
@@ -90,11 +129,13 @@ fun buildCategoryList(
             key = HOME_CATEGORY_MOTION_ANIME,
             titleRes = when {
                 isPornhubSite -> R.string.ph_japanese
+                isNjavSite -> R.string.njav_sec_uncensored
                 isAVSite -> R.string.hd_uncensored
                 else -> R.string.category_motion_anime
             },
             genre = when {
                 isPornhubSite -> "日本"
+                isNjavSite -> "uncensored-leak"
                 isAVSite -> "高清無碼"
                 else -> "Motion Anime"
             },
@@ -152,9 +193,13 @@ fun buildCategoryList(
         // ── AI 生成 / 中文字幕（PH 不用这一栏）─────────────────────────────
         HomeCategory(
             key = HOME_CATEGORY_AI_GENERATED,
-            titleRes = if (isAVSite) R.string.chinese_subtitle else R.string.ai_generated,
+            titleRes = when {
+                isNjavSite -> R.string.njav_sec_chinese_subtitle
+                isAVSite -> R.string.chinese_subtitle
+                else -> R.string.ai_generated
+            },
             genre = if (isAVSite) null else "AI生成",
-            tags = if (isAVSite) "中文字幕" else null,
+            tags = if (isNjavSite) "chinese-subtitle" else if (isAVSite) "中文字幕" else null,
             sort = "最新上傳",
             videos = homePage.aiGenerated
         ),
@@ -163,6 +208,7 @@ fun buildCategoryList(
             key = HOME_CATEGORY_MMD,
             titleRes = when {
                 isPornhubSite -> R.string.ph_exclusive
+                isNjavSite -> R.string.njav_sec_monthly
                 isAVSite -> R.string.ranking_today
                 else -> R.string.mmd
             },
@@ -171,7 +217,11 @@ fun buildCategoryList(
                 isAVSite -> null
                 else -> "MMD"
             },
-            sort = if (isAVSite && !isPornhubSite) "本日排行" else "最新上傳",
+            sort = when {
+                isNjavSite -> "monthly-hot"
+                isAVSite && !isPornhubSite -> "本日排行"
+                else -> "最新上傳"
+            },
             videos = homePage.mmd
         ),
         // ── 本月排行（nJAV）/ Cosplay（hanime）—— PH 不用这一栏 ───────────
@@ -180,6 +230,8 @@ fun buildCategoryList(
             titleRes = if (isAVSite) R.string.ranking_this_month else R.string.category_cosplay,
             genre = if (isAVSite) null else "Cosplay",
             sort = if (isAVSite) "本月排行" else "最新上傳",
+            // nJAV 的这一栏已经用不到（本月热门走 MMD 槽）——parser 不再填 cosplay，
+            // 这里保持原样即可：videos 为空时它会被结尾的 filter 丢掉。
             videos = homePage.cosplay
         )
     ).filter { it.videos.isNotEmpty() }

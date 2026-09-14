@@ -430,6 +430,9 @@ Recommendations are as follows:\n
     <string name="artist_page_title">Artist</string>
     <string name="artist_page_works">Works</string>
     <string name="artist_page_loaded_count">Loaded %1$d</string>
+    <string name="artist_page_prev">Previous</string>
+    <string name="artist_page_next">Next</string>
+    <string name="artist_page_page_indicator">Page %1$d / %2$d</string>
     <string name="artist_page_view_count">%1$s views</string>
     <string name="artist_page_no_videos">No works found for this artist</string>
     <string name="artist_page_search_result_hint">This site has no artist page, so the list below is a name search — works by namesakes may be mixed in.</string>
@@ -772,6 +775,30 @@ Recommendations are as follows:\n
     <string name="animation_2d">2D Animation</string>
     <string name="start_from_beginning">Start from Beginning</string>
     <string name="latest_av">Latest AV</string>
+    <!-- nJAV 首页栏目：与站点真实导航一一对应（26.8） -->
+    <string name="njav_sec_chinese_subtitle">Chinese Subtitles</string>
+    <string name="njav_sec_new">Recently Updated</string>
+    <string name="njav_sec_release">New Releases</string>
+    <string name="njav_sec_uncensored">Uncensored Leaks</string>
+    <string name="njav_sec_today">Today\'s Hot</string>
+    <string name="njav_sec_weekly">This Week\'s Hot</string>
+    <string name="njav_sec_monthly">This Month\'s Hot</string>
+    <string name="njav_sec_vr">VR</string>
+    <string name="njav_sort_title">Sort</string>
+    <string name="njav_sort_default">Default order</string>
+    <string name="njav_sort_released">Release date</string>
+    <string name="njav_sort_updated">Recently updated</string>
+    <string name="njav_sort_saved">Saves</string>
+    <string name="njav_sort_today_views">Views today</string>
+    <string name="njav_sort_weekly_views">Views this week</string>
+    <string name="njav_sort_monthly_views">Views this month</string>
+    <string name="njav_sort_views">Total views</string>
+    <string name="njav_filter_title">Filter</string>
+    <string name="njav_filter_all">All</string>
+    <string name="njav_filter_individual">Solo works</string>
+    <string name="njav_filter_multiple">Multi-performer</string>
+    <string name="njav_filter_chinese_subtitle">Chinese subtitles</string>
+
     <string name="amateur_nomask">Amateur No-Mask</string>
     <string name="hd_uncensored">HD Uncensored</string>
     <string name="ai_decensored">AI Uncensored</string>
@@ -805,6 +832,7 @@ Recommendations are as follows:\n
     <string name="paused">Suspended</string>
     <string name="restart_needed">You need to restart the program, otherwise it won\'t work!</string>
     <string name="played">Watched</string>
+    <string name="video_uncensored">Uncensored</string>
     <string name="local">Local</string>
     <string name="current_bucket">Current bucket</string>
     <string name="select_all">Select All</string>

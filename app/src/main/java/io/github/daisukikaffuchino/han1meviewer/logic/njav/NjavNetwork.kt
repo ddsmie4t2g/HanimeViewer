@@ -77,6 +77,30 @@ object NjavNetwork {
     fun actressUrl(path: String, page: Int): String = listUrl(path.trim('/'), page)
 
     /**
+     * 女优页带**排序/筛选**的地址（26.8）。
+     *
+     * 取值全部来自站点自己的下拉菜单（2026-09-14 从女优页锚点里读出来的）：
+     *
+     * | 菜单 | 取值 |
+     * |---|---|
+     * | 排序 | `released_at`（发行日期）/ `published_at`（最近更新）/ `saved`（收藏数）/ `today_views` / `weekly_views` / `monthly_views` / `views`（总浏览数）|
+     * | 筛选 | `individual`（单人作品）/ `multiple`（多人作品）/ `chinese-subtitle`（中文字幕）；「所有」= 不传 |
+     *
+     * ⚠️ 两个参数都是站点原生 query（`?sort=` / `?filters=`），不是我们编的 —— 站点改名前
+     * 这套下拉就是死的，所以值只在 [NjavSort] / [NjavFilter] 里定义一次。
+     */
+    fun actressUrl(path: String, page: Int, sort: String?, filter: String?): String {
+        val base = listUrl(path.trim('/'), page)
+        val extras = buildList {
+            sort?.takeIf { it.isNotBlank() }?.let { add("sort=" + it) }
+            filter?.takeIf { it.isNotBlank() }?.let { add("filters=" + it) }
+        }
+        if (extras.isEmpty()) return base
+        val separator = if (base.contains('?')) "&" else "?"
+        return base + separator + extras.joinToString("&")
+    }
+
+    /**
      * 从女优链接里抠出 `actresses/<编码后的名字>` 这一段（[actressUrl] 要的形态）。
      *
      * 输入可能是三种写法，全部要能吃下：

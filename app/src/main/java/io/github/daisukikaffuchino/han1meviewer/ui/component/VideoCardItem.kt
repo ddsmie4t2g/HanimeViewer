@@ -162,7 +162,7 @@ fun VideoCardItem(
                         }
                     }
 
-                    // 底部半透明遮罩（播放量和时长）
+                    // 底部半透明遮罩（无码标记 + 播放量 + 时长）
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -178,6 +178,28 @@ fun VideoCardItem(
                             )
                             .padding(horizontal = 6.dp),
                     ) {
+                        // ⭐ 26.8：无码标记放在**左下角**（用户明确要求的落点）。
+                        // 文案用资源（三语），颜色沿用站点那种蓝，和「已看」的黑色小标签区分开。
+                        if (videoItem.isUncensored) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(end = 4.dp)
+                                    .background(
+                                        color = Color(0xCC1E6FD9),
+                                        shape = RoundedCornerShape(4.dp),
+                                    )
+                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.video_uncensored),
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
+
                         videoItem.views?.let {
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_play_circle),

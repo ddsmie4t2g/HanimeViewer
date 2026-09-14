@@ -26,6 +26,8 @@ data class HanimeInfo(
     override val reviews: String? = "",
     override val currentArtist: String? = "",
     val watched: Boolean ?= false,
+    /** 无码；见 [VideoItemType.isUncensored]。 */
+    override val isUncensored: Boolean = false,
 ): VideoItemType , HanimeInfoType {
     companion object {
         const val NORMAL = 0

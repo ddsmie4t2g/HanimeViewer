@@ -3,6 +3,7 @@ package io.github.daisukikaffuchino.han1meviewer.logic.njav
 import io.github.daisukikaffuchino.han1meviewer.HanimeLink
 import io.github.daisukikaffuchino.han1meviewer.ResolutionLinkMap
 import io.github.daisukikaffuchino.han1meviewer.logic.exception.ParseException
+import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistProfile
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimePreview
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeVideo
@@ -74,7 +75,33 @@ object NjavParser {
     const val SEC_TODAY_HOT = "today_hot"
     const val SEC_MONTHLY_HOT = "monthly_hot"
 
-    /** 首页栏目 → nJAV 路径（已全部实测可达，每页 12 条）。 */
+    const val SEC_VR = "vr"
+
+    /**
+     * 首页栏目 → nJAV 路径。
+     *
+     * ⭐ 26.8 全部改成**站点真实导航里的栏目**（用户要求「扎根实际网页」）。
+     * 路径来自 2026-09-14 抓下来的首页导航（`/cn` 会 301 到 `/dm###/cn`，导航本身稳定）：
+     *
+     * | 站点导航 | 路径 |
+     * |---|---|
+     * | 中文字幕 | `chinese-subtitle` |
+     * | 最近更新 | `new` |
+     * | 新作上市 | `release` |
+     * | 无码流出 | `uncensored-leak` |
+     * | 今日热门 | `today-hot` |
+     * | 本週热门 | `weekly-hot` |
+     * | 本月热门 | `monthly-hot` |
+     * | VR | `genres/VR` |
+     *
+     * ⚠️ **刻意不加**的东西（用户点名不要）：`色色主播` / `韩国直播` / `中国直播`（外链直播站）、
+     * `无广告免费漫画`、底部那一堆 `bit.ly` 推广位、以及 `site/123av` 之类的换量互链 ——
+     * 它们是广告不是影片分类。
+     *
+     * 站点还有 `女优一览` / `女优排行` / `类型` / `发行商` 与二十来个**系列厂商页**
+     * （SIRO / LUXU / FC2 / 东京热 / 一本道 / 麻豆传媒 …）：那些是索引页而非影片列表页，
+     * 塞进首页会把真栏目挤掉，需要单独入口。
+     */
     val HOME_SECTIONS: List<Pair<String, String>> = listOf(
         SEC_LATEST_AV to "new",
         SEC_LATEST_RELEASE to "release",
@@ -83,6 +110,7 @@ object NjavParser {
         SEC_WEEKLY_HOT to "weekly-hot",
         SEC_TODAY_HOT to "today-hot",
         SEC_MONTHLY_HOT to "monthly-hot",
+        SEC_VR to "genres/VR",
     )
 
     /**
@@ -90,7 +118,7 @@ object NjavParser {
      * 在 AV 模式下给每个分类打的「检索标记」→ nJAV 路径。
      * 用户点某个分类的「更多」时，仓库层就是靠这张表把标记翻译成 nJAV 的分类页。
      */
-    private val MARKER_TO_PATH = mapOf(
+    private val LEGACY_MARKER_TO_PATH = mapOf(
         "日本AV" to "new",
         "最新上市" to "release",
         "高清無碼" to "uncensored-leak",
@@ -100,8 +128,25 @@ object NjavParser {
         "本月排行" to "monthly-hot",
     )
 
-    fun pathForMarker(marker: String?): String? =
-        marker?.trim()?.takeIf { it.isNotEmpty() }?.let { MARKER_TO_PATH[it] }
+    /** 站点真实导航里、可以被当作「影片列表页」打开的路径。 */
+    private val REAL_LIST_PATHS = setOf(
+        "new", "release", "uncensored-leak", "chinese-subtitle",
+        "today-hot", "weekly-hot", "monthly-hot", "genres/VR",
+    )
+
+    /**
+     * 「更多」的标记 → 路径。
+     *
+     * ⭐ 26.8 起标记**就是真实路径本身**（`new` / `release` / `uncensored-leak` / `genres/VR` …）：
+     * 栏目名已经和站点导航一一对应，中间再夹一层中文别名只会多一处会漂移的映射。
+     * 旧别名表保留，是为了兼容旧版本存下来的首页缓存/路由 —— 点「更多」不至于静默退回默认排序。
+     */
+    fun pathForMarker(marker: String?): String? {
+        val value = marker?.trim().orEmpty()
+        if (value.isEmpty()) return null
+        if (value in REAL_LIST_PATHS) return value
+        return LEGACY_MARKER_TO_PATH[value]
+    }
 
     //<editor-fold desc="列表">
 
@@ -148,12 +193,26 @@ object NjavParser {
 
         val duration = parseDuration(card)
 
+        // 无码判定（26.8）：两种标记都要认。
+        // 1. **片名 slug**：nJAV 的无码片尾缀就是 `-uncensored-leak`（列表卡片与详情页都带）；
+        // 2. 卡片角标文案：站点在部分列表页会给「無修正 / 无码 / Uncensored」角标。
+        // 只看 slug 会漏掉「slug 干净但带角标」的片，只看角标则会漏掉绝大多数
+        // （角标是分类页特有的，普通列表页没有）。
+        val uncensored = slug.contains("uncensored", ignoreCase = true) ||
+                card.select("span.absolute").any { span ->
+                    val text = span.text().trim()
+                    text.contains("无码") || text.contains("無碼") ||
+                            text.contains("無修正") || text.contains("无修正") ||
+                            text.contains("uncensored", ignoreCase = true)
+                }
+
         return HanimeInfo(
             title = title,
             coverUrl = cover,
             videoCode = slug,
             duration = duration,
             itemType = HanimeInfo.NORMAL,
+            isUncensored = uncensored,
         )
     }
 
@@ -190,18 +249,20 @@ object NjavParser {
                 avatarUrl = null,
                 username = null,
                 banner = null,
-                latestHanime = mutableListOf(),
-                latestRelease = list(SEC_LATEST_RELEASE),
-                ecchiAnime = list(SEC_LATEST_AV),
-                shortEpisodeAnime = mutableListOf(),
+                // ⚠️ 槽位名是 hanime 那边的叫法，这里只是「借同一份界面按槽位取数」，
+                // 与内容没有语义关系。**必须与 HomePageMappers 的 nJAV 分支一一对应**。
+                latestHanime = list(SEC_WEEKLY_HOT),       // 本週热门
+                latestRelease = list(SEC_LATEST_RELEASE),  // 新作上市
+                ecchiAnime = list(SEC_LATEST_AV),          // 最近更新
+                shortEpisodeAnime = list(SEC_VR),          // VR
                 twoPointFiveDAnime = mutableListOf(),
                 threeDCG = mutableListOf(),
-                motionAnime = list(SEC_UNCENSORED),
+                motionAnime = list(SEC_UNCENSORED),        // 无码流出
                 twoDAnime = mutableListOf(),
-                aiGenerated = list(SEC_CHINESE_SUBTITLE),
-                mmd = list(SEC_TODAY_HOT),
-                cosplay = list(SEC_MONTHLY_HOT),
-                watchingNow = list(SEC_WEEKLY_HOT),
+                aiGenerated = list(SEC_CHINESE_SUBTITLE),  // 中文字幕
+                mmd = list(SEC_MONTHLY_HOT),               // 本月热门
+                cosplay = mutableListOf(),
+                watchingNow = list(SEC_TODAY_HOT),         // 今日热门
                 newAnimeTrailer = mutableListOf(),
                 userId = "",
             )
@@ -277,6 +338,62 @@ object NjavParser {
 
     /** 卡片上的「2008 出道」。 */
     private val ACTRESS_DEBUT_YEAR = Regex("""(\d{4})\s*出道""")
+
+    //</editor-fold>
+
+    //<editor-fold desc="女优页（资料头 / 排序 / 筛选）">
+
+    /**
+     * 女优页顶部的**资料头**。
+     *
+     * 站点的结构（2026-09-14 抓取 `/actresses/<名字>` 实测）：
+     *
+     * ```html
+     * <h1>持野蓬的 AV 影片库</h1>
+     * <div x-init="...axios.get('https://njavtv.com/api/actresses/1112912/view')...">
+     *   <div class="... rounded-full w-24 h-24"><div>持</div></div>   ← 头像位（只有首字占位）
+     *   <div class="font-medium text-lg">
+     *     <h4 class="text-nord6">持野蓬</h4>
+     *     <div class="mt-2 ... text-nord9">
+     *       <p>158cm / 40J - 22 - 33</p>      ← 身材（该女优没有数据时是空的 <p></p>）
+     *       <p>1987-05-25 （39岁）</p>         ← 生日与年龄（同样可能为空）
+     *     </div>
+     *   </div>
+     * </div>
+     * ```
+     *
+     * ⚠️ 三个必须知道的点：
+     * 1. **这两行 `<p>` 可能整段是空的**（站点对没资料的女优只留空 `<p></p>`）——
+     *    所以解析结果必须允许为空，界面也要允许不显示，不能拿默认值硬凑。
+     * 2. **这里的头像是首字占位符，不是图片**：女优页**给不出头像**（真头像在女优一览的
+     *    `fourhoi.com/actress/<id>-t.jpg`）。想要头像得去索引页按名字找，见
+     *    `NetworkRepo.findNjavActress`。
+     * 3. 资料头里那份数据是 **JS 调 `/api/actresses/<id>/view` 填的**，服务端渲染时
+     *    往往为空 —— 我们能拿到的就是 HTML 里已经有的部分；拿不到就不显示，
+     *    **绝不为此再打一次那个被反爬保护的 API**（实测它对非浏览器客户端直接回挑战页）。
+     */
+    fun actressProfile(body: String): ArtistProfile? {
+        val doc = Jsoup.parse(body)
+        val header = doc.selectFirst("div.hero-pattern") ?: return null
+        val name = header.selectFirst("h4")?.text()?.trim().orEmpty()
+        val lines = header.select("div.text-nord9 p, div.text-sm p, div.xs\\:text-base p")
+            .map { it.text().trim() }
+            .filter { it.isNotEmpty() }
+        if (name.isEmpty() && lines.isEmpty()) return null
+        val measurements = lines.firstOrNull { MEASUREMENTS.matches(it) }.orEmpty()
+        val birthday = lines.firstOrNull { BIRTHDAY.containsMatchIn(it) }.orEmpty()
+        return ArtistProfile(
+            name = name,
+            measurements = measurements,
+            birthday = birthday,
+        )
+    }
+
+    /** `158cm / 40J - 22 - 33`：必须同时有 cm 与三围分隔，避免把简介里的数字当身材。 */
+    private val MEASUREMENTS = Regex("""^\d{2,3}\s*cm\s*/.*\d.*-.*\d""")
+
+    /** `1987-05-25 （39岁）`：只认日期那一段，后面括号里的年龄随站点怎么写都行。 */
+    private val BIRTHDAY = Regex("""\d{4}-\d{2}-\d{2}""")
 
     //</editor-fold>
 

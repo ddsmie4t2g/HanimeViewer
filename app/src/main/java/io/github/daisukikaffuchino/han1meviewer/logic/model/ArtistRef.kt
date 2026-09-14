@@ -183,6 +183,13 @@ data class ArtistProfile(
     val videoCount: String = "",
     val subscriberCount: String = "",
     val viewCount: String = "",
+    /**
+     * 身材数据，**原样文案**：nJAV 女优页给的是 `158cm / 40J - 22 - 33` 这种一行字符串。
+     * 不做结构化解析（身高/罩杯/三围拆开再拼回去，只会把站点哪天改格式变成崩溃）。
+     */
+    val measurements: String = "",
+    /** 生日与年龄，同样原样：`1987-05-25 （39岁）`。 */
+    val birthday: String = "",
 )
 
 /**

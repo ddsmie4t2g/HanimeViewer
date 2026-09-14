@@ -46,6 +46,8 @@ fun HomePageContent(
     contentTopPadding: Dp,
     modifier: Modifier = Modifier,
     isPornhubSite: Boolean = false,
+    /** 是否走 nJAV：它的首页栏目要按**站点真实导航**命名（26.8）。 */
+    isNjavSite: Boolean = false,
     listState: LazyListState = rememberLazyListState()
 ) {
     val banners = remember(data.page.banner) {
@@ -55,8 +57,8 @@ fun HomePageContent(
         data.announcements.filter { it.isActive }
     }
 
-    val categories = remember(data.page, isAVSite, isPornhubSite) {
-        buildCategoryList(data.page, isAVSite, isPornhubSite)
+    val categories = remember(data.page, isAVSite, isPornhubSite, isNjavSite) {
+        buildCategoryList(data.page, isAVSite, isPornhubSite, isNjavSite)
     }
     LazyColumn(
         modifier = modifier.fillMaxSize(),

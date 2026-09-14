@@ -896,10 +896,41 @@ object NetworkRepo {
     fun getArtistVideos(
         artist: ArtistRef,
         page: Int,
+        /** nJAV 女优页的排序（`sort=`）；其它站点忽略。 */
+        sort: String? = null,
+        /** nJAV 女优页的筛选（`filters=`）；其它站点忽略。 */
+        filter: String? = null,
     ): Flow<PageLoadingState<ArtistVideosPage>> = when (artist.siteSource) {
         SiteSource.Pornhub -> phArtistFlow(artist, page)
-        SiteSource.Njav -> njavArtistFlow(artist, page)
+        SiteSource.Njav -> njavArtistFlow(artist, page, sort, filter)
         SiteSource.Hanime1 -> hanimeArtistFlow(artist, page)
+    }
+
+    /**
+     * 按名字在 nJAV 的**女优索引**里找一位女优（26.8）。
+     *
+     * 为什么需要它：nJAV 的视频详情页只有女优的名字与链接，**没有头像**（女优页顶部那个
+     * 圆圈也是首字占位符，不是图片）—— 真头像只在索引页的
+     * `fourhoi.com/actress/<id>-t.jpg` 里。所以「关注了某个女优之后关注列表没有头像」
+     * 这件事，只能回索引页按名字把她找出来。
+     *
+     * 代价与边界：索引页每页 52 位、按作品数倒序，**没有名字检索**（`?q=` 被忽略），
+     * 所以这里最多翻 [maxPages] 页（默认 3 页 ≈ 156 位，叫得出名字的都在前面）。
+     * 找不到就返回 null —— 界面显示占位符，不做无上限的翻页。
+     */
+    suspend fun findNjavActress(name: String, maxPages: Int = 3): NjavActress? {
+        val target = name.trim()
+        if (target.isEmpty()) return null
+        for (page in 1..maxPages) {
+            val result = runCatching {
+                val response = NjavNetwork.service.get(NjavNetwork.actressIndexUrl(page))
+                if (!response.isSuccessful) return@runCatching emptyList()
+                NjavParser.actressList(response.body()?.string().orEmpty())
+            }.getOrDefault(emptyList())
+            result.firstOrNull { it.name.equals(target, ignoreCase = true) }?.let { return it }
+            if (result.isEmpty()) break
+        }
+        return null
     }
 
     /**
@@ -994,10 +1025,12 @@ object NetworkRepo {
     private fun njavArtistFlow(
         artist: ArtistRef,
         page: Int,
+        sort: String? = null,
+        filter: String? = null,
     ): Flow<PageLoadingState<ArtistVideosPage>> = flow {
         val path = NjavNetwork.actressPathFrom(artist.url)
         val url = if (path != null) {
-            NjavNetwork.actressUrl(path, page)
+            NjavNetwork.actressUrl(path, page, sort, filter)
         } else {
             // 关注表里可能只有名字（老数据 / 从索引里搜到的人）→ 退回站点搜索。
             NjavNetwork.searchUrl(artist.name, page)
@@ -1008,11 +1041,14 @@ object NetworkRepo {
         }
         val body = response.body()?.string().orEmpty()
         val list = NjavParser.videoList(body)
+        // 资料头（身材 / 生日）只在第一页解析一次 —— 它在页面上是同一个块，
+        // 每页都解析一遍纯属浪费；而且排序/筛选切换会重新拉第一页，天然会刷新。
+        val profile = if (page <= 1) NjavParser.actressProfile(body) else null
         emit(
             if (list.isEmpty() && !NjavParser.hasNextPage(body)) {
                 PageLoadingState.NoMoreData
             } else {
-                PageLoadingState.Success(ArtistVideosPage(profile = null, videos = list))
+                PageLoadingState.Success(ArtistVideosPage(profile = profile, videos = list))
             }
         )
     }.catch { e ->

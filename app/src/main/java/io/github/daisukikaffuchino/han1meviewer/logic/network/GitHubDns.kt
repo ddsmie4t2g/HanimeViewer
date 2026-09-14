@@ -43,17 +43,22 @@ object GitHubDns : Dns {
 
     private val ipsByHost: Map<String, List<String>> = mapOf(
         "github.com" to listOf(
+            // 26.8 复核（doh.pub）：GitHub 已经部分迁到 Azure 段，旧表里全是 Fastly/自建段。
+            // 新旧一起留着 —— 后面的系统 DNS 尾巴只在前面的都连不上时才生效。
+            "20.27.177.113",
             "20.205.243.166",
             "140.82.121.3",
             "140.82.116.4",
             "140.82.121.4",
         ),
         "api.github.com" to listOf(
+            "20.27.177.116",
             "140.82.116.6",
             "20.205.243.168",
             "140.82.121.6",
         ),
         "codeload.github.com" to listOf(
+            "20.27.177.113",
             "20.205.243.166",
             "140.82.121.3",
         ),
@@ -71,13 +76,33 @@ object GitHubDns : Dns {
         // 才回退到 raw 那条源。因为 [lookup] 一旦返回内置 IP，OkHttp 就不会再问系统 DNS，
         // 内置 IP 全不通 = 这个域名在这台设备上彻底不可用。
         //
-        // 下面这组是 Fastly 为 jsDelivr 提供服务的共享 anycast 段（实测可连）。
-        // 但仍然可能再过期 —— 真正的保护是 [lookup] 里的系统 DNS 兜底尾巴。
+        // ⭐ 26.8 起：**主域名 + 三个 jsDelivr 镜像域名都进表**，并在
+        // [UPDATE_URLS][io.github.daisukikaffuchino.han1meviewer.logic.AppUpdateChecker]
+        // 里逐条回退 —— 一条 CDN 段被墙不再等于「检查更新不能用」。
         "cdn.jsdelivr.net" to listOf(
             "151.101.1.229",
             "151.101.65.229",
             "151.101.129.229",
             "151.101.193.229",
+        ),
+        "fastly.jsdelivr.net" to listOf(
+            "151.101.1.229",
+            "151.101.65.229",
+            "151.101.129.229",
+            "151.101.193.229",
+        ),
+        "gcore.jsdelivr.net" to listOf(
+            "104.17.207.5",
+            "104.17.208.5",
+        ),
+        "testingcf.jsdelivr.net" to listOf(
+            "104.17.207.5",
+            "104.17.208.5",
+        ),
+        // 上游版本查询走 `data.jsdelivr.com`（与 cdn 不是一个 CDN 段）。
+        "data.jsdelivr.com" to listOf(
+            "167.82.49.91",
+            "146.75.45.91",
         ),
     )
 

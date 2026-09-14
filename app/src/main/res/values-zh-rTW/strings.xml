@@ -422,6 +422,9 @@
     <string name="artist_page_title">作者</string>
     <string name="artist_page_works">作品</string>
     <string name="artist_page_loaded_count">已載入 %1$d 部</string>
+    <string name="artist_page_prev">上一頁</string>
+    <string name="artist_page_next">下一頁</string>
+    <string name="artist_page_page_indicator">第 %1$d / %2$d 頁</string>
     <string name="artist_page_view_count">%1$s 次觀看</string>
     <string name="artist_page_no_videos">沒有取得該作者的作品</string>
     <string name="artist_page_search_result_hint">該站沒有作者頁，下面是依名字搜尋的結果，可能混入同名作者的作品。</string>
@@ -767,6 +770,30 @@
     <string name="animation_2d">2D 動畫</string>
     <string name="start_from_beginning">從頭開始</string>
     <string name="latest_av">最新 AV</string>
+    <!-- nJAV 首页栏目：与站点真实导航一一对应（26.8） -->
+    <string name="njav_sec_chinese_subtitle">中文字幕</string>
+    <string name="njav_sec_new">最近更新</string>
+    <string name="njav_sec_release">新作上市</string>
+    <string name="njav_sec_uncensored">無碼流出</string>
+    <string name="njav_sec_today">今日熱門</string>
+    <string name="njav_sec_weekly">本週熱門</string>
+    <string name="njav_sec_monthly">本月熱門</string>
+    <string name="njav_sec_vr">VR</string>
+    <string name="njav_sort_title">排序</string>
+    <string name="njav_sort_default">站點預設</string>
+    <string name="njav_sort_released">發行日期</string>
+    <string name="njav_sort_updated">最近更新</string>
+    <string name="njav_sort_saved">收藏數</string>
+    <string name="njav_sort_today_views">今日瀏覽數</string>
+    <string name="njav_sort_weekly_views">本週瀏覽數</string>
+    <string name="njav_sort_monthly_views">本月瀏覽數</string>
+    <string name="njav_sort_views">總瀏覽數</string>
+    <string name="njav_filter_title">篩選</string>
+    <string name="njav_filter_all">所有</string>
+    <string name="njav_filter_individual">單人作品</string>
+    <string name="njav_filter_multiple">多人作品</string>
+    <string name="njav_filter_chinese_subtitle">中文字幕</string>
+
     <string name="amateur_nomask">素人業餘</string>
     <string name="hd_uncensored">高清無碼</string>
     <string name="ai_decensored">AI 解碼</string>
@@ -796,6 +823,7 @@
     <string name="network_timeout_text">逾時</string>
     <string name="paused">已暫停</string>
     <string name="played">已觀看</string>
+    <string name="video_uncensored">無碼</string>
     <string name="local">本機</string>
     <string name="current_bucket">目前套用級距</string>
     <string name="select_all">全選</string>

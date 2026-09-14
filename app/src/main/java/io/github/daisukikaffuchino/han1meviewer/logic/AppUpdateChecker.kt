@@ -15,6 +15,7 @@ import io.github.daisukikaffuchino.utils.applicationContext
 import io.github.daisukikaffuchino.utils.decodeFromStringByBase64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -133,6 +134,11 @@ object AppUpdateChecker {
         "aHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L2doL2Rkc21pZTR0MmcvSGFuaW1lVmlld2VyQG1vZC91cGRhdGUuanNvbg==",
         // GitHub raw（直连，可能需要代理）
         "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2Rkc21pZTR0MmcvSGFuaW1lVmlld2VyL21vZC91cGRhdGUuanNvbg==",
+        // ⭐ 26.8：jsDelivr 的**其它 CDN 段**。同一份内容、不同 anycast 段 ——
+        // 某一段被墙/被投毒时还有别的能走（这三个域名都已进 [GitHubDns] 的内置 IP 表）。
+        "aHR0cHM6Ly9mYXN0bHkuanNkZWxpdnIubmV0L2doL2Rkc21pZTR0MmcvSGFuaW1lVmlld2VyQG1vZC91cGRhdGUuanNvbg==",
+        "aHR0cHM6Ly9nY29yZS5qc2RlbGl2ci5uZXQvZ2gvZGRzbWllNHQyZy9IYW5pbWVWaWV3ZXJAbW9kL3VwZGF0ZS5qc29u",
+        "aHR0cHM6Ly90ZXN0aW5nY2YuanNkZWxpdnIubmV0L2doL2Rkc21pZTR0MmcvSGFuaW1lVmlld2VyQG1vZC91cGRhdGUuanNvbg==",
     )
 
     /** 原实现用于腾讯云 COS 防盗链；对 raw.githubusercontent 无影响，保留以免动到请求结构。 */
@@ -219,6 +225,10 @@ object AppUpdateChecker {
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
+            // ⭐ 26.8 起也挂 [GitHubDns]：它现在同时覆盖 data.jsdelivr.com 与 pi.github.com
+            // （都带系统 DNS 兜底尾巴），所以「套上 GitHub 的钉 IP 表会把 jsDelivr 打歪」
+            // 这个顾虑已经不成立，而收益是上游查询不再吃 DNS 投毒。
+            .dns(GitHubDns)
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)
             .build()
@@ -297,32 +307,48 @@ object AppUpdateChecker {
 
     //<editor-fold desc="本仓库 update.json">
 
-    private fun requestUpdateJson(): String {
-        var lastError: Throwable? = null
-        for (encoded in UPDATE_URLS) {
-            val url = encoded.decodeFromStringByBase64(Base64.NO_WRAP)
-            val request = Request.Builder()
-                .url(url)
-                .header(
-                    "Referer",
-                    ENCODED_UPDATE_REFERER.decodeFromStringByBase64(Base64.NO_WRAP)
-                )
-                .get()
-                .build()
-            val result = runCatching {
-                client.newCall(request).execute().use { response ->
-                    check(response.isSuccessful) { "Update check failed with HTTP ${response.code}" }
-                    response.body.string()
-                }
+    /**
+     * 取 `update.json`：**并发问所有源，取 `versionCode` 最大的那一份**。
+     *
+     * ⚠️ 这里以前是「第一个成功就返回」，有两个后果，都是用户能感知到的：
+     *
+     * 1. **jsDelivr 边缘节点会缓存旧内容**（发版后几分钟到十几小时不等）——
+     *    而它是列表里的第一条，于是「刚发的新版检测不到」。26.6.2 就踩过这个；
+     *    当时记下的修法是「两个源都请求、取较大的 versionCode」，但**代码一直没改**。
+     * 2. 单条源不通时只能串行重试，弱网下「检查更新」会一次比一次慢。
+     *
+     * 现在：并发（总耗时 = 最慢那条，而不是相加）→ 逐条解析 → 取版本号最大的；
+     * 全都失败才抛错（由上层退回缓存）。列表里放了主 CDN + 三个镜像域名 + raw
+     * 共 5 条，**任一条能通就够**。
+     */
+    private suspend fun requestUpdateJson(): String = coroutineScope {
+        val referer = ENCODED_UPDATE_REFERER.decodeFromStringByBase64(Base64.NO_WRAP)
+        val results = UPDATE_URLS.map { encoded ->
+            async(Dispatchers.IO) {
+                val url = encoded.decodeFromStringByBase64(Base64.NO_WRAP)
+                runCatching {
+                    val request = Request.Builder()
+                        .url(url)
+                        .header("Referer", referer)
+                        .get()
+                        .build()
+                    client.newCall(request).execute().use { response ->
+                        check(response.isSuccessful) {
+                            "Update check failed with HTTP ${response.code}"
+                        }
+                        val json = response.body.string()
+                        val code = jsonParser
+                            .decodeFromString<AppUpdatePayload>(json)
+                            .versionCode
+                        LogUtil.d(TAG, "更新源 $url → versionCode=$code")
+                        code to json
+                    }
+                }.onFailure { LogUtil.e(TAG, "更新源失败：$url", it) }
             }
-            result.getOrNull()?.let { json ->
-                LogUtil.d(TAG, "本仓库更新响应（$url）：$json")
-                return json
-            }
-            lastError = result.exceptionOrNull()
-            LogUtil.e(TAG, "更新源失败：$url", lastError)
-        }
-        throw lastError ?: IllegalStateException("No update source configured")
+        }.awaitAll().mapNotNull { it.getOrNull() }
+
+        results.maxByOrNull { it.first }?.second
+            ?: throw IllegalStateException("所有更新源都失败了（共 ${UPDATE_URLS.size} 条）")
     }
 
     private fun String?.toUpdateCheckResult(): AppUpdateCheckResult {

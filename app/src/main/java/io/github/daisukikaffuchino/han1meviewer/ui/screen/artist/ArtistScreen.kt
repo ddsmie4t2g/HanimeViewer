@@ -57,10 +57,12 @@ import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.account.AccountRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistProfile
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
+import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageLoadingState
 import io.github.daisukikaffuchino.han1meviewer.ui.component.LoadMoreFooter
 import io.github.daisukikaffuchino.han1meviewer.ui.component.VideoCardItem
 import io.github.daisukikaffuchino.han1meviewer.ui.component.appbar.HanimeScaffold
+import io.github.daisukikaffuchino.han1meviewer.ui.component.ChoiceDialog
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.RetryableImage
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.rememberVideoGridColumns
 import io.github.daisukikaffuchino.han1meviewer.ui.theme.SpacingNormal
@@ -118,28 +120,14 @@ fun ArtistScreen(
         FollowedArtistStore.isFollowed(artist.followKey)
     }
 
-    var isLoadingMore by remember { mutableStateOf(false) }
-    LaunchedEffect(gridState, state.videos.size, state.canLoadMore) {
-        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
-            .distinctUntilChanged()
-            .collect { last ->
-                if (!isLoadingMore && state.canLoadMore && last != null &&
-                    last >= state.videos.size - 6
-                ) {
-                    isLoadingMore = true
-                    viewModel.loadMore()
-                }
-            }
-    }
-    LaunchedEffect(state.state) {
-        if (state.state !is PageLoadingState.Loading) isLoadingMore = false
-    }
 
     val target = state.artist.takeIf { it.followKey.isNotEmpty() } ?: artist
     val profile = state.profile
     val displayName = profile?.name?.takeIf { it.isNotBlank() }
         ?: target.name.ifBlank { stringResource(R.string.artist_page_title) }
-    val videoColumns = rememberVideoGridColumns()
+    // ⭐ 26.8：用户要求的排版 —— **3 列**，一页 12 条正好 4 行。
+    // 不再按屏宽自适应：列数一变，「一页 12 条 = 几行」就不确定了。
+    val videoColumns = ArtistViewModel.COLUMNS
 
     HanimeScaffold(title = displayName, onBack = navigateBack) { innerPadding ->
         Box(
@@ -160,10 +148,13 @@ fun ArtistScreen(
                 isFollowed = isFollowed,
                 columns = videoColumns,
                 gridState = gridState,
-                isLoadingMore = isLoadingMore,
                 onClickVideo = onClickVideo,
                 onToggleFollow = { toggleFollow(scope, view, artist) },
                 onRetry = viewModel::retry,
+                onPrevPage = viewModel::prevPage,
+                onNextPage = viewModel::nextPage,
+                onSortChange = viewModel::setSort,
+                onFilterChange = viewModel::setFilter,
             )
         }
     }
@@ -199,10 +190,13 @@ private fun ArtistVideoGrid(
     isFollowed: Boolean,
     columns: Int,
     gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
-    isLoadingMore: Boolean,
     onClickVideo: (String) -> Unit,
     onToggleFollow: () -> Unit,
     onRetry: () -> Unit,
+    onPrevPage: () -> Unit,
+    onNextPage: () -> Unit,
+    onSortChange: (String?) -> Unit,
+    onFilterChange: (String?) -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
@@ -236,12 +230,31 @@ private fun ArtistVideoGrid(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 if (state.videos.isNotEmpty()) {
+                    // 只说「第 x / y 页」，不说「已加载 n 条」——
+                    // 后者会把「站点那边还有多少」暴露成噪音，用户关心的是一页 12 条翻了多久。
                     Text(
-                        text = stringResource(R.string.artist_page_loaded_count, state.videos.size),
+                        text = stringResource(
+                            R.string.artist_page_page_indicator,
+                            state.page,
+                            state.totalPages,
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+        }
+
+        // ⭐ 26.8：nJAV 女优页的**排序 / 筛选**（站点原生 `?sort=` / `?filters=`）。
+        // 只在 nJAV 显示 —— 另外两个站点没有这组参数，画出来只会点了没反应。
+        if (state.artist.siteSource == SiteSource.Njav) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                ArtistSortFilterRow(
+                    sort = state.sort,
+                    filter = state.filter,
+                    onSortChange = onSortChange,
+                    onFilterChange = onFilterChange,
+                )
             }
         }
 
@@ -268,6 +281,8 @@ private fun ArtistVideoGrid(
             return@LazyVerticalGrid
         }
 
+        // 只画**这一页的 12 条**（3 列 × 4 行）。翻页由下面的翻页行控制，
+        // 不再无限往下滚 —— 用户能知道「一共翻到第几页」，也能回到上一页。
         items(state.videos.size, key = { state.videos[it].videoCode }) { index ->
             val video = state.videos[index]
             VideoCardItem(
@@ -279,46 +294,161 @@ private fun ArtistVideoGrid(
             )
         }
 
-        if (state.canLoadMore) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                if (isLoadingMore) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            ArtistPager(
+                page = state.page,
+                totalPages = state.totalPages,
+                canPrev = state.canPrev,
+                canNext = state.canNext,
+                isPaging = state.isPaging,
+                onPrev = onPrevPage,
+                onNext = onNextPage,
+                footer = {
+                    // 补拉失败要说出来：否则「翻不动了」和「真的没有了」长得一模一样。
+                    val failure = state.state as? PageLoadingState.Error
+                    if (failure != null) {
+                        RetryRow(
+                            message = stringResource(
+                                R.string.load_failed_with_reason,
+                                failure.throwable.message.orEmpty(),
+                            ),
+                            onRetry = onRetry,
+                        )
                     }
-                } else {
-                    LoadMoreFooter(
-                        state = PageLoadingState.Success(emptyList<String>()),
-                        isLoadingMore = false,
-                    )
-                }
+                },
+            )
+        }
+    }
+}
+
+/**
+ * nJAV 女优页的**排序 / 筛选**入口（26.8）。
+ *
+ * 取值与站点下拉菜单一一对应（见 `NjavNetwork.actressUrl`）：
+ * 排序 7 项、筛选 4 项（「所有」= 不传参数）。用两个按钮 + [ChoiceDialog]，
+ * 与「切换数据源」「作者格子行数」等既有交互保持一致。
+ */
+@Composable
+private fun ArtistSortFilterRow(
+    sort: String?,
+    filter: String?,
+    onSortChange: (String?) -> Unit,
+    onFilterChange: (String?) -> Unit,
+) {
+    var showSort by remember { mutableStateOf(false) }
+    var showFilter by remember { mutableStateOf(false) }
+
+    val sortOptions = listOf(
+        stringResource(R.string.njav_sort_released) to "released_at",
+        stringResource(R.string.njav_sort_updated) to "published_at",
+        stringResource(R.string.njav_sort_saved) to "saved",
+        stringResource(R.string.njav_sort_today_views) to "today_views",
+        stringResource(R.string.njav_sort_weekly_views) to "weekly_views",
+        stringResource(R.string.njav_sort_monthly_views) to "monthly_views",
+        stringResource(R.string.njav_sort_views) to "views",
+    )
+    val filterOptions = listOf(
+        stringResource(R.string.njav_filter_all) to "",
+        stringResource(R.string.njav_filter_individual) to "individual",
+        stringResource(R.string.njav_filter_multiple) to "multiple",
+        stringResource(R.string.njav_filter_chinese_subtitle) to "chinese-subtitle",
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedButton(onClick = { showSort = true }) {
+            Text(
+                text = sortOptions.firstOrNull { it.second == sort }?.first
+                    ?: stringResource(R.string.njav_sort_default),
+            )
+        }
+        OutlinedButton(onClick = { showFilter = true }) {
+            Text(
+                text = filterOptions.firstOrNull { it.second == (filter ?: "") }?.first
+                    ?: stringResource(R.string.njav_filter_all),
+            )
+        }
+        Spacer(Modifier.weight(1f))
+    }
+
+    ChoiceDialog(
+        visible = showSort,
+        title = stringResource(R.string.njav_sort_title),
+        options = sortOptions,
+        selectedValue = sort ?: "",
+        onDismiss = { showSort = false },
+        onSelect = { value ->
+            showSort = false
+            onSortChange(value.takeIf { it.isNotBlank() })
+        },
+    )
+    ChoiceDialog(
+        visible = showFilter,
+        title = stringResource(R.string.njav_filter_title),
+        options = filterOptions,
+        selectedValue = filter ?: "",
+        onDismiss = { showFilter = false },
+        onSelect = { value ->
+            showFilter = false
+            onFilterChange(value.takeIf { it.isNotBlank() })
+        },
+    )
+}
+
+/**
+ * 作品列表的**翻页行**（26.8）。
+ *
+ * 为什么要有它：站点一页给 30–49 条，直接铺出来是一条长瀑布 —— 用户既不知道一共多少，
+ * 也没法退回去。这里固定「一页 12 条（3 列 × 4 行）」，用上一页/下一页控制，
+ * 页数随加载增长（翻到已知边界时后台续拉，用户感觉不到停顿）。
+ *
+ * @param isPaging 正在续拉站点数据：此时按钮禁用并显示小转圈，而不是让用户重复点。
+ * @param footer 翻页行下方的补充内容（例如「补拉失败 + 重试」）。
+ */
+@Composable
+private fun ArtistPager(
+    page: Int,
+    totalPages: Int,
+    canPrev: Boolean,
+    canNext: Boolean,
+    isPaging: Boolean,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    footer: @Composable () -> Unit = {},
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            OutlinedButton(onClick = onPrev, enabled = canPrev && !isPaging) {
+                Text(text = stringResource(R.string.artist_page_prev))
             }
-        } else {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                // 已经翻到底：如果最后一次是**失败**（而不是真的没了），得说出来 ——
-                // 否则「只有这么多」和「下一页没取到」在界面上长得一模一样。
-                val failure = state.state as? PageLoadingState.Error
-                if (failure != null) {
-                    RetryRow(
-                        message = stringResource(
-                            R.string.load_failed_with_reason,
-                            failure.throwable.message.orEmpty(),
-                        ),
-                        onRetry = onRetry,
-                    )
+            Text(
+                text = stringResource(R.string.artist_page_page_indicator, page, totalPages),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = onNext, enabled = canNext && !isPaging) {
+                if (isPaging) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 } else {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(top = 8.dp),
-                        thickness = 0.5.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                    )
+                    Text(text = stringResource(R.string.artist_page_next))
                 }
             }
         }
+        footer()
     }
 }
 
@@ -496,6 +626,28 @@ private fun ArtistHeader(
                         Spacer(Modifier.height(2.dp))
                         Text(
                             text = artist.genre,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    // ⭐ 26.8：nJAV 女优页那两行资料（`158cm / 40J - 22 - 33` 与
+                    // `1987-05-25 （39岁）`）**原样**显示。站点没给就整行不画 ——
+                    // 这两行对很多女优本来就是空的，硬凑占位符反而像数据丢了。
+                    profile?.measurements?.takeIf { it.isNotBlank() }?.let { line ->
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    profile?.birthday?.takeIf { it.isNotBlank() }?.let { line ->
+                        Text(
+                            text = line,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,

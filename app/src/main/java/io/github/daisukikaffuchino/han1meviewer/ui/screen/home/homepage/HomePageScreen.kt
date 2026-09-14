@@ -104,6 +104,8 @@ fun HomePageScreen(
     // Pornhub 的栏目名与 nJAV 完全不同，所以再单开一个开关。
     val isAVSite = SettingsRepository.isAvSite
     val isPornhubSite = SettingsRepository.isPornhubSite
+    // nJAV 的首页栏目名要与站点导航一致（26.8）。
+    val isNjavSite = SettingsRepository.isNjavSite
     LaunchedEffect(Unit) {
         viewModel.initializeHomePage()
     }
@@ -235,6 +237,7 @@ fun HomePageScreen(
                                     updateActionState = updateActionState,
                                     isAVSite = isAVSite,
                                     isPornhubSite = isPornhubSite,
+                                    isNjavSite = isNjavSite,
                                     onEvent = onEvent,
                                     onCloseAnnouncement = viewModel::dismissAnnouncements,
                                     contentTopPadding = contentTopPadding,
