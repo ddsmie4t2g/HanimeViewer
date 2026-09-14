@@ -42,6 +42,7 @@ fun HomeRouteScreen(
     showNavigationIcon: Boolean,
     onOpenDrawer: () -> Unit,
     onNavigateToPreview: () -> Unit,
+    onNavigateToActressGallery: () -> Unit,
     onNavigateToSearch: (String?) -> Unit,
     onNavigateToSearchAdvanced: (Map<String, String>) -> Unit,
     onNavigateToVideo: (String) -> Unit,
@@ -112,6 +113,7 @@ fun HomeRouteScreen(
                 when (event) {
                     is HomeUiEvent.OpenDrawer -> onOpenDrawer()
                     is HomeUiEvent.NavigateToPreview -> onNavigateToPreview()
+                    is HomeUiEvent.NavigateToActressGallery -> onNavigateToActressGallery()
                     is HomeUiEvent.OpenSearchPage -> onNavigateToSearch(event.query)
                     is HomeUiEvent.NavigateToSearchAdvanced -> onNavigateToSearchAdvanced(event.params)
                     is HomeUiEvent.OpenVideo -> onNavigateToVideo(event.videoCode)

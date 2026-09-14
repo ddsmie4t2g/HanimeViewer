@@ -30,6 +30,10 @@ object ImageNetworkClient {
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .sslSocketFactory(CdnRelay.sslContext.socketFactory, CdnRelay.trustManager)
+            // 与其它 client **共用**池与调度器：封面是本应用请求量最大的一类
+            // （首页一屏就 30 张），各自一份池等于把并发切碎，详见 [NetworkTuning]。
+            .connectionPool(NetworkTuning.connectionPool)
+            .dispatcher(NetworkTuning.dispatcher)
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)
             .dns(HDns())

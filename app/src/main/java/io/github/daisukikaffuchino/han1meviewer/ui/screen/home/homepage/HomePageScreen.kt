@@ -47,6 +47,7 @@ import io.github.daisukikaffuchino.han1meviewer.ui.component.PullRefreshOverlay
 import io.github.daisukikaffuchino.han1meviewer.ui.component.isFirstPageEmpty
 import io.github.daisukikaffuchino.han1meviewer.ui.component.isFirstPageError
 import io.github.daisukikaffuchino.han1meviewer.ui.component.isFirstPageLoading
+import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.HomeTopBarAction
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.HomePageTopBar
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.AppUpdateActionState
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.AppUpdateCard
@@ -257,6 +258,15 @@ fun HomePageScreen(
             onOpenDrawer = { onEvent(HomeUiEvent.OpenDrawer) },
             onSearchClick = { onEvent(HomeUiEvent.OpenSearchPage()) },
             onNavigateToPreview = { onEvent(HomeUiEvent.NavigateToPreview) },
+            onNavigateToActressGallery = { onEvent(HomeUiEvent.NavigateToActressGallery) },
+            // 右上角那个入口按数据源换：hanime 是日历/新番，nJAV 是浏览（女优一览），
+            // Pornhub 下什么都不放 —— 日历页读的是 hanime 归档与 Getchu 预告，
+            // 在 Pornhub 下点进去只有一整页空态。理由详见 HomeTopBarAction。
+            topBarAction = when {
+                isNjavSite -> HomeTopBarAction.Browse
+                isPornhubSite -> HomeTopBarAction.None
+                else -> HomeTopBarAction.Preview
+            },
             containerColor = topBarContainerColor,
             showNavigationIcon = showNavigationIcon,
             modifier = Modifier.zIndex(1f),

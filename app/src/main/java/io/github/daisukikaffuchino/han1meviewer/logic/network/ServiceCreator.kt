@@ -69,12 +69,28 @@ object ServiceCreator {
         getchuClient = buildGetchuClient()
     }
 
+    /**
+     * getchu（新番预告）专用 client。
+     *
+     * ⚠️ 必须挂 [CdnRelay] 的信任链与 [CdnRelayInterceptor]：`www.getchu.com`
+     * 从大陆**直连必失败**（TLS 握手就被打断），唯一可行路径是自建中转
+     * （`getchu.com` 已在 [CdnRelay.BLOCKED_HOSTS] 里）。
+     *
+     * 拦截器顺序有讲究：[CdnRelayInterceptor] 放在 [GetchuInterceptor] **之后**。
+     * 请求头（UA / Referer / Cookie / Accept）由 GetchuInterceptor 补上，
+     * CdnRelayInterceptor 只换 URL —— 顺序反过来的话，URL 已经被换成中转地址，
+     * 再按「原始 host」补头就会补错，而且中转侧要靠 `Referer` 才能过 getchu 的防盗链。
+     */
     private fun buildGetchuClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
+            .sslSocketFactory(CdnRelay.sslContext.socketFactory, CdnRelay.trustManager)
             .addInterceptor(UrlLoggingInterceptor())
             .addInterceptor(GetchuInterceptor())
+            .addInterceptor(CdnRelayInterceptor())
             .cookieJar(CookieJar.NO_COOKIES)
+            .connectionPool(NetworkTuning.connectionPool)
+            .dispatcher(NetworkTuning.dispatcher)
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)
             .dns(dns)
@@ -107,6 +123,8 @@ object ServiceCreator {
             // 顺序反过来会让限速把那一次直连失败的重试也算进配额，纯属浪费。
             .addInterceptor(CdnRelayInterceptor())
             .addNetworkInterceptor(NjavPlaybackInterceptor())
+            .connectionPool(NetworkTuning.connectionPool)
+            .dispatcher(NetworkTuning.dispatcher)
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)
             .dns(dns)
@@ -124,6 +142,8 @@ object ServiceCreator {
             .addInterceptor(CloudflareInterceptor(applicationContext))
             .cache(cache)
             .cookieJar(HCookieJar())
+            .connectionPool(NetworkTuning.connectionPool)
+            .dispatcher(NetworkTuning.dispatcher)
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)
             .dns(dns)

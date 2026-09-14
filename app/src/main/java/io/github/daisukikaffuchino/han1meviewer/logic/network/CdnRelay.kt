@@ -127,6 +127,18 @@ object CdnRelay {
         "fourhoi.com",  // nJAV 封面
         "pornhub.com",  // Pornhub 站点本体（HTML / JSON API）
         "phncdn.com",   // Pornhub 全部封面与视频 CDN（pix-*.phncdn.com / ev-h.phncdn.com …）
+
+        // 「新番预告」的数据源（`all/month_title.html`，EUC-JP 的 HTML）。
+        //
+        // 26.8.3 补：以前它不在表里，于是整页走直连 —— 从大陆**从来就没成功过**，
+        // 用户看到的是「连接被中断，可能是当前网络不稳定或服务器主动断开」，
+        // 而由于 `/previews/{yyyyMM}` 已被站方停更（整段 500），这条链路一挂，
+        // 「9 月新番一部都没有」就没了别的解释途径。
+        //
+        // 这里**没有**放进 [ALWAYS_RELAY_HOSTS]：它的直连在海外是通的，
+        // 海外用户不该被强行绕一趟美国。代价只是大陆用户进程内第一次请求
+        // 白撞一次 RST，之后 [isKnownDead] 记着，后面全走中转。
+        "getchu.com",
     )
 
     /**

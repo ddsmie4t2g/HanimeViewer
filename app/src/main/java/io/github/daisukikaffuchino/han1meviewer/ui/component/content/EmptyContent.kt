@@ -28,12 +28,16 @@ import io.github.daisukikaffuchino.han1meviewer.ui.preview.ComponentPreview
  * @param hint 主提示文本
  * @param subHint 副提示文本，默认为空
  * @param picRes 占位图片资源 ID，默认为 h_chan_speechless
+ * @param action 可选的行动按钮。空态里最该做的事往往不是「重试」，而是
+ *   「换个地方找」——比如月度归档为空时直接跳 Getchu 的当月预告。没有出口的空态
+ *   只会让人反复下拉刷新。
  */
 @Composable
 fun EmptyContent(
     hint: String,
     subHint: String = "",
     picRes: Int = R.drawable.h_chan_speechless,
+    action: (@Composable () -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -62,6 +66,9 @@ fun EmptyContent(
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center,
             )
+            action?.let {
+                Box(modifier = Modifier.padding(top = 16.dp)) { it() }
+            }
         }
     }
 }

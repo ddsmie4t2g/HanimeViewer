@@ -246,9 +246,19 @@ fun PreviewContent(
                         }
 
                         !archiveState.hasItems -> item {
+                            // 该月为空是**站点的状态**，不是加载失败：hanime 的月度归档读的
+                            // 是「该月上架的视频」，而它上架哪些、什么时候上架由站方决定
+                            // （实测 2026-09-14：站方最新上架的里番仍在 8 月，9 月一部都没有）。
+                            // 所以这里刻意不说「失败」，也不只说「空的」—— 而是给一个出口：
+                            // 想知道这个月**预定发售**什么，去看 Getchu 那份预告。
                             EmptyContent(
                                 hint = stringResource(R.string.preview_archive_empty),
                                 subHint = stringResource(R.string.preview_archive_empty_hint),
+                                action = {
+                                    Button(onClick = { onEvent(PreviewEvent.OnOpenGetchuPreview) }) {
+                                        Text(stringResource(R.string.view_getchu_preview))
+                                    }
+                                },
                             )
                         }
 

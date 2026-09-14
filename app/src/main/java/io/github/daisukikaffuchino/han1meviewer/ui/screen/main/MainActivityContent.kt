@@ -160,8 +160,6 @@ fun MainActivityContent(
         isLoading = headerIsLoading,
         currentSite = SettingsRepository.baseUrl,
         checkInEnabled = checkInEnabled,
-        // 女优一览 / 排行是 nJAV 自己的页面，只在 nJAV 数据源下摆出这个入口。
-        showActressGallery = SiteSource.fromValue(currentSiteSource) == SiteSource.Njav,
         onAvatarClick = {
             if (isLoggedIn) {
                 scope.launch { drawerState.close() }
