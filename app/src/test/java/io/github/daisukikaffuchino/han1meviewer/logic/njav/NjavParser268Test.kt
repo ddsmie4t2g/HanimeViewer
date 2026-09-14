@@ -50,6 +50,28 @@ class NjavParser268Test {
         assertNull(NjavParser.pathForMarker("不认识的东西"))
     }
 
+    /**
+     * ⭐ 资产 ↔ 解析器一致性（这一条是本文件最有价值的断言之一）。
+     *
+     * `genre_av.json` 是搜索页「类型」筛选的**数据源**，它的每个 `search_key` 都要能被
+     * [NjavParser.pathForMarker] 翻译成真实路径。少一条的后果是**静默**的：
+     * 用户选中它 → `pathForMarker` 返回 null → 列表退回默认排序（「点了没反应」）。
+     *
+     * 单元测试的工作目录是 app 模块根目录，所以能直接读 asset 文件。
+     */
+    @Test
+    fun `类型筛选里的每个 search_key 都能翻译成真实路径`() {
+        val asset = java.io.File("src/main/assets/search_options/genre_av.json")
+        assertTrue("找不到 ${asset.absolutePath}", asset.exists())
+        val text = asset.readText()
+        // 只做 JSON 文本层面的抽取：不引额外依赖，字段名固定且文件由我们维护。
+        val keys = Regex("\"search_key\"\\s*:\\s*\"([^\"]+)\"")
+            .findAll(text).map { it.groupValues[1] }.toList()
+        assertTrue("genre_av.json 里没有 search_key？", keys.size > 10)
+        val broken = keys.filter { it != "全部" && NjavParser.pathForMarker(it) == null }
+        assertTrue("这些 search_key 翻不成路径（会静默退回默认排序）：$broken", broken.isEmpty())
+    }
+
     // ── 女优页资料头（身材 / 生日）──────────────────────────────────────
 
     /** 有资料的女优（结构照 2026-09-14 线上页面，数据取自用户截图里的 JULIA）。 */

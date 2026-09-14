@@ -128,10 +128,37 @@ object NjavParser {
         "本月排行" to "monthly-hot",
     )
 
-    /** 站点真实导航里、可以被当作「影片列表页」打开的路径。 */
+    /**
+     * 站点真实导航里、可以被当作「影片列表页」打开的路径。
+     *
+     * ⭐ 26.8 补全：除了「观看日本 AV」里那 8 个栏目，还有站点另外三组下拉里的
+     * **系列/厂商页**（它们本身就是影片列表页，不是索引页）：
+     *
+     * | 站点菜单 | 系列 |
+     * |---|---|
+     * | 素人 | SIRO / LUXU / GANA / PRESTIGE PREMIUM / S-CUTE / ARA |
+     * | 无码影片 | 无码流出 / FC2 / HEYZO / 东京热 / 一本道 / Caribbeancom / Caribbeancompr / 10musume / pacopacomama / Gachinco / XXX-AV / 人妻斩 / 顽皮4610 / 顽皮0930 |
+     * | 亚洲 AV | 麻豆传媒 / TWAV / Furuke |
+     *
+     * ⚠️ 站点导航里那些路径带**随机数字前缀**（`/dm817/cn/uncensored-leak`，前缀会变），
+     * 一律只取尾部（`uncensored-leak`）——与 `detailUrl` 的「只抄裸 slug」同一个道理。
+     *
+     * ⚠️ 这份表必须与 `assets/search_options/genre_av.json` 的 `search_key` 对齐：
+     * 少了任何一条，筛选里选中它就会 `pathForMarker` 返回 null → 静默退回默认排序
+     * （「点了没反应」）。`NjavParser268Test` 会读那份 asset 逐条断言，别手改漏了。
+     */
     private val REAL_LIST_PATHS = setOf(
+        // 观看日本 AV
         "new", "release", "uncensored-leak", "chinese-subtitle",
         "today-hot", "weekly-hot", "monthly-hot", "genres/VR",
+        // 素人
+        "siro", "luxu", "gana", "maan", "scute", "ara",
+        // 无码影片（系列）
+        "fc2", "heyzo", "tokyohot", "1pondo", "caribbeancom", "caribbeancompr",
+        "10musume", "pacopacomama", "gachinco", "xxxav", "marriedslash",
+        "naughty4610", "naughty0930",
+        // 亚洲 AV
+        "madou", "twav", "furuke",
     )
 
     /**

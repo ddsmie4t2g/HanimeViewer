@@ -1,58 +1,126 @@
 [
   {
-    "lang": {
-      "zh-rCN": "全部",
-      "en": "All",
-      "zh-rTW": "全部"
-    },
+    "lang": { "zh-rCN": "全部", "en": "All", "zh-rTW": "全部" },
     "search_key": "全部"
   },
   {
-    "lang": {
-      "zh-rCN": "日本AV",
-      "en": "Japanese AV",
-      "zh-rTW": "日本AV"
-    },
-    "search_key": "日本AV"
+    "lang": { "zh-rCN": "中文字幕", "en": "Chinese Subtitles", "zh-rTW": "中文字幕" },
+    "search_key": "chinese-subtitle"
   },
   {
-    "lang": {
-      "zh-rCN": "素人业余",
-      "en": "Amateur Rookie",
-      "zh-rTW": "素人業餘"
-    },
-    "search_key": "素人業餘"
+    "lang": { "zh-rCN": "最近更新", "en": "Recently Updated", "zh-rTW": "最近更新" },
+    "search_key": "new"
   },
   {
-    "lang": {
-      "zh-rCN": "高清无码",
-      "en": "HD No Mosaic",
-      "zh-rTW": "高清無碼"
-    },
-    "search_key": "高清無碼"
+    "lang": { "zh-rCN": "新作上市", "en": "New Releases", "zh-rTW": "新作上市" },
+    "search_key": "release"
   },
   {
-    "lang": {
-      "zh-rCN": "AI解码",
-      "en": "AI Decensored",
-      "zh-rTW": "AI解碼"
-    },
-    "search_key": "AI解碼"
+    "lang": { "zh-rCN": "无码流出", "en": "Uncensored Leaks", "zh-rTW": "無碼流出" },
+    "search_key": "uncensored-leak"
   },
   {
-    "lang": {
-      "zh-rCN": "国产AV",
-      "en": "Chinese AV",
-      "zh-rTW": "國產AV"
-    },
-    "search_key": "國產AV"
+    "lang": { "zh-rCN": "今日热门", "en": "Today's Hot", "zh-rTW": "今日熱門" },
+    "search_key": "today-hot"
   },
   {
-    "lang": {
-      "zh-rCN": "国产素人",
-      "en": "Domestic Amateur",
-      "zh-rTW": "國產素人"
-    },
-    "search_key": "國產素人"
+    "lang": { "zh-rCN": "本週热门", "en": "This Week's Hot", "zh-rTW": "本週熱門" },
+    "search_key": "weekly-hot"
+  },
+  {
+    "lang": { "zh-rCN": "本月热门", "en": "This Month's Hot", "zh-rTW": "本月熱門" },
+    "search_key": "monthly-hot"
+  },
+  {
+    "lang": { "zh-rCN": "VR", "en": "VR", "zh-rTW": "VR" },
+    "search_key": "genres/VR"
+  },
+  {
+    "lang": { "zh-rCN": "素人 · SIRO", "en": "Amateur · SIRO", "zh-rTW": "素人 · SIRO" },
+    "search_key": "siro"
+  },
+  {
+    "lang": { "zh-rCN": "素人 · LUXU", "en": "Amateur · LUXU", "zh-rTW": "素人 · LUXU" },
+    "search_key": "luxu"
+  },
+  {
+    "lang": { "zh-rCN": "素人 · GANA", "en": "Amateur · GANA", "zh-rTW": "素人 · GANA" },
+    "search_key": "gana"
+  },
+  {
+    "lang": { "zh-rCN": "素人 · PRESTIGE PREMIUM", "en": "Amateur · PRESTIGE PREMIUM", "zh-rTW": "素人 · PRESTIGE PREMIUM" },
+    "search_key": "maan"
+  },
+  {
+    "lang": { "zh-rCN": "素人 · S-CUTE", "en": "Amateur · S-CUTE", "zh-rTW": "素人 · S-CUTE" },
+    "search_key": "scute"
+  },
+  {
+    "lang": { "zh-rCN": "素人 · ARA", "en": "Amateur · ARA", "zh-rTW": "素人 · ARA" },
+    "search_key": "ara"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · FC2", "en": "Uncensored · FC2", "zh-rTW": "無碼 · FC2" },
+    "search_key": "fc2"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · HEYZO", "en": "Uncensored · HEYZO", "zh-rTW": "無碼 · HEYZO" },
+    "search_key": "heyzo"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · 东京热", "en": "Uncensored · Tokyo Hot", "zh-rTW": "無碼 · 東京熱" },
+    "search_key": "tokyohot"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · 一本道", "en": "Uncensored · 1Pondo", "zh-rTW": "無碼 · 一本道" },
+    "search_key": "1pondo"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · Caribbeancom", "en": "Uncensored · Caribbeancom", "zh-rTW": "無碼 · Caribbeancom" },
+    "search_key": "caribbeancom"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · Caribbeancompr", "en": "Uncensored · Caribbeancompr", "zh-rTW": "無碼 · Caribbeancompr" },
+    "search_key": "caribbeancompr"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · 10musume", "en": "Uncensored · 10musume", "zh-rTW": "無碼 · 10musume" },
+    "search_key": "10musume"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · pacopacomama", "en": "Uncensored · pacopacomama", "zh-rTW": "無碼 · pacopacomama" },
+    "search_key": "pacopacomama"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · Gachinco", "en": "Uncensored · Gachinco", "zh-rTW": "無碼 · Gachinco" },
+    "search_key": "gachinco"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · XXX-AV", "en": "Uncensored · XXX-AV", "zh-rTW": "無碼 · XXX-AV" },
+    "search_key": "xxxav"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · 人妻斩", "en": "Uncensored · Married Slash", "zh-rTW": "無碼 · 人妻斬" },
+    "search_key": "marriedslash"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · 顽皮 4610", "en": "Uncensored · Naughty 4610", "zh-rTW": "無碼 · 頑皮 4610" },
+    "search_key": "naughty4610"
+  },
+  {
+    "lang": { "zh-rCN": "无码 · 顽皮 0930", "en": "Uncensored · Naughty 0930", "zh-rTW": "無碼 · 頑皮 0930" },
+    "search_key": "naughty0930"
+  },
+  {
+    "lang": { "zh-rCN": "亚洲 · 麻豆传媒", "en": "Asian · Madou", "zh-rTW": "亞洲 · 麻豆傳媒" },
+    "search_key": "madou"
+  },
+  {
+    "lang": { "zh-rCN": "亚洲 · TWAV", "en": "Asian · TWAV", "zh-rTW": "亞洲 · TWAV" },
+    "search_key": "twav"
+  },
+  {
+    "lang": { "zh-rCN": "亚洲 · Furuke", "en": "Asian · Furuke", "zh-rTW": "亞洲 · Furuke" },
+    "search_key": "furuke"
   }
 ]
