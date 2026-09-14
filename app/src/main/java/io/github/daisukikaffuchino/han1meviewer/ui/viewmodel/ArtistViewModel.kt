@@ -9,6 +9,7 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavActressCache
+import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavNetwork
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageLoadingState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -119,29 +120,43 @@ class ArtistViewModel : ViewModel() {
     }
 
     /**
-     * nJAV 的头像补齐（26.8 新增，26.8.2 提速）。
+     * nJAV 的头像补齐（26.8 新增，26.8.2 提速，26.8.3 改成**双路查缓存**）。
      *
-     * 视频详情页只给女优名字、女优页顶部也是首字占位符 ⇒ 从 nJAV 关注过来的作者**天生没有头像**，
-     * 关注列表里就是一排空白。这里按名字去**女优索引**里找一次（最多 3 页），
-     * 找到就补进页面头部，并且 —— 如果这个人已在关注表里 —— **顺手写回关注表**，
-     * 让「关注列表」也有头像（一次补齐，之后不必再找）。
+     * 视频详情页只给女优名字、女优页顶部也是首字占位符 ⇒ 从 nJAV 过来的作者**天生没有头像**，
+     * 关注列表里就是一排空白。这里是三条依次尝试的路径：
      *
-     * ⭐ 26.8.2 的顺序刻意是「**同步查本地缓存 → 不行才联网**」：
-     * 缓存是同步的（读内存里的那份设置），命中时头像和资料头**同帧**就画出来了，
-     * 不会出现「先占位符、过一秒才变头像」的闪动。用户报的正是这一点。
+     * 1. **先按女优路径查缓存**（26.8.3 新增）：作者页的 url 里就带着
+     *    `…/actresses/<编码名>`，而浏览过女优一览 / 排行之后缓存里就有同一段路径。
+     *    这比按名字查可靠 —— 详情页给的名字和索引页可能是繁简两种写法。
+     * 2. 再按名字查缓存（26.8.2 的老路径，老记录 / 只有名字的条目走这条）。
+     * 3. 都没有才联网翻索引页（内部并行 + 回填缓存，见 `NetworkRepo.findNjavActress`）。
+     *
+     * 命中缓存时是**同步**的：头像和资料头同帧画出来，不会出现「先占位符、过一秒才变头像」。
+     *
+     * ⚠️ 别把「联网那一步」去掉：第一次进作者页时缓存很可能是空的
+     * （`NjavActressCache` 只装浏览过的女优），那时只能靠它去补。
      */
     private fun resolveMissingAvatarIfNeeded() {
         val artist = _state.value.artist
         if (artist.siteSource != SiteSource.Njav) return
         if (artist.avatar.isNotBlank() || artist.name.isBlank()) return
 
-        // 1) 本地缓存：浏览过女优一览 / 排行之后必中，0 网络、0 延迟。
+        // 1) 本地缓存 · 按女优路径（最稳）
+        val path = runCatching { NjavNetwork.actressPathFrom(artist.url) }.getOrNull()
+        path?.let { p ->
+            NjavActressCache.findByPath(p)?.let { cached ->
+                applyResolvedAvatar(cached.avatarUrl, cached.videoCount)
+                return
+            }
+        }
+
+        // 2) 本地缓存 · 按名字
         NjavActressCache.find(artist.name)?.let { cached ->
             applyResolvedAvatar(cached.avatarUrl, cached.videoCount)
             return
         }
 
-        // 2) 未命中才联网（内部并行翻页 + 回填缓存，见 NetworkRepo.findNjavActress）。
+        // 3) 未命中才联网
         viewModelScope.launch {
             val found = runCatching { NetworkRepo.findNjavActress(artist.name) }.getOrNull() ?: return@launch
             applyResolvedAvatar(found.avatarUrl, found.videoCount)
@@ -162,14 +177,10 @@ class ArtistViewModel : ViewModel() {
         )
         _state.value = _state.value.copy(artist = enriched)
         // 已在关注表里 → 写回，让关注列表也拿到头像。
-        // ⚠️ 写回是挂起操作（要落盘），所以必须回到协程里；界面上的头像**不等它**。
+        // ⚠️ 用 enrich（就地补资料）而不是 toggle 两下：后者会先删后加，
+        //    把这个人从关注顺序里挪到末尾 —— 用户会看到「什么都没干、顺序变了」。
         viewModelScope.launch {
-            runCatching {
-                if (FollowedArtistStore.isFollowed(enriched.followKey)) {
-                    FollowedArtistStore.toggle(enriched)   // 已关注 → 先删
-                    FollowedArtistStore.toggle(enriched)   // 再按新资料加回（等价于「更新」）
-                }
-            }
+            runCatching { FollowedArtistStore.enrich(enriched) }
         }
     }
 

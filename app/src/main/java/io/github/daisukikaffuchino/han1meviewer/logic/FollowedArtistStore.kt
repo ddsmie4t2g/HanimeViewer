@@ -3,6 +3,10 @@ package io.github.daisukikaffuchino.han1meviewer.logic
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -48,8 +52,18 @@ object FollowedArtistStore {
         /** hanime 兜底搜索用的类型检索键（见 [ArtistRef.genreKey]）。 */
         val genreKey: String = "",
     ) {
-        /** 身份键：**优先主页地址** —— 只按名字，跨站同名作者会撞在一起。 */
-        val key: String get() = url.trim().ifEmpty { name.trim() }
+        /**
+         * 身份键：**规范化后的主页地址**（见 [ArtistRef.identityKey]）。
+         *
+         * ⚠️ 26.8.3 起不再是「url 原样」。用户 2026-09-14 报的「同一位女优关注出两条」
+         * 就是原样比较造成的：nJAV 同一张女优页有 `…/actresses/<名>`、
+         * `…/dm288/cn/actresses/<名>`、`…?page=2` 等多种写法，原样比就是三个人。
+         *
+         * 老数据不用迁移：键是在读取时**算**出来的，存的是原始 url ——
+         * 所以升级后两条老记录会自动算出同一个键，下一次写入时合并成一条（见 [dedup]）。
+         */
+        val key: String
+            get() = ArtistRef.keyOf(name, url, toArtistRef().siteSource)
 
         fun toArtistRef(): ArtistRef = ArtistRef(
             name = name,
@@ -65,11 +79,22 @@ object FollowedArtistStore {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** 当前关注的全部作者（按关注顺序）。 */
+    /**
+     * 当前关注的全部作者（按关注顺序）。
+     *
+     * ⚠️ 读的时候顺手按 [Item.key] 合并重复项（26.8.3）。老版本写下的数据里
+     * 同一个人可能躺着两三条（不同 URL 写法各一条），不合并的话关注列表会长出两个
+     * 一模一样的头像 —— 那正是用户看到的现象。
+     */
     val all: List<Item>
-        get() = runCatching {
-            json.decodeFromString<List<Item>>(SettingsRepository.followedArtistsJson)
-        }.getOrDefault(emptyList())
+        get() {
+            val decoded = runCatching {
+                json.decodeFromString<List<Item>>(SettingsRepository.followedArtistsJson)
+            }.getOrDefault(emptyList())
+            val (merged, changed) = dedup(decoded)
+            if (changed) persist(merged)
+            return merged
+        }
 
     /** 关注页要的形态（作者页头部 / 抽屉入口都用它）。 */
     val asArtistRefs: List<ArtistRef>
@@ -185,21 +210,52 @@ object FollowedArtistStore {
         get() = all.map { SubscriptionItem(artistName = it.name, avatar = it.avatar) }
 
     /**
+     * 给**已经在关注表里**的那位补资料（头像 / 作品数），不新增、不改关注顺序。
+     *
+     * 为什么不用 [toggle] 两下：那样会先删后加，把这个人从「关注顺序」里挪到末尾，
+     * 用户在关注列表里看到的是「我什么都没干，顺序变了」。
+     *
+     * @return 真的改了才返回 true
+     */
+    suspend fun enrich(ref: ArtistRef): Boolean {
+        val k = ref.followKey
+        if (k.isEmpty()) return false
+        val list = all
+        var changed = false
+        val updated = list.map { item ->
+            if (!sameIdentity(item, k)) return@map item
+            val merged = item.copy(
+                name = item.name.ifBlank { ref.name },
+                avatar = item.avatar.ifBlank { ref.avatar },
+                url = item.url.ifBlank { ref.url },
+                site = item.site.ifBlank { ref.site },
+                videoCount = item.videoCount.ifBlank { ref.videoCount },
+                subscriberCount = item.subscriberCount.ifBlank { ref.subscriberCount },
+            )
+            if (merged != item) changed = true
+            merged
+        }
+        if (changed) save(updated)
+        return changed
+    }
+
+    /**
      * 关注 / 取关，返回**新状态**（`true` = 现在已关注）。
      *
-     * 取关按身份键删，顺带把「同一身份但名字写法变了」的旧记录也清掉，
-     * 不然会出现「点已关注，但列表里还留着一个」。
+     * 取关按**规范化身份键**删（见 [Item.key]），顺带把「同一身份但写法变了」的
+     * 旧记录也清掉，不然会出现「点已关注，但列表里还留着一个」。
      */
     suspend fun toggle(ref: ArtistRef): Boolean {
         val k = ref.followKey
+        if (k.isEmpty()) return false
         val list = all
-        val existing = list.any { it.key == k }
+        val existing = list.any { sameIdentity(it, k) }
         val updated = if (existing) {
-            list.filterNot { it.key == k }
+            list.filterNot { sameIdentity(it, k) }
         } else {
             // 已关注过但换了数据源/补齐了资料时，以最后一次看到的为准 ——
             // 保留旧记录只会让作者页头部一直显示过时的作品数。
-            list.filterNot { it.key == k } + ref.toFollowedItem()
+            list.filterNot { sameIdentity(it, k) } + ref.toFollowedItem()
         }
         save(updated)
         return !existing
@@ -212,7 +268,77 @@ object FollowedArtistStore {
     suspend fun toggle(url: String, name: String, avatar: String = ""): Boolean =
         toggle(ArtistRef(name = name, avatar = avatar, url = url))
 
+    /** 该条目是不是键 [key] 那位（两边都按 [ArtistRef.keyOf] 归一后比）。 */
+    private fun sameIdentity(item: Item, key: String): Boolean {
+        if (key.isEmpty()) return false
+        return ArtistRef.keyOf(item.name, item.url, item.toArtistRef().siteSource) == key
+    }
+
+    /**
+     * 把同一身份的多条记录合并成一条（26.8.3）。
+     *
+     * 只在读取时做：**保留第一条的位置与名字**，只把后来那条里「第一位没有的信息」
+     * 填进去（头像 / 作品数 / 分类码……）—— 老版本写下的 url 可能更短、更新的那条
+     * 可能更全。**绝不**因为「后来的更全」就改写已有的头像：那张图可能正被界面用着，
+     * 而站点换图后旧地址往往还能用。
+     *
+     * @return 合并后的列表 + 有没有真的合并掉东西（有才需要落盘）
+     */
+    private fun dedup(list: List<Item>): Pair<List<Item>, Boolean> {
+        if (list.size <= 1) return list to false
+        val byIdentity = LinkedHashMap<String, Item>()
+        var changed = false
+        list.forEach { item ->
+            val id = ArtistRef.keyOf(item.name, item.url, item.toArtistRef().siteSource)
+            if (id.isEmpty()) {
+                // 连名字都没有的脏数据：原样留着，但不能拿空键互相覆盖。
+                byIdentity["\u0000" + item.hashCode()] = item
+                return@forEach
+            }
+            val first = byIdentity[id]
+            if (first == null) {
+                byIdentity[id] = item
+                return@forEach
+            }
+            val merged = first.copy(
+                name = first.name.ifBlank { item.name },
+                avatar = first.avatar.ifBlank { item.avatar },
+                url = first.url.ifBlank { item.url },
+                site = first.site.ifBlank { item.site },
+                genre = first.genre.ifBlank { item.genre },
+                videoCount = first.videoCount.ifBlank { item.videoCount },
+                subscriberCount = first.subscriberCount.ifBlank { item.subscriberCount },
+                genreKey = first.genreKey.ifBlank { item.genreKey },
+            )
+            if (merged != first) byIdentity[id] = merged
+            // 无论如何这一条都算「变了」：它被合并掉了（哪怕一点新信息都没带），
+            // 不置位的话下次读还会再看到这个重复项。
+            changed = true
+        }
+        return byIdentity.values.toList() to changed
+    }
+
     private suspend fun save(list: List<Item>) {
-        SettingsRepository.setFollowedArtistsJson(json.encodeToString(list))
+        persist(dedup(list).first)
+    }
+
+    /**
+     * 直接落盘（**不再** dedup：调用方要么来自 [dedup] 之后的 [all]，要么自己已经合过了）。
+     *
+     * 单独留一个同步入口是因为 [all] 是同步属性 —— 合并掉重复项之后必须顺手落盘，
+     * 否则下一次读还要再合一遍（界面也会跟着抖）。落盘本身挂起，所以只 `launch` 出去，
+     * 不让调用方等它。
+     */
+    private fun persist(list: List<Item>) {
+        persistScope.launch {
+            runCatching {
+                SettingsRepository.setFollowedArtistsJson(json.encodeToString(list))
+            }
+        }
+    }
+
+    /** [persist] 的落地 scope（与 [io.github.daisukikaffuchino.han1meviewer.logic.network.CdnRelay] 同一个套路）。 */
+    private val persistScope by lazy {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 }

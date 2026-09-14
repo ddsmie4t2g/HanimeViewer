@@ -129,6 +129,61 @@ object NjavActressCache {
         )
     }
 
+    /**
+     * 按**女优路径**查（26.8.3 新增）：作者页拿得到 `…/actresses/<编码名>`，
+     * 那是最稳的定位方式 —— 比按名字查更可靠，因为详情页给的名字可能与索引页的
+     * 写法不同（一个繁体一个简体）。
+     *
+     * @param path 形如 `actresses/%E6%B3%A2%E5%A4%9A%E9%87%8E%E7%B5%90%E8%A1%A3`，
+     *   由 [io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavNetwork.actressPathFrom] 抠出来
+     */
+    fun findByPath(path: String): NjavActress? {
+        val wanted = pathKey(path) ?: return null
+        val hit = pathIndex()[wanted] ?: return null
+        if (hit.avatar.isBlank() || hit.name.isBlank()) return null
+        return NjavActress(
+            name = hit.name,
+            avatarUrl = hit.avatar,
+            videoCount = hit.videoCount,
+            debutYear = hit.debutYear,
+            path = hit.path,
+            rank = hit.rank,
+        )
+    }
+
+    /** 路径 → 条目（按需建立；上限 1500 条，一次遍历而已）。 */
+    private var cachedPathIndex: Map<String, Entry>? = null
+
+    private fun pathIndex(): Map<String, Entry> {
+        cachedPathIndex?.let { return it }
+        val index = LinkedHashMap<String, Entry>()
+        load().values.forEach { entry ->
+            val k = pathKey(entry.path) ?: return@forEach
+            // 同一路径有多条时保留**有头像**的那条（没头像的那条对这里没用）。
+            val old = index[k]
+            if (old == null || (old.avatar.isBlank() && entry.avatar.isNotBlank())) {
+                index[k] = entry
+            }
+        }
+        cachedPathIndex = index
+        return index
+    }
+
+    /**
+     * 路径的归一形式：**解码后再归一**。
+     *
+     * 站点同一张女优页会写 `actresses/%E6%B3%A2...`（编码）或者直接写汉字，
+     * 而 `dm###` 前缀与 `?page=` 也不该参与比较 —— 不归一就会「明明缓存里有，就是查不到」。
+     */
+    private fun pathKey(path: String): String? {
+        val raw = path.trim()
+        if (raw.isEmpty()) return null
+        val tail = raw.substringAfter("actresses/", "").substringBefore('?').trim('/')
+        if (tail.isEmpty()) return null
+        val decoded = runCatching { java.net.URLDecoder.decode(tail, "UTF-8") }.getOrDefault(tail)
+        return key(decoded)
+    }
+
     /** 已缓存的条目数（设置页 / 日志用）。 */
     val size: Int get() = load().size
 
@@ -176,6 +231,8 @@ object NjavActressCache {
                     .associate { it.key to it.value }
             }
             snapshot = trimmed
+            // 路径索引是 snapshot 的派生物，snapshot 一换就必须丢掉（26.8.3）。
+            cachedPathIndex = null
             runCatching {
                 SettingsRepository.setNjavActressCacheJson(json.encodeToString(trimmed))
             }
@@ -187,6 +244,7 @@ object NjavActressCache {
     suspend fun clear() {
         mutex.withLock {
             snapshot = emptyMap()
+            cachedPathIndex = null
             runCatching { SettingsRepository.setNjavActressCacheJson("") }
         }
     }

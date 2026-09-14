@@ -1,6 +1,7 @@
 package io.github.daisukikaffuchino.han1meviewer.logic.account
 
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
+import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -38,8 +39,47 @@ class AccountSyncTest {
         val b = AccountSnapshot(followedArtists = listOf(ref("持野蓬", "https://njavtv.com/actresses/x", "njav")))
         val merged = AccountSync.merge(a, b)
         assertEquals(2, merged.followedArtists.size)
-        assertEquals(setOf("/pornstar/tru-kait", "https://njavtv.com/actresses/x"),
-            merged.followedArtists.map { it.followKey }.toSet())
+        // followKey 26.8.3 起是**规范化身份**（见 ArtistRef.identityKey）：不再是 url 原样。
+        // 两份快照里同一个人换了 url 写法时，靠它才会合成一条。
+        assertEquals(
+            setOf(
+                ArtistRef.keyOf("Tru Kait", "/pornstar/tru-kait", SiteSource.Pornhub),
+                ArtistRef.keyOf("持野蓬", "https://njavtv.com/actresses/x", SiteSource.Njav),
+            ),
+            merged.followedArtists.map { it.followKey }.toSet(),
+        )
+    }
+
+    /**
+     * ⭐ 同一个 nJAV 女优、两种 url 写法（一览卡片带 `dm###`，详情页裸路径）→ 只留一条。
+     *
+     * 这条就是用户 2026-09-14 报的那个：「女优一览关注一次、视频页再关注一次，
+     * 关注列表里出现两个同一个人」。
+     */
+    @Test
+    fun `同一个女优的两种 url 写法合并成一条`() {
+        val a = AccountSnapshot(
+            followedArtists = listOf(
+                ref(
+                    "波多野结衣",
+                    "https://njavtv.com/dm288/cn/actresses/%E6%B3%A2%E5%A4%9A%E9%87%8E%E7%B5%90%E8%A1%A3",
+                    "njav",
+                    avatar = "http://a.jpg",
+                )
+            )
+        )
+        val b = AccountSnapshot(
+            followedArtists = listOf(
+                ref(
+                    "波多野结衣",
+                    "https://njavtv.com/actresses/%E6%B3%A2%E5%A4%9A%E9%87%8E%E7%B5%90%E8%A1%A3",
+                    "njav",
+                )
+            )
+        )
+        val merged = AccountSync.merge(a, b)
+        assertEquals(1, merged.followedArtists.size)
+        assertEquals("http://a.jpg", merged.followedArtists.single().avatar)
     }
 
     @Test

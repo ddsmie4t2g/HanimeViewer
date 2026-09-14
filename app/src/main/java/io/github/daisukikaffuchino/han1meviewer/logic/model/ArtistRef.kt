@@ -60,8 +60,16 @@ data class ArtistRef(
      */
     val genreKey: String = "",
 ) {
-    /** 本地关注用的身份键：有主页地址就用地址，没有才退回名字。 */
-    val followKey: String get() = url.trim().ifEmpty { name.trim() }
+    /**
+     * 关注用的身份键（26.8.3 起是**规范化**的，见 [identityKey]）。
+     *
+     * ⚠️ 不要退回「url 原样 / 名字」那种写法。用户 2026-09-14 报的
+     * 「女优一览关注一次、视频页作者再关注一次，关注列表里出现两个同一个人」
+     * 就是它造成的：同一张女优页在站点上有多种写法（`njavtv.com/actresses/<名>`、
+     * `/dm288/cn/actresses/<名>`、`/cn/actresses/<名>?sort=`…），
+     * 谁出现在哪个入口取决于当时点的是哪个链接，原样比较就必然认成两个人。
+     */
+    val followKey: String get() = identityKey()
 
     /**
      * 实际用哪个数据源取作者页。
@@ -137,8 +145,125 @@ data class ArtistRef(
         genreKey = genreKey,
     )
 
+    /**
+     * **规范化的身份键**（26.8.3 新增）。
+     *
+     * ## 它解决的是什么
+     *
+     * 关注这件事必须「同一个人在哪儿点都只算一条」。而站点给的作者地址**写法不止一种**：
+     *
+     * | 入口 | 拿到的地址 |
+     * |---|---|
+     * | nJAV 视频详情页的「女優」链接 | `https://njavtv.com/actresses/%E6%8C%81...` |
+     * | nJAV 女优一览卡片 | `https://njavtv.com/dm288/cn/actresses/%E6%8C%81...` |
+     * | nJAV 女优页自己的分页链接 | `…/actresses/%E6%8C%81...?page=2` |
+     *
+     * 原样比较时它们是三个不同的字符串 ⇒ 关注列表里同一个人出现三次
+     * （用户 2026-09-14 报的就是这个）。[identityKey] 把「会变的包装」剥掉，只留站点侧
+     * 真正标识这个人的那一小段：
+     *
+     * - **nJAV**：`actresses/<编码名>` —— 丢掉域名、语言段、会变的 `dm###` 前缀与 query，
+     *   再把百分号编码**解回文字**（同一个名字可能一处写成 `%E6%8C%81`、一处直接写汉字）；
+     * - **Pornhub / 其它**：`路径::名字` —— 丢掉域名与语言段，但**不**碰路径本身
+     *   （Pornhub 的 `/pornstar/<slug>` 与 `/users/<name>` 是两类东西，绝不能合并）；
+     * - 没有地址时退回名字。
+     *
+     * ⚠️ 名字在键里**只当兜底**，不当主键：跨站同名作者靠 [url] 区分（见 [siteSource]）。
+     */
+    fun identityKey(): String = keyOf(name, url, siteSource)
+
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
+
+        /**
+         * [identityKey] 的实现。做成静态函数是为了让 [FollowedArtistStore.Item]
+         * 这种「已经不是 [ArtistRef]」的老数据也能算出同一个键。
+         */
+        fun keyOf(name: String, url: String, site: SiteSource): String {
+            val rawUrl = url.trim()
+            if (rawUrl.isEmpty() && name.isBlank()) return ""
+            val host = runCatching { java.net.URI(rawUrl).host.orEmpty() }.getOrDefault("")
+            val nJavUrl = host.contains("njavtv") ||
+                    rawUrl.contains("njavtv") ||
+                    rawUrl.contains("/actresses/")
+            if (site == SiteSource.Njav || nJavUrl) {
+                val actressKey = actressKeyOf(rawUrl)
+                // nJAV 上「同一个人」也可能只给名字（老记录 / 关注表里只有名字）——
+                // 那就直接用归一化后的名字，一样能跟带地址的写法对上。
+                return "njav|" + (actressKey ?: normalizeName(name))
+            }
+            // ⚠️ site 与 url 可能互相矛盾（`site` 是关注那一刻的「当前站点」，
+            // 而 url 是站点自己给的）。以 url 为准 —— 与 [siteSource] 的判据一致。
+            val pathKey = urlPathKey(rawUrl)
+            if (pathKey.isEmpty()) return "${site.value}|" + normalizeName(name)
+            return "${site.value}|$pathKey|" + normalizeName(name)
+        }
+
+        /**
+         * nJAV 女优地址 → `actresses/<解码后的名字>`；不是女优地址就返回 null。
+         *
+         * 三种写法都要吃得下（见 [identityKey] 的表），并且：
+         * - `dm###`（会变的随机数字前缀，`/dm539/` 自己都能 301 到别处）与 `cn` / `en`
+         *   这类语言段一律丢掉；
+         * - `ranking` / `genres` 不是「某个人」，返回 null 让调用方退回名字。
+         */
+        private fun actressKeyOf(rawUrl: String): String? {
+            if (rawUrl.isEmpty()) return null
+            val marker = "/actresses/"
+            val where = rawUrl.indexOf(marker)
+            if (where < 0) return null
+            // 百分号编码是**原样**抄下来的（站点给什么就是什么），所以先解码再归一 ——
+            // 同一个名字一处写成 `%E6%8C%81`、一处直接写汉字，两边都落到同一个键上。
+            val tail = rawUrl.substring(where + marker.length)
+                .substringBefore('?')
+                .substringBefore('#')
+                .trim('/')
+            if (tail.isEmpty()) return null
+            val name = runCatching { java.net.URLDecoder.decode(tail, "UTF-8") }
+                .getOrDefault(tail)
+                .trim()
+                .removePrefix("dm")
+                .substringAfter('/')
+                .trimStart('/')
+                .trim()
+            if (name.isEmpty()) return null
+            // `ranking` / `genres` / `cn` 这些不是「某个人」，交给调用方退回名字。
+            if (name.lowercase() in ACTRESS_RESERVED) return null
+            return "actresses/" + normalizeName(name)
+        }
+
+        /**
+         * `https://www.pornhub.com/pornstar/tru-kait?x=1` → `pornstar/tru-kait`。
+         *
+         * 只丢域名、协议与 query，**不碰路径内容** —— `/pornstar/<slug>` 与 `/users/<name>`
+         * 是两类不同的东西，合并了就会把两个人认成一个。
+         */
+        private fun urlPathKey(rawUrl: String): String {
+            if (rawUrl.isEmpty()) return ""
+            val path = runCatching { java.net.URI(rawUrl).path.orEmpty() }
+                .getOrDefault("")
+                .ifEmpty {
+                    // 不是绝对地址（Pornhub 给过相对路径）：直接当路径用。
+                    rawUrl.substringAfter("://", rawUrl).substringAfter('/', "")
+                }
+            return path.substringBefore('?').trim('/').lowercase()
+        }
+
+        /**
+         * 名字归一化：NFC + 去空白 + 小写。
+         *
+         * 与 [io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavActressCache] 同一套口径
+         * （它那边还要按名字查头像，两边不一致就会出现「关注认得出、头像补不上」）。
+         * **不做繁简转换**：那需要一张大表，而站点自己的 href 里已经是同一种写法。
+         */
+        private fun normalizeName(name: String): String = runCatching {
+            java.text.Normalizer.normalize(name.trim(), java.text.Normalizer.Form.NFC)
+                .lowercase()
+                .filterNot { it.isWhitespace() }
+        }.getOrDefault(name.trim().lowercase())
+
+        /** nJAV 上不是「某个人」的保留尾段（榜单 / 分类 / 语言段）。 */
+        private val ACTRESS_RESERVED = setOf("ranking", "genres", "cn", "en", "tw", "ja")
 
         fun from(
             artist: HanimeVideo.Artist,
