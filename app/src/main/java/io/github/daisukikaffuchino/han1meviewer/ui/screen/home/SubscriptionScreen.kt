@@ -30,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
+import io.github.daisukikaffuchino.han1meviewer.logic.account.AccountRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionVideosItem
@@ -51,21 +52,24 @@ import kotlinx.coroutines.launch
  * 持有 [MySubscriptionsViewModel]，管理缓存、下拉刷新、加载更多等状态编排。
  * 渲染委托给 [SubscriptionContent]。
  *
- * ## ⭐ 26.6.3：这一段**不需要登录**
+ * ## ⭐ 26.7.3：hanime 订阅**不再依赖 hanime 登录才能看**
  *
- * 页面上永远有「关注的作者」这一段 —— 它读的是本机
- * [FollowedArtistStore]（Pornhub / nJAV 的关注都存在这里），
- * **未登录时不发任何网络请求**，因此也不会再出现「没登录 → 整页报错」。
+ * | 状态 | hanime 那一块读哪 |
+ * |---|---|
+ * | 已登录 hanime | hanime 服务端（实时、以取关为准） |
+ * | 未登录 hanime | **本机那份同步副本**（登录时自动存下来的，见 [FollowedArtistStore]） |
  *
- * hanime 的服务端订阅只占第二段：[SettingsRepository.isAlreadyLogin] 为真时才请求、
- * 才渲染。两者互不依赖，是个刻意的取舍 —— 用户的原话是「最好登录不跟网站挂钩」。
+ * 那份副本会跟着 `AccountSync` 同步到**用户自己建的账号**，所以「订一次、换设备也能看到」
+ * 成立。未登录进页面时还会顺手从自建账号拉一次（5 分钟节流），失败静默 —— 本机已有旧数据可画。
+ *
+ * 页面结构见 [SubscriptionContent]：作者按 hanime / Pornhub / nJAV **各成一块**。
  *
  * @param navigateBack 返回回调
  * @param viewModel 订阅 ViewModel（只服务 hanime 那一段）
- * @param onClickArtist 点击 hanime 订阅作者 → 跳搜索（hanime 没有作者页）
- * @param onLongClickArtist 长按 hanime 订阅作者 → 复制分享文本
- * @param onClickFollowed 点击「关注的作者」→ 进作者页（或退回搜索）
- * @param onLongClickFollowed 长按「关注的作者」→ 复制分享文本
+ * @param onClickArtist 点击 hanime 服务端订阅作者 → 跳搜索（hanime 没有作者页）
+ * @param onLongClickArtist 长按 hanime 服务端订阅作者 → 复制分享文本
+ * @param onClickFollowed 点击本机关注的作者 → 进作者页（或退回搜索）
+ * @param onLongClickFollowed 长按本机关注的作者 → 复制分享文本
  * @param onClickVideosItem 点击视频 → 跳转详情
  * @param onLongClickVideosItem 长按视频 → 复制分享文本
  */
@@ -100,6 +104,19 @@ fun SubscriptionScreen(
     // 本机关注的作者（三个站点通用）。**不经过任何网络**，所以未登录也一定有内容。
     val localFollowed = remember(settings.followedArtistsJson) {
         FollowedArtistStore.asArtistRefs
+    }
+
+    /**
+     * ⭐ 未登录 hanime 时，这一页读的是**用户自己账号里那份数据**。
+     *
+     * 于是进页面时顺手从自建账号拉一次（带 5 分钟节流，见 [AccountRepository.isSyncStale]）：
+     * 换设备之后打开订阅页就能看到上次在别的机器上订的人，不用等到下次登录。
+     * 同步失败静默忽略 —— 本机已经有上次那份，界面照样画得出来。
+     */
+    LaunchedEffect(isLoggedIn) {
+        if (!isLoggedIn && AccountRepository.isLoggedIn && AccountRepository.isSyncStale()) {
+            AccountRepository.sync()
+        }
     }
 
     LaunchedEffect(state, isLoggedIn) {
@@ -167,8 +184,12 @@ fun SubscriptionScreen(
                 if (isLoggedIn) {
                     viewModel.loadMySubscriptions(forceReload = true)
                 } else {
-                    // 未登录时下拉刷新没有服务端可刷：立刻收掉转圈，别转个不停。
-                    isRefreshing = false
+                    // 未登录 hanime：能刷的是**自己账号**那一份，不是「没东西可刷」——
+                    // 26.7.3 之前这里直接把转圈收掉，用户以为下拉刷新坏了。
+                    scope.launch {
+                        if (AccountRepository.isLoggedIn) AccountRepository.sync()
+                        isRefreshing = false
+                    }
                 }
             }
 

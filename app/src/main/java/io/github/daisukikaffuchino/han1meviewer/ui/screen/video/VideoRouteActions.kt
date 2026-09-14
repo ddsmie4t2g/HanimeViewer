@@ -6,6 +6,7 @@ import io.github.daisukikaffuchino.han1meviewer.HCacheManager
 import io.github.daisukikaffuchino.han1meviewer.logic.DatabaseRepo
 import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
+import io.github.daisukikaffuchino.han1meviewer.logic.account.AccountRepository
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.getHanimeVideoDownloadLink
 import io.github.daisukikaffuchino.han1meviewer.getHanimeVideoLink
@@ -99,6 +100,8 @@ class VideoRouteActions(
                 val followed = FollowedArtistStore.toggle(
                     ArtistRef.from(artist, SettingsRepository.siteSource)
                 )
+                // 关注是「本机的事实」，同时也要跟着用户自己的账号走 → 立刻传一次。
+                if (AccountRepository.isLoggedIn) AccountRepository.uploadLocal()
                 SonnerToast.success(
                     if (followed) R.string.artist_followed else R.string.artist_unfollow
                 )
@@ -121,9 +124,35 @@ class VideoRouteActions(
         viewModel.unsubscribeArtist(post.userId, post.artistId)
     }
 
+    /**
+     * 「喜欢 / 加入喜欢」按钮。
+     *
+     * ## ⭐ 落地到哪里，看的是**这部片子在哪个站点**，不是「有没有登录 hanime」
+     *
+     * | 情况 | 存哪 |
+     * |---|---|
+     * | Pornhub / nJAV 数据源 | **本机库**（这两个站没有服务端收藏） |
+     * | hanime 数据源但未登录 | 本机库 |
+     * | hanime 数据源 + 已登录 | hanime 服务端 |
+     *
+     * 以前只判「有没有登录 hanime」，于是在 Pornhub 下登录了 hanime 之后点喜欢，会拿着
+     * 一个 Pornhub 的 viewkey 去请求 hanime 的收藏接口 —— 表现就是**白等好几秒然后失败**
+     * （用户 2026-09-14 报的「延迟非常高」）；而未登录时会弹「本机数据与在线数据独立」的提示，
+     * 可那提示对 AV 站点根本不成立（它们本来就没有在线数据），用户看到的就是一句莫名其妙的
+     * 「未登录时的数据」（同一天报的第二个问题）。
+     *
+     * 本机库里的东西**会同步到用户自建的账号**（见 [io.github.daisukikaffuchino.han1meviewer.logic.account.AccountSync]），
+     * 所以「本机」不再是「孤立的一份数据」，提示的必要性也随之消失 —— 只有在本机什么都没有
+     * （既没登 hanime 也没登自建账号）且当前是 hanime 站时，才还值得提醒一次。
+     */
     fun toggleFavorite(video: HanimeVideo) {
-        if (!SettingsRepository.isAlreadyLogin) {
-            onRequestLocalListAction(viewModel::toggleLocalFavorite)
+        if (SettingsRepository.useLocalVideoState) {
+            if (SettingsRepository.isAvSite) {
+                // AV 站点没有服务端收藏可谈，直接落本机，不弹任何说明。
+                viewModel.toggleLocalFavorite()
+            } else {
+                onRequestLocalListAction(viewModel::toggleLocalFavorite)
+            }
             return
         }
         if (video.isFav) {
@@ -134,7 +163,7 @@ class VideoRouteActions(
     }
 
     fun rateVideo(video: HanimeVideo, isPositive: Boolean) {
-        if (!SettingsRepository.isAlreadyLogin) {
+        if (SettingsRepository.useLocalVideoState) {
             SonnerToast.warning(R.string.login_first)
             return
         }
@@ -145,7 +174,7 @@ class VideoRouteActions(
         myList: HanimeVideo.MyList?,
         selectedStates: List<Boolean>,
     ) {
-        if (!SettingsRepository.isAlreadyLogin) {
+        if (SettingsRepository.useLocalVideoState) {
             val localMyList = myList
             if (localMyList != null && localMyList.myListInfo.isNotEmpty()) {
                 viewModel.updateLocalMyListSelection(localMyList, selectedStates)

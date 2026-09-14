@@ -54,6 +54,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
+import io.github.daisukikaffuchino.han1meviewer.logic.account.AccountRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistProfile
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageLoadingState
@@ -182,6 +183,9 @@ private fun toggleFollow(
     VibrationUtil.performHapticFeedback(view)
     scope.launch {
         val followed = FollowedArtistStore.toggle(artist)
+        // 关注是「本机的事实」，但用户希望它跟着**自己的账号**走 —— 立刻上传一次，
+        // 别等到下次登录/手动同步（换机时才发现没传上去是最难受的）。
+        if (AccountRepository.isLoggedIn) AccountRepository.uploadLocal()
         SonnerToast.success(
             if (followed) R.string.artist_followed else R.string.artist_unfollow
         )

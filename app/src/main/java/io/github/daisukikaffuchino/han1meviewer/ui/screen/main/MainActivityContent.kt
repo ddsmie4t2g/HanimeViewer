@@ -179,7 +179,12 @@ fun MainActivityContent(
             val handled = backStack.navigateDrawerDestination(
                 destination = destination,
                 isLoggedIn = isLoggedIn,
-                onRequireLogin = { SonnerToast.warning(R.string.login_first) },
+                onRequireLogin = {
+                    // 光弹一句「请先登录」是死路（用户不知道从哪儿登）——直接带去登录页，
+                    // 顺手把抽屉收掉，免得它盖在登录页上面。
+                    activity.openLogin()
+                    scope.launch { drawerState.close() }
+                },
             )
             if (handled) {
                 scope.launch { drawerState.close() }

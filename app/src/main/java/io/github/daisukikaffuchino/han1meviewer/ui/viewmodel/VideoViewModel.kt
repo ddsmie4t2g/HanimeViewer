@@ -14,14 +14,17 @@ import io.github.daisukikaffuchino.han1meviewer.EMPTY_STRING
 import io.github.daisukikaffuchino.han1meviewer.HanimeResolution
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.DatabaseRepo
+import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
 import io.github.daisukikaffuchino.han1meviewer.logic.LocalListRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
+import io.github.daisukikaffuchino.han1meviewer.logic.account.AccountRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.entity.HKeyframeEntity
 import io.github.daisukikaffuchino.han1meviewer.logic.entity.WatchHistoryEntity
 import io.github.daisukikaffuchino.han1meviewer.logic.entity.download.HanimeDownloadEntity
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeVideo
+import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
 import io.github.daisukikaffuchino.han1meviewer.logic.state.VideoLoadingState
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
 import io.github.daisukikaffuchino.han1meviewer.ui.viewmodel.AppViewModel.csrfToken
@@ -109,17 +112,21 @@ class VideoViewModel(
     val hanimeVideoFlow = _hanimeVideoFlow.asStateFlow()
 
     /**
-     * 详情页展示用视频流：未登录时把本地喜欢/清单状态合成到视频上，
-     * 登录时与 [hanimeVideoFlow] 保持一致。
+     * 详情页展示用视频流：**该用本机状态时**把本地喜欢/清单状态合成到视频上，
+     * 否则与 [hanimeVideoFlow] 保持一致。
+     *
+     * ⚠️ 判据是 [SettingsRepository.useLocalVideoStateFlow] 而不是「有没有登录 hanime」：
+     * 在 Pornhub / nJAV 下，就算登录了 hanime，这部片子也不存在于 hanime，
+     * 收藏落在本机库 —— 状态自然也要从本机库读，否则点了喜欢按钮上的心不会亮。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val displayVideoFlow: StateFlow<HanimeVideo?> = combine(
         _hanimeVideoFlow,
         _videoCodeFlow,
-        SettingsRepository.loginStateFlow,
-    ) { video, code, isLoggedIn -> Triple(video, code, isLoggedIn) }
-        .flatMapLatest { (video, code, isLoggedIn) ->
-            if (video == null || isLoggedIn || code.isBlank()) {
+        SettingsRepository.useLocalVideoStateFlow,
+    ) { video, code, useLocalState -> Triple(video, code, useLocalState) }
+        .flatMapLatest { (video, code, useLocalState) ->
+            if (video == null || !useLocalState || code.isBlank()) {
                 flowOf(video)
             } else {
                 combine(
@@ -492,8 +499,38 @@ class VideoViewModel(
                     _hanimeVideoFlow.update {
                         it?.copy(artist = it.artist?.copy(post = it.artist.post?.copy(isSubscribed = true)))
                     }
+                    recordSubscribedArtistLocally()
                 }
             }
+        }
+    }
+
+    /**
+     * ⭐ 在 hanime 上订阅成功之后，**顺手把这位作者记进本机关注库**。
+     *
+     * 这是「订阅 → 同步到我自己的账号」这条链路的起点：
+     *
+     * ```
+     * 点订阅 → hanime 服务端订阅成功 ─┬→ 本机关注库（写一条）
+     *                                └→ 用户自建账号（上传一次）
+     * ```
+     *
+     * 于是**退出 hanime 登录之后，订阅列表照样看得见**（读的是自己账号那份）。
+     * 取关**不会**把本机这条删掉 —— 与 `AccountSync.merge` 的「只增不删」一致，
+     * 同步删数据的风险远大于多留一条。
+     *
+     * 上传失败静默忽略：本机那份已经写好了，下次同步还会再传。
+     */
+    private fun recordSubscribedArtistLocally() {
+        val artist = _hanimeVideoFlow.value?.artist ?: return
+        if (artist.name.isBlank()) return
+        viewModelScope.launch {
+            val added = runCatching {
+                FollowedArtistStore.mergeSubscriptionItems(
+                    listOf(SubscriptionItem(artistName = artist.name, avatar = artist.avatarUrl))
+                )
+            }.getOrDefault(0)
+            if (added > 0 && AccountRepository.isLoggedIn) AccountRepository.uploadLocal()
         }
     }
 

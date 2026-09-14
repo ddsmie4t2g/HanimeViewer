@@ -1,6 +1,7 @@
 package io.github.daisukikaffuchino.han1meviewer.logic
 
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
+import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -73,6 +74,66 @@ object FollowedArtistStore {
     /** 关注页要的形态（作者页头部 / 抽屉入口都用它）。 */
     val asArtistRefs: List<ArtistRef>
         get() = all.map { it.toArtistRef() }
+
+    /**
+     * 按站点分组（订阅页要把 hanime / Pornhub / nJAV 画成三块互不混淆的分区）。
+     *
+     * 分组依据是 [ArtistRef.siteSource] —— 它优先看主页地址的路径形态，所以老记录
+     * （没有 `site` 字段）也能落到正确的组里。
+     */
+    fun bySite(site: SiteSource): List<ArtistRef> =
+        asArtistRefs.filter { it.siteSource == site }
+
+    /**
+     * ⭐ hanime 服务端订阅在本机的**副本**。
+     *
+     * 为什么要有它：hanime 的订阅只存在 hanime 的服务器上，**没登录就一点都看不到**。
+     * 而用户要的是「订阅之后同步到我自己的账号，没登 hanime 时读我自己那份」——
+     * 那份「自己」就是这里。写入见 [mergeSubscriptionItems]。
+     */
+    val hanimeRefs: List<ArtistRef>
+        get() = bySite(SiteSource.Hanime1)
+
+    /**
+     * ⭐ 把 hanime 服务端订阅**并进**本机关注库（只增不改），返回新增条数。
+     *
+     * ## 语义
+     * - **只增不删**：hanime 那边取关了，这里不清 —— 与 [AccountSync.merge] 的取舍一致
+     *   （同步删数据的风险远大于多留一条；真要删得引墓碑标记）。
+     *   所以「已登录时读服务端、未登录时读本机」两条路径看到的会是同一批人，
+     *   只是取关后本机这份会多留一会儿。
+     * - **按名字去重**（只跟本机的 hanime 条目比）：hanime 的订阅列表只有名字和头像，
+     *   没有作者主页地址，所以身份键就是名字。同名但 url 不同的旧记录也不会被重复插入。
+     * - 头像为空时**不覆盖**已有记录的头像。
+     *
+     * 写进本机之后，[AccountSync.snapshot] 会自然把它带上用户自建账号，
+     * 于是「订一次、换任何设备都能看到」这件事就成立了。
+     */
+    suspend fun mergeSubscriptionItems(items: List<SubscriptionItem>): Int {
+        if (items.isEmpty()) return 0
+
+        val existing = all
+        // 只跟「同样是 hanime 的人」比名字：别的站有同名作者不该拦着。
+        val known = existing.filter { it.toArtistRef().siteSource == SiteSource.Hanime1 }
+            .mapTo(mutableSetOf()) { it.name.trim().lowercase() }
+
+        val additions = mutableListOf<Item>()
+        items.forEach { item ->
+            val name = item.artistName.trim()
+            if (name.isEmpty()) return@forEach
+            if (!known.add(name.lowercase())) return@forEach
+            additions += Item(
+                name = name,
+                avatar = item.avatar,
+                // 没有主页地址：hanime 站点上没有作者页，身份只能用名字。
+                url = "",
+                site = SiteSource.Hanime1.value,
+            )
+        }
+        if (additions.isEmpty()) return 0
+        save(existing + additions)
+        return additions.size
+    }
 
     fun isFollowed(key: String): Boolean {
         val k = key.trim()

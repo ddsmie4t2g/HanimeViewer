@@ -134,8 +134,15 @@ object HanimeConstants {
     }
 }
 
+/**
+ * hanime 的登录页地址。
+ *
+ * ⚠️ 必须用 [SettingsRepository.hanimeBaseUrl] 而不是 [HANIME_BASE_URL]：后者是**当前数据源**
+ * 的地址，切到 Pornhub / nJAV 之后会变成 `pornhub.com/login`，登录 WebView 自然加载不出来
+ * （表现为「登录出错 / 加载失败请重试」）。登录是 hanime 独有的功能，地址不该跟着数据源走。
+ */
 val HANIME_LOGIN_URL: String
-    get() = HANIME_BASE_URL + "login"
+    get() = SettingsRepository.hanimeBaseUrl + "login"
 
 // github url
 

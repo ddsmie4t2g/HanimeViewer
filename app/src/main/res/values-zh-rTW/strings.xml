@@ -303,7 +303,7 @@
     <string name="add_success">新增成功</string>
     <string name="local_favorite_cancelled">已取消</string>
     <string name="local_list_notice_title">本機資料提示</string>
-    <string name="local_list_notice_message">未登入時的本機資料將與登入後的線上資料分別儲存，兩者完全獨立，不做雙向同步。確定要繼續嗎？</string>
+    <string name="local_list_notice_message">本機資料與 hanime 的線上資料分別儲存。登入「我的帳號」（你自己的伺服器）後，本機資料會自動同步到你自己的伺服器。確定要繼續嗎？</string>
     <string name="do_not_show_again">不再提示</string>
     <string name="default_">預設</string>
     <string name="alternative">備用</string>
@@ -434,6 +434,11 @@
     <string name="site_badge_pornhub">Pornhub</string>
     <string name="subscription_followed_artists_count">關注的作者（%1$d）</string>
     <string name="subscription_server_artists_count">hanime 訂閱（%1$d）</string>
+    <string name="subscription_hanime_local_count">hanime 訂閱 · 本機同步（%1$d）</string>
+    <string name="subscription_hanime_local_note">未登入 hanime —— 下面是同步到你帳號的訂閱；登入 hanime 後顯示伺服器端的即時清單。</string>
+    <string name="subscription_pornhub_artists_count">Pornhub 關注（%1$d）</string>
+    <string name="subscription_njav_artists_count">nJAV 關注（%1$d）</string>
+    <string name="subscription_videos_count">訂閱影片（%1$d）</string>
     <string name="subscription_followed_empty_hint">還沒有關注的作者。在影片詳情頁或作者頁點作者右側的「關注」即可 —— 關注存在本機，不需要登入。</string>
     <string name="subscription_login_hint">登入 hanime 後才能看到伺服器端訂閱；關注、收藏、清單都不需要登入。</string>
     <string name="unsubscribe_artist">取消追蹤此作者</string>

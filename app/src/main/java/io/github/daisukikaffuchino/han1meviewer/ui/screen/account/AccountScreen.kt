@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import io.github.daisukikaffuchino.han1meviewer.R
+import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.model.UserAccount
 import io.github.daisukikaffuchino.han1meviewer.logic.model.UserAccountAction
 import io.github.daisukikaffuchino.han1meviewer.logic.model.UserAccountSubmittingState
@@ -172,7 +173,8 @@ fun AccountScreen(
                 },
                 onLogout = onLogout,
                 onOpenPasswordReset = {
-                    uriHandler.openUri("${io.github.daisukikaffuchino.han1meviewer.HANIME_BASE_URL}password/reset")
+                    // 这一页只管 hanime 站点账号 → 用 hanime 的地址，别跟着当前数据源走。
+                    uriHandler.openUri("${SettingsRepository.hanimeBaseUrl}password/reset")
                 },
                 onOpenMyAccount = onOpenMyAccount,
             )

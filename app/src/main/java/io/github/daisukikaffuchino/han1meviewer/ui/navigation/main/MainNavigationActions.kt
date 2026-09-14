@@ -6,11 +6,18 @@ import kotlinx.serialization.json.Json
 /**
  * 需要登录才能进的抽屉项。
  *
- * ⭐ 26.7.1 起**清空**：原来只有「订阅」在这里，但那页现在未登录也能用（显示本机关注的作者，
- * 一段网络请求都不发）。把它拦在登录页前面，等于继续暗示「这些功能属于 hanime」——
- * 而用户要的恰恰是「关注是我自己的数据，不该被某个站点的登录挡住」。
+ * ⭐ 26.7.1 起**移除了「订阅」**：那一页现在未登录也能用（作者按 hanime / Pornhub / nJAV
+ * 分成三块，hanime 那块未登录时读本机同步副本）。把它拦在登录页前面，等于继续暗示
+ * 「这些功能属于 hanime」—— 而用户要的恰恰是「关注是我自己的数据，不该被某个站点的登录挡住」。
+ *
+ * ⭐ 26.7.3 起把 **hanime 站点账号**加进来：那一页（`AccountRoute`）的内容是
+ * 「hanime 账号资料 / 改密 / 订阅清单」这类服务端数据，**没有登录时整页无从加载** ——
+ * 原来的表现是打开后直接看到一句「加载失败，请重试」（`NotLoggedInException` 也被
+ * 当成加载失败），而用户点它的本意是「去登录 hanime」。现在直接把他带去登录页。
  */
-private val loginRequiredDrawerItems = emptySet<MainDrawerDestination>()
+private val loginRequiredDrawerItems = setOf<MainDrawerDestination>(
+    MainDrawerDestination.SiteAccount,
+)
 
 const val EXTRA_OPEN_DAILY_CHECK_IN = "openDailyCheckIn"
 const val ACTION_OPEN_CLOUDFLARE_VERIFICATION =

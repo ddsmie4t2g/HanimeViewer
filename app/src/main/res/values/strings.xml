@@ -305,7 +305,7 @@ Some mirrors may not support login, may not share cookies, may fail verification
     <string name="add_success">Addition Successful</string>
     <string name="local_favorite_cancelled">Cancelled</string>
     <string name="local_list_notice_title">Local data</string>
-    <string name="local_list_notice_message">Local data saved while signed out is stored separately from your online data after signing in. The two are completely independent and are not synchronized in either direction. Continue?</string>
+    <string name="local_list_notice_message">Local data is stored separately from hanime\'s online data. After you sign in to "My Account" (your own server), local data is synced to your own server automatically. Continue?</string>
     <string name="do_not_show_again">Don\'t show again</string>
     <string name="default_">Default</string>
     <string name="alternative">Alternative</string>
@@ -442,6 +442,11 @@ Recommendations are as follows:\n
     <string name="site_badge_pornhub">Pornhub</string>
     <string name="subscription_followed_artists_count">Followed Authors (%1$d)</string>
     <string name="subscription_server_artists_count">hanime Subscriptions (%1$d)</string>
+    <string name="subscription_hanime_local_count">hanime Subscriptions · Synced (%1$d)</string>
+    <string name="subscription_hanime_local_note">Not signed in to hanime. These are the subscriptions synced to your own account; sign in to hanime to see the live server list.</string>
+    <string name="subscription_pornhub_artists_count">Pornhub Follows (%1$d)</string>
+    <string name="subscription_njav_artists_count">nJAV Follows (%1$d)</string>
+    <string name="subscription_videos_count">Subscription Videos (%1$d)</string>
     <string name="subscription_followed_empty_hint">No followed authors yet. Tap Follow next to an author on a video page or an artist page — following is kept on this device and needs no login.</string>
     <string name="subscription_login_hint">Log in to hanime to see server-side subscriptions. Following, favorites and lists never need login.</string>
     <string name="unsubscribe_artist">Unsubscribe Artist</string>

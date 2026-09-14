@@ -48,6 +48,14 @@ object AccountRepository {
     /** 账号状态流（界面订阅它，注册/登录/登出后自动刷新）。 */
     val state: Flow<AccountState> = SettingsRepository.settings.map { decode(it.accountJson) }
 
+    /**
+     * 同步读一次「有没有登录自建账号」。
+     *
+     * 给**点击那一瞬间**判断用（例如详情页要不要弹「本机数据与在线数据独立」的提示）：
+     * 那种场合读 Flow 会拿到上一帧的值，直接用设置里的那份更准。
+     */
+    val isLoggedIn: Boolean get() = decode(SettingsRepository.accountJson).isLoggedIn
+
     suspend fun current(): AccountState = decode(SettingsRepository.accountJson)
 
     private fun decode(raw: String): AccountState = runCatching {
@@ -169,6 +177,19 @@ object AccountRepository {
                 base = conflict.revision
             }
         }
+    }
+
+    /**
+     * 距上次成功同步是否已经超过 [minutes] 分钟（没登录返回 false）。
+     *
+     * 给「进页面顺手同步一下」这种场合做节流用 —— 观看记录可能有几百条，
+     * 每次进订阅页都无脑传一遍太浪费。
+     */
+    suspend fun isSyncStale(minutes: Long = 5): Boolean {
+        val s = current()
+        if (!s.isLoggedIn) return false
+        if (s.lastSyncAt <= 0L) return true
+        return System.currentTimeMillis() - s.lastSyncAt > minutes * 60_000L
     }
 
     /** 刷新账号信息（顺带验证 token 还有效）。 */

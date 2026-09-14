@@ -7,21 +7,24 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionVideosIt
 /**
  * 订阅页面 UI 状态。
  *
- * ## 26.6.3 起这里装的是**两段**互不相干的东西
+ * ## 26.7.3 起这里有**两类**互不相干的数据
  *
  * | 字段 | 来源 | 要不要登录 |
  * |---|---|---|
- * | [followed] | 本机 [io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore] | **不要**（三个站点通用） |
+ * | [followed] | 本机 [io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore] | **不要**（三站通用，会同步到自建账号） |
  * | [artists] / [videos] | hanime 服务端订阅 | 要 |
  *
- * 分开的理由是用户的原话：「自带的订阅又必须要登录才能用……最好登录不跟网站挂钩」。
- * 关注是「我记住这个人」这件纯本地的事，没有理由被任何一个站点的登录挡住；
+ * [followed] 里**同时包含 hanime 的作者**：拉到 hanime 服务端订阅时会顺手把作者写进本机
+ * （见 `FollowedArtistStore.mergeSubscriptionItems`），于是「hanime 未登录」时
+ * 那一块还能读本机这份同步副本 —— 这正是用户要的「没登录就读我自己那份」。
+ *
+ * ⚠️ 本机关注是「我记住这个人」这件纯本地的事，没有理由被任何一个站点的登录挡住；
  * 而服务端订阅本来就只存在于 hanime，登录之后才有意义。
  *
- * @param followed 本机关注的作者（三站通用，免登录）
+ * @param followed 本机关注的全部作者（三站通用，免登录；按站点分组画成三块）
  * @param artists hanime 服务端订阅的作者（未登录时恒为空）
  * @param videos hanime 服务端订阅的视频流
- * @param isLoggedIn 当前是否已登录 hanime —— 决定要不要请求 / 画服务端那一段
+ * @param isLoggedIn 当前是否已登录 hanime —— 决定 hanime 那一块读服务端还是读本机副本
  * @param isRefreshing 是否正在下拉刷新
  * @param canLoadMore 是否可加载更多
  * @param error 错误信息，null 表示无错误

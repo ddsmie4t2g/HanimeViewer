@@ -49,6 +49,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.daisukikaffuchino.han1meviewer.BuildConfig
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
+import io.github.daisukikaffuchino.han1meviewer.logic.account.AccountRepository
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.getHanimeVideoLink
 import io.github.daisukikaffuchino.han1meviewer.logic.DatabaseRepo
@@ -194,6 +195,22 @@ fun VideoRouteHostScreen(
     }
     var showDialog by remember { mutableStateOf(false) }
 
+    /**
+     * 「本机数据提示」还该不该弹。
+     *
+     * 那句话的意思是「本机这份数据跟在线数据互相独立、不通」。现在本机数据会同步到
+     * **用户自己的账号**（见 [io.github.daisukikaffuchino.han1meviewer.logic.account.AccountSync]），
+     * 所以只要这份数据不是孤立无援的，就没有理由再拦一道：
+     * - 已登录 hanime → 本来就有服务端数据，提示无意义；
+     * - 已登录自建账号 → 本机数据会同步到他自己的服务器，提示反而误导（用户 2026-09-14 报的
+     *   「我明明已经登了自己的账号，还弹未登录的数据」就是这一条）；
+     * - 用户自己点过「不再提示」。
+     */
+    fun shouldSkipLocalListNotice(): Boolean =
+        SettingsRepository.isAlreadyLogin ||
+                SettingsRepository.localListNoticeDismissed ||
+                AccountRepository.isLoggedIn
+
     val actions = remember(activity, scope, viewModel, genres) {
         VideoRouteActions(
             context = activity,
@@ -207,7 +224,7 @@ fun VideoRouteHostScreen(
             onCopyText = copyTextToClipboard,
             onRequestUnsubscribe = { pendingUnsubscribeArtist = it },
             onRequestLocalListAction = { action ->
-                if (SettingsRepository.localListNoticeDismissed) {
+                if (shouldSkipLocalListNotice()) {
                     action()
                 } else {
                     pendingLocalListAction = action
@@ -836,9 +853,7 @@ fun VideoRouteHostScreen(
                 onToggleSubscribe = actions::toggleArtistSubscription,
                 onToggleFavorite = actions::toggleFavorite,
                 onRequestManageMyList = { action ->
-                    if (SettingsRepository.isAlreadyLogin ||
-                        SettingsRepository.localListNoticeDismissed
-                    ) {
+                    if (SettingsRepository.useLocalVideoState || shouldSkipLocalListNotice()) {
                         action()
                     } else {
                         pendingLocalListAction = action

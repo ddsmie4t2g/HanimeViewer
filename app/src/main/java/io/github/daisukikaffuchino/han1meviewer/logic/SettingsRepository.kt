@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.net.URI
@@ -39,6 +40,29 @@ object SettingsRepository : SettingsStore {
 
     val loginStateFlow by lazy { settings.map { it.isAlreadyLogin }.stateIn(scope, SharingStarted.Eagerly, current.isAlreadyLogin) }
     val checkInEnabledFlow by lazy { settings.map { it.checkInEnabled }.stateIn(scope, SharingStarted.Eagerly, current.checkInEnabled) }
+
+    /**
+     * ⭐ 详情页的「喜欢 / 我的清单」状态该从哪读：**本机库** 还是 hanime 服务端。
+     *
+     * 判据不是「有没有登录 hanime」，而是**这部片子有没有 hanime 服务端存储可用**：
+     * - 当前数据源是 Pornhub / nJAV → 片子根本不在 hanime 上，服务端存储不存在 ⇒ 本机库；
+     * - hanime 数据源但未登录 → 同理 ⇒ 本机库。
+     *
+     * 只有「hanime 数据源 + 已登录」才读服务端。以前只判登录态，于是在 Pornhub 下
+     * 登录了 hanime 就会去 hanime 服务端收藏一个它不认识的 videoCode（白等几秒然后失败）。
+     */
+    val useLocalVideoStateFlow by lazy {
+        settings.map { !it.isAlreadyLogin || it.siteSource.isAvSite }
+            .distinctUntilChanged()
+            .stateIn(
+                scope,
+                SharingStarted.Eagerly,
+                !current.isAlreadyLogin || current.siteSource.isAvSite,
+            )
+    }
+
+    /** [useLocalVideoStateFlow] 的同步版本（点击那一瞬间做判断用，避免读到上一帧的值）。 */
+    val useLocalVideoState get() = !current.isAlreadyLogin || current.siteSource.isAvSite
 
     val isAlreadyLogin get() = current.isAlreadyLogin
     val localListNoticeDismissed get() = current.localListNoticeDismissed
@@ -74,6 +98,28 @@ object SettingsRepository : SettingsStore {
         return sanitizeDomain(current.domainName)
     }
     val homeUrl get() = if (current.useCustomMirrorSite && current.customMirrorSite.isNotBlank()) current.customMirrorSite else baseUrl
+    /**
+     * ⭐ **hanime 站点根地址 —— 与当前数据源无关**。
+     *
+     * 和 [baseUrl] 的区别就是「切到 Pornhub / nJAV 之后会怎样」：[baseUrl] 会跟着数据源
+     * 变成 `pornhub.com` / `njavtv.com`，而 hanime 的登录页、服务端订阅、我的清单这些
+     * **只存在于 hanime 的功能**，地址绝不能跟着变。
+     *
+     * 之前它们都读 [baseUrl]，于是在 Pornhub / nJAV 下点「登录 hanime 账号」会去加载
+     * `https://www.pornhub.com/login` —— 表现为「登录出错 / 加载失败请重试」（用户 2026-09-14 报的）。
+     *
+     * 取值规则：
+     * 1. 当前就在 hanime → 直接用 [baseUrl]（含自定义镜像）；
+     * 2. 当前在 AV 站点 → 用 [AppSettings.selectedBaseUrl]，它是切站时特意留下的
+     *    「下次回 hanime 用哪个镜像」备忘（见 `MainActivity.switchSite`）；
+     * 3. 备忘也不是 hanime 镜像（历史遗留值）→ 退回默认镜像 `hanime1.com`。
+     */
+    val hanimeBaseUrl: String get() {
+        if (!current.siteSource.isAvSite) return baseUrl
+        val remembered = current.selectedBaseUrl.trim().trimEnd('/')
+        return HanimeConstants.HANIME_URL.firstOrNull { it.trimEnd('/') == remembered }
+            ?: HanimeConstants.HANIME_URL[0]
+    }
     val useCustomMirrorSite get() = current.useCustomMirrorSite
     /** 当前数据源（hanime1.me / nJAV / Pornhub）。 */
     val siteSource: SiteSource get() = current.siteSource

@@ -48,6 +48,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
+import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageLoadingState
 import io.github.daisukikaffuchino.han1meviewer.ui.component.ArtistItem
@@ -65,18 +66,25 @@ import kotlinx.coroutines.flow.map
 /**
  * 订阅页面 Content 层。纯 UI，不持有 ViewModel。
  *
- * ## 页面结构（26.6.3 起分成互不相干的两段）
+ * ## 页面结构（26.7.3 起**按站点**分成三块）
  *
  * ```
- * 关注的作者（本机，三站通用，不需要登录）   ← 空的时候给一句「怎么关注」的提示
+ * hanime 订阅（N）        ← 已登录：读 hanime 服务端（实时）
+ *                            未登录：读本机同步副本，下方注明来源
  * ────────────────────────────────────────
- * hanime 订阅（服务端，登录后才有）          ← 没登录时给一句说明，**不发任何请求**
+ * Pornhub 关注（N）       ← 本机关注（Pornhub 没有订阅接口）
  * ────────────────────────────────────────
- * 订阅视频流（服务端，登录后才有）
+ * nJAV 关注（N）          ← 本机关注（同上）
+ * ────────────────────────────────────────
+ * 订阅视频（N）+ 视频网格  ← 仅 hanime 登录后才有
  * ```
  *
- * 之所以拆开：关注是纯本机的事（谁都不该被登录挡住），服务端订阅只存在于 hanime。
- * 合成一段画会让人分不清「这个作者为什么在这儿」，也解释不了「没登录为什么整页报错」。
+ * ⚠️ 26.7.3 之前只有「关注的作者」+「hanime 订阅」两块，于是 Pornhub 与 nJAV 的人
+ * **混在同一个横排里**，只能靠卡片角标区分 —— 用户的原话是「分布不清」。
+ * 现在每个站点一块，标题里就写着是哪一家，角标也就没有必要了。
+ *
+ * 之所以还要保留「本机关注」这个概念：关注是「我记住这个人」这件纯本地的事，
+ * 没有理由被任何一个站点的登录挡住，而且本机关注会同步到用户自建的账号。
  *
  * @param uiState 页面 UI 状态
  * @param onEvent 用户事件回调
@@ -131,90 +139,136 @@ fun SubscriptionContent(
             horizontalArrangement = Arrangement.spacedBy(SpacingNormal),
             verticalArrangement = Arrangement.spacedBy(SpacingNormal)
         ) {
-            // ── 第一段：本机关注的作者 ────────────────────────────────────────
-            item(span = { GridItemSpan(videoColumns) }) {
-                if (uiState.followed.isEmpty()) {
+            // ── ⭐ 作者按**站点**分成三块（26.7.3） ─────────────────────────────
+            //
+            // 以前只有「关注的作者」和「hanime 订阅」两块，于是 Pornhub 和 nJAV 的人
+            // 混在同一个格子里，只能靠卡片上的小角标区分 —— 用户的原话是「分布不清」。
+            // 现在三个站点各成一块，标题就写着是哪一家。
+            val followedBySite = uiState.followed.groupBy { it.siteSource }
+            val hanimeLocal = followedBySite[SiteSource.Hanime1].orEmpty()
+            val pornhubLocal = followedBySite[SiteSource.Pornhub].orEmpty()
+            val njavLocal = followedBySite[SiteSource.Njav].orEmpty()
+            val everythingEmpty = uiState.followed.isEmpty() &&
+                    (!uiState.isLoggedIn || uiState.artists.isEmpty())
+
+            if (everythingEmpty) {
+                item(span = { GridItemSpan(videoColumns) }) {
                     SectionHint(stringResource(R.string.subscription_followed_empty_hint))
-                } else {
-                    AnimatedContent(
-                        targetState = uiState.followed,
-                        label = "followed-artist-animation",
-                        transitionSpec = {
-                            fadeIn(tween(300)) togetherWith fadeOut(tween(200))
-                        }
-                    ) { artists ->
-                        ArtistListSection(
-                            cards = artists.map {
-                                ArtistCard(
-                                    name = it.name,
-                                    avatar = it.avatar,
-                                    // 跨站显示的关注：每张卡标出站点，点进去才知道会去哪。
-                                    badge = stringResource(it.siteLabelRes),
+                }
+            }
+
+            // ── 第一段：hanime ────────────────────────────────────────────────
+            //
+            // 登录 → 读 hanime 服务端（实时、以取关为准）；
+            // 未登录 → 读本机那份同步副本（登录时自动存下来的，见 FollowedArtistStore）。
+            val hanimeCards = if (uiState.isLoggedIn) {
+                uiState.artists.map { ArtistCard(it.artistName, it.avatar) }
+            } else {
+                hanimeLocal.map { ArtistCard(it.name, it.avatar) }
+            }
+            if (!everythingEmpty) {
+                item(span = { GridItemSpan(videoColumns) }, key = "section-hanime") {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        ArtistSectionItem(
+                            title = if (uiState.isLoggedIn) {
+                                stringResource(
+                                    R.string.subscription_server_artists_count,
+                                    hanimeCards.size,
+                                )
+                            } else {
+                                stringResource(
+                                    R.string.subscription_hanime_local_count,
+                                    hanimeCards.size,
                                 )
                             },
-                            title = stringResource(
-                                R.string.subscription_followed_artists_count,
-                                artists.size,
-                            ),
+                            cards = hanimeCards,
                             artistRows = artistRows,
                             artistColumns = artistColumns,
                             onClickArtist = { index ->
-                                artists.getOrNull(index)?.let {
-                                    onEvent(SubscriptionEvent.OnClickFollowed(it))
+                                if (uiState.isLoggedIn) {
+                                    uiState.artists.getOrNull(index)?.let {
+                                        onEvent(SubscriptionEvent.OnClickArtist(it.artistName))
+                                    }
+                                } else {
+                                    hanimeLocal.getOrNull(index)?.let {
+                                        onEvent(SubscriptionEvent.OnClickFollowed(it))
+                                    }
                                 }
                             },
                             onLongClickArtist = { index ->
-                                artists.getOrNull(index)?.let {
-                                    onEvent(SubscriptionEvent.OnLongClickFollowed(it))
+                                if (uiState.isLoggedIn) {
+                                    uiState.artists.getOrNull(index)?.let {
+                                        onEvent(SubscriptionEvent.OnLongClickArtist(it.artistName))
+                                    }
+                                } else {
+                                    hanimeLocal.getOrNull(index)?.let {
+                                        onEvent(SubscriptionEvent.OnLongClickFollowed(it))
+                                    }
                                 }
                             },
                         )
-                    }
-                }
-            }
-
-            // ── 第二段：hanime 服务端订阅 ─────────────────────────────────────
-            item(span = { GridItemSpan(videoColumns) }) {
-                if (!uiState.isLoggedIn) {
-                    SectionHint(stringResource(R.string.subscription_login_hint))
-                } else {
-                    AnimatedContent(
-                        targetState = uiState.artists,
-                        label = "artist-animation",
-                        transitionSpec = {
-                            fadeIn(tween(300)) togetherWith fadeOut(tween(200))
+                        if (!uiState.isLoggedIn) {
+                            // 说清楚这一块是哪儿来的，免得用户以为「没登录怎么也有订阅」。
+                            SectionHint(stringResource(R.string.subscription_hanime_local_note))
                         }
-                    ) { artists ->
-                        ArtistListSection(
-                            cards = artists.map { ArtistCard(it.artistName, it.avatar) },
-                            title = stringResource(
-                                R.string.subscription_server_artists_count,
-                                artists.size,
-                            ),
-                            artistRows = artistRows,
-                            artistColumns = artistColumns,
-                            onClickArtist = { index ->
-                                artists.getOrNull(index)?.let {
-                                    onEvent(SubscriptionEvent.OnClickArtist(it.artistName))
-                                }
-                            },
-                            onLongClickArtist = { index ->
-                                artists.getOrNull(index)?.let {
-                                    onEvent(SubscriptionEvent.OnLongClickArtist(it.artistName))
-                                }
-                            },
-                        )
                     }
                 }
             }
 
-            if (uiState.isLoggedIn) {
-                item(span = { GridItemSpan(videoColumns) }) {
-                    HorizontalDivider(
-                        modifier = Modifier.fillMaxWidth(),
-                        thickness = 1.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant
+            // ── 第二段 / 第三段：Pornhub、nJAV 各成一块 ─────────────────────────
+            listOf(
+                Triple("section-pornhub", SiteSource.Pornhub, pornhubLocal),
+                Triple("section-njav", SiteSource.Njav, njavLocal),
+            ).forEach { (key, site, list) ->
+                if (list.isEmpty()) return@forEach
+                item(span = { GridItemSpan(videoColumns) }, key = key) {
+                    ArtistSectionItem(
+                        title = stringResource(
+                            when (site) {
+                                SiteSource.Pornhub -> R.string.subscription_pornhub_artists_count
+                                SiteSource.Njav -> R.string.subscription_njav_artists_count
+                                SiteSource.Hanime1 -> R.string.subscription_followed_artists_count
+                            },
+                            list.size,
+                        ),
+                        cards = list.map { ArtistCard(it.name, it.avatar) },
+                        artistRows = artistRows,
+                        artistColumns = artistColumns,
+                        onClickArtist = { index ->
+                            list.getOrNull(index)?.let {
+                                onEvent(SubscriptionEvent.OnClickFollowed(it))
+                            }
+                        },
+                        onLongClickArtist = { index ->
+                            list.getOrNull(index)?.let {
+                                onEvent(SubscriptionEvent.OnLongClickFollowed(it))
+                            }
+                        },
                     )
+                }
+            }
+
+            // ── 第四段：hanime 订阅视频流（只有登录后才有） ───────────────────────
+            if (uiState.isLoggedIn) {
+                if (uiState.videos.isNotEmpty()) {
+                    item(span = { GridItemSpan(videoColumns) }, key = "section-videos") {
+                        Column(verticalArrangement = Arrangement.spacedBy(SpacingNormal)) {
+                            HorizontalDivider(
+                                modifier = Modifier.fillMaxWidth(),
+                                thickness = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant
+                            )
+                            Text(
+                                text = stringResource(
+                                    R.string.subscription_videos_count,
+                                    uiState.videos.size,
+                                ),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                            )
+                        }
+                    }
                 }
 
                 items(
@@ -246,6 +300,37 @@ fun SubscriptionContent(
                 }
             }
         }
+    }
+}
+
+/**
+ * 一个站点的作者格子（标题 + 横向滚动的作者卡）。
+ *
+ * 抽出来是因为三个站点各要画一块，而它们的排版完全一样，只有「标题」和「点谁」不同。
+ * 内部套 [AnimatedContent] 是为了列表增删时有个淡入淡出，不套也能用。
+ */
+@Composable
+private fun ArtistSectionItem(
+    title: String,
+    cards: List<ArtistCard>,
+    artistRows: Int,
+    artistColumns: Int,
+    onClickArtist: (Int) -> Unit,
+    onLongClickArtist: (Int) -> Unit,
+) {
+    AnimatedContent(
+        targetState = cards,
+        label = "artist-animation-$title",
+        transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(200)) }
+    ) { artists ->
+        ArtistListSection(
+            cards = artists,
+            title = title,
+            artistRows = artistRows,
+            artistColumns = artistColumns,
+            onClickArtist = onClickArtist,
+            onLongClickArtist = onLongClickArtist,
+        )
     }
 }
 
