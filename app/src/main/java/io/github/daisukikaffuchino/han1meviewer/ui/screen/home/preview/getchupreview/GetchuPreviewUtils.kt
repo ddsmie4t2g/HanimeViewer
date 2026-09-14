@@ -8,10 +8,12 @@ import androidx.compose.ui.platform.LocalInspectionMode
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.ImageRequest
+import io.github.daisukikaffuchino.han1meviewer.logic.network.CdnRelay
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HProxyAuthenticator
 import io.github.daisukikaffuchino.han1meviewer.DESKTOP_USER_AGENT
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HDns
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HProxySelector
+import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.CdnRelayInterceptor
 import okhttp3.OkHttpClient
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
@@ -65,8 +67,12 @@ internal fun rememberGetchuImageLoader(): ImageLoader {
 }
 
 internal fun createGetchuImageLoader(context: Context): ImageLoader {
+    // ⚠️ 发售表的封面也在 `www.getchu.com` 上，必须和 GetchuService 一样挂中转：
+    // 那条直连从大陆不通 ⇒ 不挂的话就是「列表出来了、封面全是空白」。
+    // 拦截器顺序：先按原始 host 补头，再由 CdnRelayInterceptor 把 URL 换成中转地址。
     val imageClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
+        .sslSocketFactory(CdnRelay.sslContext.socketFactory, CdnRelay.trustManager)
         .dns(HDns())
         .proxySelector(HProxySelector())
         .proxyAuthenticator(HProxyAuthenticator.http)
@@ -82,6 +88,7 @@ internal fun createGetchuImageLoader(context: Context): ImageLoader {
             }
             chain.proceed(builder.build())
         }
+        .addInterceptor(CdnRelayInterceptor())
         .build()
     return ImageLoader.Builder(context)
         .components {

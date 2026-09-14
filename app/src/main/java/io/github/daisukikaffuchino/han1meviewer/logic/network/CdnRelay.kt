@@ -127,6 +127,17 @@ object CdnRelay {
         "fourhoi.com",  // nJAV 封面
         "pornhub.com",  // Pornhub 站点本体（HTML / JSON API）
         "phncdn.com",   // Pornhub 全部封面与视频 CDN（pix-*.phncdn.com / ev-h.phncdn.com …）
+
+        // 「新番预告 / 发售表」的数据源（`all/month_title.html`，EUC-JP 的 HTML）。
+        //
+        // ⚠️ 26.8.3：**只把 getchu 这一个域名挂回来**，其余网络改动一律保持 26.8.2 的基线。
+        // 原因：`www.getchu.com` 从大陆直连不通（用户实测就是那句「连接被中断」），
+        // 而中转那台服务器的白名单里已经有它（`build/relay/relay.py` v5 的 ALLOW_SUFFIXES）。
+        //
+        // ⚠️ 刻意**不放**进 ALWAYS_RELAY_HOSTS：getchu 在海外能直连，海外用户不该被强绕
+        // 一趟美国；代价只是大陆用户进程内第一次请求白撞一次 RST，之后 [isKnownDead]
+        // 记着，后面全走中转。
+        "getchu.com",
     )
 
     /**
