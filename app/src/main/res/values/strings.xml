@@ -218,6 +218,7 @@
     <string name="site_source_pornhub_with_host">Pornhub (pornhub.com)</string>
     <!-- Pornhub 首页栏目名。注意：下面的 ph_* 只做**显示**，
          真正的「检索标记」是中文字面量（见 PhParser.MARKER_TO_QUERY），两者别混。 -->
+    <string name="ph_recommended">Recommended</string>
     <string name="ph_latest">Latest</string>
     <string name="ph_popular">Most viewed</string>
     <string name="ph_top_rated">Top rated</string>

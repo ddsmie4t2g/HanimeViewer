@@ -30,10 +30,13 @@ import org.jsoup.nodes.Element
  * | 页面 | 来源 | 形态 |
  * |---|---|---|
  * | 首页 / 列表 / 搜索 | `/webmasters/search` | **JSON**（30 条/页，字段齐全） |
+ * | 首页的「推荐」一行 | `/recommended` | **HTML**（约 1 MB，21 条/页，见 [recommendedList]） |
+ * | 作者页 | `/pornstar|/model/<slug>/videos` | **HTML**（约 1.2 MB，40–49 条/页） |
  * | 详情 | `/view_video.php?viewkey=…` | HTML，播放地址埋在 `var flashvars_<id> = {…}` 里 |
  *
  * 列表之所以不抓 HTML：站点列表页有 1.2–1.6 MB，而 JSON 只有约 140 KB，
  * 而这一切都要经过自建中转（见 [PhNetwork]），差 10 倍的流量没有理由不用 JSON。
+ * **只有推荐和作者页没有等价的 JSON 接口**，才不得不抓 HTML（两条都复用同一套卡片解析）。
  *
  * ## 详情页最容易踩的两个坑
  *
@@ -149,12 +152,27 @@ object PhParser {
 
     //<editor-fold desc="首页 / 列表标记">
 
-    /** 首页栏目 → 往 [HomePage] 哪个槽位填；由 [homePage] 使用。 */
-    fun homePage(sections: Map<String, List<HanimeInfo>>): WebsiteState<HomePage> {
+    /**
+     * 首页栏目 → 往 [HomePage] 哪个槽位填；由 [homePage] 使用。
+     *
+     * @param recommended 站点自己的「推荐」（`/recommended` 页的第 1 页）。
+     *   单独传进来是因为它**不是**一个 JSON 检索栏目：它要抓一整页 HTML（约 1 MB），
+     *   比那 10 个 JSON 栏目都慢，所以仓库层是先发一版没有它的首页、等它回来再补发一版
+     *   （见 [io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo.phHomePageFlow]）。
+     *   为空时它占的槽位就是空列表，界面按「没内容的行不画」处理。
+     */
+    fun homePage(
+        sections: Map<String, List<HanimeInfo>>,
+        recommended: List<HanimeInfo> = emptyList(),
+    ): WebsiteState<HomePage> {
         fun list(key: String) = sections[key].orEmpty().toMutableList()
         // 槽位名是 hanime 那边的叫法，内容与它毫无关系 —— 这里只是借用
         // 「同一份界面按槽位取数」的机制。映射关系见 HomePageMappers.buildCategoryList
         // 里 isPornhubSite 的那几个分支，两边必须一一对应。
+        //
+        // Pornhub 用掉 10 个槽、留空 3 个（aiGenerated / newAnimeTrailer / cosplay），
+        // 「推荐」占 newAnimeTrailer —— 那是这三个里语义最不相干的一个（hanime 的
+        // 「本月新番预告」页在 Pornhub 根本没有对应物，见 [emptyPreview]）。
         return WebsiteState.Success(
             HomePage(
                 csrfToken = null,
@@ -173,7 +191,7 @@ object PhParser {
                 mmd = list(PhNetwork.SEC_EXCLUSIVE),
                 cosplay = mutableListOf(),
                 watchingNow = list(PhNetwork.SEC_TOP_RATED),
-                newAnimeTrailer = mutableListOf(),
+                newAnimeTrailer = recommended.toMutableList(),
                 userId = "",
             )
         )
@@ -195,6 +213,24 @@ object PhParser {
      */
     fun queryForMarker(marker: String?): PhNetwork.PhQuery? =
         marker?.trim()?.takeIf { it.isNotEmpty() }?.let { MARKER_TO_QUERY[it] }
+
+    /**
+     * ⭐ 「推荐」这一行的标记（26.9.5）。
+     *
+     * 它**故意不走 [queryForMarker]**：那套映射的产物是 [PhNetwork.PhQuery]，
+     * 也就是「同一个检索接口换参数」，而「推荐」是另一个页面（`/recommended`，整页 HTML）。
+     * 由 [io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo.resolvePhListUrl]
+     * 先问这一个、再问 [queryForMarker]。
+     *
+     * 简繁同义都收，因为界面文案按语言给的是简体，而别处（`genre_ph.json`）用繁体。
+     */
+    const val RECOMMENDED_MARKER = "推薦"
+
+    private val RECOMMENDED_MARKERS = setOf(RECOMMENDED_MARKER, "推荐", "Recommended", "recommended")
+
+    /** [marker] 是不是「推荐」那一行的标记。 */
+    fun isRecommendedMarker(marker: String?): Boolean =
+        marker?.trim()?.let { it in RECOMMENDED_MARKERS } == true
 
     private val MARKER_TO_QUERY: Map<String, PhNetwork.PhQuery> = buildMap {
         PhNetwork.PhQuery(ordering = "newest").let { q ->
@@ -605,10 +641,80 @@ object PhParser {
      * 同一个页面上还有 `#hottestMenuSection`（另一个标签页的预载数据）和一堆推荐位，
      * 全局取 `li.pcVideoListItem` 会把它们一起收进来 —— 表现就是「作者的作品里混着别人的片」。
      */
-    fun artistVideoList(doc: org.jsoup.nodes.Document): MutableList<HanimeInfo> {
-        val items = doc.select("#mostRecentVideosSection li.pcVideoListItem")
-            .ifEmpty { doc.select("div.videoUList li.pcVideoListItem") }
-            .ifEmpty { doc.select("li.pcVideoListItem") }
+    fun artistVideoList(doc: org.jsoup.nodes.Document): MutableList<HanimeInfo> =
+        videoItemsFrom(
+            doc.select("#mostRecentVideosSection li.pcVideoListItem")
+                .ifEmpty { doc.select("div.videoUList li.pcVideoListItem") }
+                .ifEmpty { doc.select("li.pcVideoListItem") }
+        )
+
+    /**
+     * ⭐ **站点自己的「推荐」列表** —— `/recommended` 页（26.9.5 新增）。
+     *
+     * 用户要的是「它自己的首页推荐」，而不是又一个排序：`最新 / 最多观看 / 本周热门`
+     * 这些都是**同一个检索接口换参数**（见 [PhNetwork.HOME_SECTIONS]），
+     * 而 `/recommended` 是站点推荐引擎吐出来的另一套东西（响应头里带
+     * `x-dd-experiments: {video_recommendation: …}`，首页导航里也挂着
+     * `Recommended Videos` → `/recommended`）。
+     *
+     * 实测（2026-09-15）：
+     * - 容器 `ul#recommendedListings`，21 条/页，卡片结构与作者页**完全一致**
+     *   （`data-video-vkey` / `span.title a` / `var.duration` / `div.videoDetailBlock span.views var`），
+     *   所以解析直接复用 [videoItemsFrom]。
+     * - 与「最多观看」/「最新」是**另一批片子**的意义上成立：`/recommended` 的第 1 页与
+     *   第 2 页零重合，翻页有效（页面上能看到 18+ 页）。
+     * - **越界的页码返回 404**（实测 `?page=999`），所以调用方必须把
+     *   「第 2 页起的 404」当成「到底了」，否则滚到底会弹错误
+     *   —— 这正是 26.9.4 用户报的「末页 404」的同一类坑，见 [recommendedState]。
+     *
+     * ⚠️ 容器**不要**退到全局 `li.pcVideoListItem`：这一页还有
+     * `recommendedPornstarsWrapper` / `recommendedCategoriesWrapper` 两个区块，
+     * 它们自有分页器，混进来会让「还有没有下一页」判错（见 [hasRecommendedNextPage]）。
+     */
+    fun recommendedList(body: String): MutableList<HanimeInfo> {
+        val doc = Jsoup.parse(body)
+        val scoped = doc.select("#recommendedListings li.pcVideoListItem")
+        if (scoped.isNotEmpty()) return videoItemsFrom(scoped)
+        // 站点改版时的兜底：只在**确实没有**这个容器时才用整页卡片，
+        // 免得把旁边两个推荐区块的卡片混进作品列表。
+        return if (doc.selectFirst("#recommendedListings") == null) {
+            videoItemsFrom(doc.select("div.recommendedVideosContainer li.pcVideoListItem"))
+        } else {
+            mutableListOf()
+        }
+    }
+
+    /**
+     * 推荐页的分页结果。
+     *
+     * 判据只有一条：**这一页有卡片就有下一页，没有就到底**。
+     *
+     * 为什么不看站点自己的页码条：`PageLoadingState` 没有「还有下一页」这个位，
+     * 列表页只认 `NoMoreData`（见 `SearchScreen` 的 `canLoadMore`）。所以在这里
+     * 返回 `Success(空列表)` 的后果是**列表页继续保持「可以再翻」的状态**，
+     * 用户每滚一下就会白发一次请求 —— 换来的是一个从未观察到的场景
+     * （有效页码却渲染出空容器）。不值得。
+     *
+     * ⚠️ 真正会遇到的「到底」是**越界页码返回 404**，那一段在
+     * [io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo.phListFlow]
+     * 里翻译成 `NoMoreData`（这里根本收不到这种响应）。
+     */
+    fun recommendedState(body: String): PageLoadingState<MutableList<HanimeInfo>> {
+        val list = recommendedList(body)
+        return if (list.isNotEmpty()) PageLoadingState.Success(list)
+        else PageLoadingState.NoMoreData
+    }
+
+    /**
+     * 把一批 `li.pcVideoListItem` 卡片解析成 [HanimeInfo]。
+     *
+     * 作者页与推荐页用的是**同一套卡片标记**，所以两处共用这一个函数 ——
+     * 站点改一处标记时不会只修好一边。
+     *
+     * ⚠️ 解析失败（拿不到 `viewkey`）的卡片**直接丢掉**，不要塞一个空壳进去：
+     * 界面上会出现点不开的封面。
+     */
+    private fun videoItemsFrom(items: List<Element>): MutableList<HanimeInfo> {
         val result = LinkedHashMap<String, HanimeInfo>()
         items.forEach { item ->
             val anchor = item.selectFirst("a[href*=viewkey]")

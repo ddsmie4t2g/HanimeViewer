@@ -2,6 +2,7 @@ package io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage
 
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HomePage
+import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhParser
 
 /**
  * 将首页原始数据转换为 UI 可直接展示的分类行数据。
@@ -17,6 +18,11 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.HomePage
  *    里给这个标记一条映射。
  *
  * 只做第 1 步的话，栏目画得出来、点进去却静默退回默认排序 —— 看着像「点了没反应」。
+ *
+ * ⚠️ **例外：Pornhub 的「推荐」行**（[HOME_CATEGORY_RECOMMENDED]）。它不是检索条件，
+ * 而是另一个页面（`/recommended`），所以它的标记走
+ * [io.github.daisukikaffuchino.han1meviewer.logic.ph.PhParser.isRecommendedMarker]，
+ * 而不是 `queryForMarker`。新增这类「非检索」栏目时照着它抄。
  *
  * @param homePage 仓库层返回的首页原始数据。
  * @param isAVSite 是否是非 hanime 的「AV 型」站点（nJAV / Pornhub）。
@@ -41,6 +47,21 @@ fun buildCategoryList(
     isNjavSite: Boolean = false,
 ): List<HomeCategory> {
     return listOfNotNull(
+        // ── 站点自己的「推荐」（26.9.5，只有 Pornhub 有内容）─────────────────
+        //
+        // 内容是 `/recommended` 页（整页 HTML，见 PhNetwork.recommendedUrl），
+        // 不是检索接口换参数 —— 所以它的标记不给 queryForMarker，而是给
+        // PhParser.isRecommendedMarker 认（NetworkRepo.resolvePhListUrl 先问那个）。
+        //
+        // ⚠️ **必须卡 `isPornhubSite`**：借用的槽位 `newAnimeTrailer` 在 hanime 那边
+        //    装的是「本月新番预告」的真实数据（见 `Parser.homePageVer2`），
+        //    不卡的话 hanime 首页会凭空多出一行叫「推荐」、内容却是新番预告。
+        if (!isPornhubSite) null else HomeCategory(
+            key = HOME_CATEGORY_RECOMMENDED,
+            titleRes = R.string.ph_recommended,
+            genre = PhParser.RECOMMENDED_MARKER,
+            videos = homePage.newAnimeTrailer
+        ),
         // ── 最新 ───────────────────────────────────────────────────────────
         HomeCategory(
             key = HOME_CATEGORY_LATEST_HANIME,

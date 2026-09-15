@@ -47,6 +47,50 @@ object PhNetwork {
     private const val VIEW_PATH = "view_video.php"
 
     /**
+     * 站点自己的「推荐」页 —— 26.9.5 新增，与 [HOME_SECTIONS] 那 10 个栏目不是一回事。
+     *
+     * ## 为什么它单独一格
+     *
+     * `/webmasters/search` 只能表达「检索条件」（关键词 / 排序 / 标签），而
+     * 「推荐」是站点推荐引擎的输出 —— 不是又一个排序。实测（2026-09-15）：
+     * 它自己的第 1 页与第 2 页零重合、页码条能翻到 18+ 页，响应头里带
+     * `x-dd-experiments: {video_recommendation: …}`，首页导航里也挂着
+     * `Recommended Videos → /recommended`。用户的原话是
+     * 「现在只有最新/最多观看/本周热门这些都不带变的，加点它自己的首页推荐」。
+     *
+     * ## 代价（务必知情）
+     *
+     * 它**没有 JSON 版本**，只有整页 HTML：约 **1 MB**（对比：一个 JSON 栏目约 140 KB），
+     * 21 条/页，卡片在文档第 433–676 KB 处，页码条在 683 KB 处。
+     * 每开一次首页就多这么一趟 —— 作者页也是这个量级（1.2 MB/页），属于既有做法。
+     *
+     * ⚠️ **越界的页码返回 404**（实测 `?page=999`），不是空页。调用方必须把它当成
+     * 「到底了」（见 [io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo.phListFlow]），
+     * 否则滚到底会弹错误 —— 与 26.9.4 那个「末页 404」是同一类坑。
+     */
+    private const val RECOMMENDED_PATH = "recommended"
+
+    /**
+     * 「推荐」页地址。`page = 1` 时不带参数（站点自己的形式就是 `/recommended`）。
+     *
+     * 与 [apiUrl] 一样交给 [okhttp3.HttpUrl.Builder] 拼，别手拼字符串。
+     */
+    fun recommendedUrl(page: Int): String {
+        val builder = (BASE_URL + RECOMMENDED_PATH).toHttpUrl().newBuilder()
+        if (page > 1) builder.addQueryParameter("page", page.toString())
+        return builder.build().toString()
+    }
+
+    /**
+     * 这个地址是不是「推荐」页 —— 用来决定列表页该用 JSON 解析还是 HTML 解析
+     * （两条路的 [io.github.daisukikaffuchino.han1meviewer.logic.ph.PhParser] 入口不同）。
+     */
+    fun isRecommendedUrl(url: String): Boolean {
+        val path = url.toHttpUrlOrNull()?.encodedPath ?: return false
+        return path.trim('/') == RECOMMENDED_PATH
+    }
+
+    /**
      * embed 页。**播放地址的保底来源** —— 只有 48 KB、且签名形态稳定可取，
      * 但只有 480P 一档。详见 [embedUrl]。
      */
@@ -65,6 +109,9 @@ object PhNetwork {
      * 数量刻意压到 **10** 个：每个栏目都是一次独立请求（约 140 KB，约 30 条），
      * 全部并发发出。实测并行总吞吐约 1 MB/s，10 个栏目首屏约 1–2 秒，
      * 再多就会把中转那条链路压满。
+     *
+     * ⚠️ 26.9.5 加的「推荐」**不在这个表里**：它不是一个检索条件（见 [recommendedUrl]），
+     * 而且比这里每一个都重（约 1 MB 的整页 HTML），所以单独一趟、晚一档发出。
      */
     const val SEC_LATEST = "latest"
     const val SEC_POPULAR = "popular"

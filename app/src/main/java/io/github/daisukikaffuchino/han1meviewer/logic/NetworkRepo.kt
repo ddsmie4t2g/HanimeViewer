@@ -42,6 +42,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -848,40 +849,94 @@ object NetworkRepo {
      * 与 [njavHomePageFlow] 同一套思路：单个栏目失败不影响整体
      * （`runCatching` 兜成空列表），免得一个栏目抽风就让整个首页报错。
      *
-     * ⚠️ 四个栏目是**四个独立请求**（每个约 140 KB 的 JSON，且都要过自建中转），
+     * ⚠️ 这些栏目是**独立请求**（每个约 140 KB 的 JSON，且都要过自建中转），
      * 所以别再加栏目了 —— 每多一个栏目就是首页首屏多等一次境外往返。
+     * 26.9.5 的「推荐」没有加进这个表，原因见下。
+     *
+     * ## 「推荐」为什么单独一趟、而且发两次
+     *
+     * `/recommended` 不是检索接口，是一整页 HTML（**约 1 MB**，见 [PhNetwork.recommendedUrl]），
+     * 比这里的每一个都重。所以它和这 10 个 JSON **并行**去取（`async` 就在这个流的
+     * 作用域里），但**不挡首屏**：
+     *
+     * 1. 10 个 JSON 到齐 → 立刻发一版（此时「推荐」那一行是空的，界面按
+     *    「没内容的行不画」处理，不会有空行闪烁）；
+     * 2. 那 1 MB 回来 → 再发一版把它补上。
+     *
+     * 这正是 26.9.2 定下的规矩：首页**不等**慢东西（那时等的是更新检查）。
+     * 用 `channelFlow` 而不是 `flow` 就是为了能在子协程里 `send` 两次。
+     * 推荐拉失败/解析不出（站点改版、被限流）时**只发第一版**，
+     * 一行不出现，而不是让整个首页报错。
      */
-    private fun phHomePageFlow(): Flow<WebsiteState<HomePage>> = flow {
-        val sections = coroutineScope {
-            PhNetwork.HOME_SECTIONS.map { (key, query) ->
-                async(Dispatchers.IO) {
-                    key to runCatching {
-                        val response = PhNetwork.service.get(PhNetwork.apiUrl(page = 1, query = query))
-                        if (response.isSuccessful) {
-                            PhParser.videoList(response.body()?.string().orEmpty())
-                        } else {
-                            throw ParseException("Pornhub: HTTP ${response.code()} - $key")
-                        }
-                    }.getOrDefault(mutableListOf<HanimeInfo>())
-                }
-            }.awaitAll().toMap()
-        }
-        emit(PhParser.homePage(sections))
+    private fun phHomePageFlow(): Flow<WebsiteState<HomePage>> = channelFlow {
+        val recommended = async(Dispatchers.IO) { runCatching { fetchPhRecommended() }
+            .getOrDefault(mutableListOf()) }
+
+        val sections = PhNetwork.HOME_SECTIONS.map { (key, query) ->
+            async(Dispatchers.IO) {
+                key to runCatching {
+                    val response = PhNetwork.service.get(PhNetwork.apiUrl(page = 1, query = query))
+                    if (response.isSuccessful) {
+                        PhParser.videoList(response.body()?.string().orEmpty())
+                    } else {
+                        throw ParseException("Pornhub: HTTP ${response.code()} - $key")
+                    }
+                }.getOrDefault(mutableListOf<HanimeInfo>())
+            }
+        }.awaitAll().toMap()
+
+        send(PhParser.homePage(sections))
+
+        val reco = recommended.await()
+        if (reco.isNotEmpty()) send(PhParser.homePage(sections, reco))
     }.catch { e ->
         emit(WebsiteState.Error(handlePhException(e)))
     }.flowOn(Dispatchers.IO)
 
-    /** Pornhub 列表页（分类 / 搜索）通用管线。 */
+    /**
+     * 取站点自己的「推荐」第 1 页（约 1 MB HTML，见 [PhNetwork.recommendedUrl]）。
+     *
+     * 只用来填首页那一行；「更多」进去的分页走 [phListFlow]。
+     */
+    private suspend fun fetchPhRecommended(): MutableList<HanimeInfo> {
+        val response = PhNetwork.service.get(PhNetwork.recommendedUrl(page = 1))
+        if (!response.isSuccessful) {
+            throw ParseException("Pornhub: HTTP ${response.code()} - recommended")
+        }
+        return PhParser.recommendedList(response.body()?.string().orEmpty())
+    }
+
+    /**
+     * Pornhub 列表页通用管线。
+     *
+     * ⭐ 26.9.5：同一个函数要伺候**两种页面** —— 检索接口给的 JSON，
+     * 与「推荐」页给的 HTML（见 [PhNetwork.isRecommendedUrl]）。用哪一个解析器
+     * **只由 url 决定**，别在别处再判一次，否则两边判据一漂移就会拿 JSON 解析器
+     * 去啃 HTML（表现为「点进去一直空」）。
+     *
+     * ⚠️ 推荐页**越界的页码是 404**（实测 `?page=999`），不是空页 ——
+     * 必须把「第 2 页起的 404」翻译成 [PageLoadingState.NoMoreData]。
+     * 不这么处理的话，用户滚到底会看到一条报错，而这其实是「翻完了」——
+     * 26.9.4 用户报的「末页 404」就是没分清这一层。
+     */
     private fun phListFlow(
         page: Int,
         url: String,
     ): Flow<PageLoadingState<MutableList<HanimeInfo>>> = flow {
+        val recommended = PhNetwork.isRecommendedUrl(url)
         val response = PhNetwork.service.get(url)
         if (!response.isSuccessful) {
+            if (recommended && page > 1 && response.code() == 404) {
+                emit(PageLoadingState.NoMoreData)
+                return@flow
+            }
             throw ParseException("Pornhub: HTTP ${response.code()} - $url")
         }
-        // 翻页判据要 page：接口不返回总页数，只能看这一页给满没有。
-        emit(PhParser.pageState(response.body()?.string().orEmpty(), page))
+        val body = response.body()?.string().orEmpty()
+        emit(
+            if (recommended) PhParser.recommendedState(body)
+            else PhParser.pageState(body, page)
+        )
     }.catch { e ->
         emit(PageLoadingState.Error(handlePhException(e)))
     }.flowOn(Dispatchers.IO)
@@ -939,6 +994,11 @@ object NetworkRepo {
      *
      * 有关键词就搜索；否则把 [genre] / [tags] / [sort] 里的标记交给
      * [PhParser.queryForMarker] 映射成排序或标签条件，都映射不上就兜底到「最新」。
+     *
+     * ⭐ 26.9.5：「推荐」那一行是**唯一一个不走检索接口**的标记 ——
+     * 它映射到 `/recommended` 整页（HTML），所以必须先问
+     * [PhParser.isRecommendedMarker]，再问 [PhParser.queryForMarker]。
+     * 顺序反了不会报错，只会静默退回「最新」（看着像「点了推荐却在看最新」）。
      */
     private fun resolvePhListUrl(
         page: Int,
@@ -952,8 +1012,14 @@ object NetworkRepo {
             return PhNetwork.apiUrl(page, PhNetwork.PhQuery(keyword = keyword))
         }
 
-        val mapped = sequenceOf(genre).plus(tags.asSequence()).plus(sequenceOf(sort))
-            .firstNotNullOfOrNull { PhParser.queryForMarker(it) }
+        val markers = sequenceOf(genre).plus(tags.asSequence()).plus(sequenceOf(sort))
+            .mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
+
+        if (markers.any { PhParser.isRecommendedMarker(it) }) {
+            return PhNetwork.recommendedUrl(page)
+        }
+
+        val mapped = markers.firstNotNullOfOrNull { PhParser.queryForMarker(it) }
 
         return PhNetwork.apiUrl(page, mapped ?: PhNetwork.PhQuery(ordering = "newest"))
     }

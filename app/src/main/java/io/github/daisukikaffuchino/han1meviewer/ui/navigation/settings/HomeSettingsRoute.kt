@@ -67,6 +67,7 @@ import io.github.daisukikaffuchino.han1meviewer.ui.screen.settings.dialog.AppUpd
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.settings.HomeSettingsPage
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.settings.HomeSettingsScreen
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.settings.model.HomeSettingsUiState
+import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.HOME_CATEGORY_RECOMMENDED
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.defaultHomeCategoryPreferenceItems
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.hiddenHomeCategoryKeys
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.homeCategoryOrder
@@ -851,7 +852,11 @@ private fun buildHomeSettingsUiState(
         horizontalCardCountConfig = horizontalCardCountConfig,
         checkInEnabled = SettingsRepository.isCheckInEnabled,
         followUpdateAlert = SettingsRepository.followUpdateAlert,
-        homeCategoryItems = defaultHomeCategoryPreferenceItems,
+        // 「推荐」那一行只有 Pornhub 有内容（见 HOME_CATEGORY_RECOMMENDED），
+        // 别的数据源下把它从这一页藏掉 —— 否则会多出一条永远排不出东西的开关。
+        homeCategoryItems = defaultHomeCategoryPreferenceItems.filterNot {
+            it.key == HOME_CATEGORY_RECOMMENDED && !SettingsRepository.isPornhubSite
+        },
         homeCategoryOrder = homeCategoryOrder,
         hiddenHomeCategoryKeys = hiddenHomeCategoryKeys,
         // 分类标题用「AV 那一套」还是「里番那一套」。

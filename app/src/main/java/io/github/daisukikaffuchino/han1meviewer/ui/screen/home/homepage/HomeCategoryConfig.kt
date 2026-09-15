@@ -17,13 +17,33 @@ const val HOME_CATEGORY_AI_GENERATED = "ai_generated"
 const val HOME_CATEGORY_MMD = "mmd"
 const val HOME_CATEGORY_COSPLAY = "cosplay"
 
+/**
+ * 站点自己的「推荐」行（26.9.5 新增）—— **目前只有 Pornhub 有内容**
+ * （`/recommended` 页，见 [io.github.daisukikaffuchino.han1meviewer.logic.ph.PhNetwork.recommendedUrl]）。
+ *
+ * hanime / nJAV 下这一行的视频列表恒为空，会在 `buildCategoryList` 结尾
+ * 被「空行不画」的过滤丢掉；设置里那一项也按数据源隐藏
+ * （见 `HomeSettingsRouteScreen`），免得这边留着一条永远没内容的开关。
+ */
+const val HOME_CATEGORY_RECOMMENDED = "recommended"
+
 data class HomeCategoryPreferenceItem(
     val key: String,
     @param:StringRes val normalTitleRes: Int,
     @param:StringRes val avTitleRes: Int? = null,
 )
 
+/**
+ * 设置页里「首页栏目」的**全部**条目，同时决定新用户的默认顺序。
+ *
+ * ⚠️ 「推荐」放在最前面是刻意的：它是站点推荐引擎的输出，比
+ * 「最新 / 最多观看 / 本周热门」这类机械排序更值得先看到 —— 用户原话是
+ * 「现在只有最新、最多观看、本周热门这些都不带变的，加点它自己的首页推荐」。
+ * 老用户如果自己排过顺序，顺序按他保存的走（新键会被 `normalizeHomeCategoryKeys`
+ * 追加到末尾），**不覆盖用户的排序**。
+ */
 val defaultHomeCategoryPreferenceItems = listOf(
+    HomeCategoryPreferenceItem(HOME_CATEGORY_RECOMMENDED, R.string.ph_recommended),
     HomeCategoryPreferenceItem(HOME_CATEGORY_LATEST_HANIME, R.string.latest_hanime, R.string.latest_av),
     HomeCategoryPreferenceItem(HOME_CATEGORY_LATEST_RELEASE, R.string.latest_release),
     HomeCategoryPreferenceItem(HOME_CATEGORY_LATEST_UPLOAD, R.string.latest_upload),
