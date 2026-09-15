@@ -3,101 +3,156 @@ package io.github.daisukikaffuchino.han1meviewer.ui.viewmodel
 /**
  * 作者页分页条的**纯数学** —— 不碰网络、不碰状态流，所以能被单测钉死。
  *
- * ## 总页数从哪来（两条线，都拿不到就按已加载条数长）
+ * ## ⭐⭐ 26.9.4：一页 = **站点自己的一页**
  *
- * 1. **站点公布的作品数**：`87 Videos` / `5668 部影片` ⇒ [pagesFromCountText]。
- *    Pornhub 详情页的主模特块带这句；nJAV 的女优卡片虽然也带，但它那个数是**站点全站**
- *    口径（女优页根本翻不动，见 `ArtistViewModel.knownTotalPages`），所以 nJAV 不认。
- * 2. **站点自己的总页数**：hanime 的合成作者页只有这一条 —— 搜索页是 Laravel 分页，
- *    页码条里写着末页号 ⇒ [pagesFromSitePages]。
+ * 26.8 ~ 26.9.3 的做法是「应用内固定 12 条一页」（2 列 × 6 行），再拿
+ * 「站点公布的作品数 ÷ 12」倒推总页数。用户报的三个毛病全是从这里长出来的：
  *
- * ## 为什么要把它单独拿出来
+ * | 现象 | 根因 |
+ * |---|---|
+ * | 「最后的 6 个怎么都翻不到，显示 404」 | 12 条一页的边界**不落在站点分页边界上**：要凑满第 N 页的最后 12 条，得去要站点那边**下一页**，而那一页已经不存在 ⇒ 站点 404 ⇒ 整个第 N 页报错 |
+ * | 「有些作品遗失」 | 同上，只是换个方向：估算出的总页数比真实少，末页干脆没入口 |
+ * | 「点第 34 页等于从第 1 页一路翻到 34 页」 | 应用页与站点页**没有对应关系**，只能把中间每一页都拉回来才知道第 34 页装的是哪 12 条 |
  *
- * 用户报的现象很具体：**不管作者还是女优有多少视频，最多只显示十页**。
- * 根因不在取数，而在 26.9.0 那几行判断的**死锁**：
+ * 现在不再做这个换算：**站点的一页就是应用的一页**。
  *
- * ```
- * val displayTotal = maxOf(knownTotalPages() ?: 1, loadedPages)  // 总数拿不到时 = 已加载页数
- * canNext = safePage < displayTotal && (remoteHasMore || …)      // ← 必须「还没到总数」才给翻
- * ```
+ * - 跳到第 N 页 = **要站点第 N 页**，一次请求（[ArtistViewModel.goToPage]），
+ *   不像以前那样把 1..N-1 全拉一遍；
+ * - 一页装多少条由**站点**决定（hanime 41/59、Pornhub 40–49、nJAV 视站点而定），
+ *   所以「末页不满」是天经地义的，不会再有「不足 12 条 = 视为 404」这回事；
+ * - 一页的内容就是站点那一页的内容，**不可能漏掉也不可能重复**；
+ * - 总页数也改用站点口径：站点自己说的总页数（hanime 的 Laravel 页码条、
+ *   nJAV 女优页的页码条）优先，其次才是「作品数 ÷ 实测站点一页条数」。
  *
- * 站点公布的作品总数那条线当时是坏的（[pagesFromCountText] 的注释里有完整说明），
- * 于是总页数**只剩「已加载条数 / 12」这一个来源**。而「下一页」又要求「还没到总页数」——
- * 站在最后一页就再也点不动了：想加载更多必须先点下一页，想点下一页又必须先加载更多。
+ * 拿不到任何总数时按「已经翻到过的最大页」往上长（这就是「动态调整」）。
  *
- * 什么时候正好卡在**十页**？已加载条数正好是应用内一页条数的整数倍时：
- * Pornhub 的作者页实测 40–49 条/站点页，连续拉三批 ≈ 120 条 = 10 页（12 条/页），
- * 用户看到的就是「第 10 / 10 页」，且「下一页」与 `›` 永远变灰 —— 而这位作者其实还有几百部。
- *
- * ## 现在怎么算
- *
- * - [PagerVerdict.totalPages]：站点公布了作品数（或站点自己的页数）就用它（第一页进来就一次算准）；
- *   拿不到就按已加载条数算，翻页时自然往上长。站点那边**已经确认没有了**
- *   （`remoteHasMore == false`）时，按**实际拿到的**算 —— 不把用户送进一个空白页。
- * - [PagerVerdict.canNext]：只看两件事 —— **本地已经攒下了下一页**，或者**站点那边可能还有**。
- *   刻意**不**再和总页数挂钩，死锁从根上没有了。
- * - [PagerVerdict.page]：停在「**已经拿到条数**的那一页」。跳页是异步的
- *   （`ArtistViewModel.loadRemotePage` 会连着补拉好几个站点页），目标页还没攒够时
- *   宁可停在原地，也不能先画一个空页出来。
- *
- * @param pageSize 应用内一页几条（`ArtistViewModel.PAGE_SIZE`，12）。
+ * @param page 当前页（1 起）
+ * @param totalPages 总页数：站点口径优先，拿不到就按已翻到的页数长
+ * @param canPrev / [canNext] 站点那边还有没有上一页 / 下一页
+ * @param numbers 分页条要画的页码；`null` 表示省略号。见 [strip]
  */
 internal data class PagerVerdict(
     val page: Int,
     val totalPages: Int,
     val canPrev: Boolean,
     val canNext: Boolean,
+    val numbers: List<Int?>,
 )
 
 internal object ArtistPaging {
 
     /**
-     * 分页条要画成什么样。
+     * 分页条**初始**画几个数字（`1..STRIP_INITIAL`）。
      *
-     * @param requested 用户想去第几页（点页码 / 上一页下一页 / 首屏都走这一条）
-     * @param loadedCount 已经从站点累积下来的条数（跨多个站点页）
-     * @param knownTotalPages 由站点公布的作品数算出的总页数；拿不到传 null
-     * @param remoteHasMore 站点那边还可能有下一页（内部累积的口径）
+     * ⚠️ 这个数与 [STRIP_WINDOW] 一起受**屏宽**约束：一行里还有 `‹` / `›` 两个箭头，
+     * 一共 8 个 32dp 的圆 + 间距 ≈ 300dp。再多就会在 360dp 的机器上被裁掉。
+     */
+    const val STRIP_INITIAL = 6
+
+    /**
+     * 一次**展开**几页 —— 也是「当前页右侧永远留几格」。
+     *
+     * 用户原话：**「最好是只到 6，然后点了 6 之后会展开 7、8、9 三页」**。
+     */
+    const val STRIP_STEP = 3
+
+    /** 页码条滑到中间时，一次画几个数字（左边留一个 `1 …` 锚点，合计 6 格）。 */
+    private const val STRIP_WINDOW = 4
+
+    /**
+     * 分页条的结论。
+     *
+     * @param maxLoadedPage 已经**拿到过内容**的最大站点页（一页都没拿到时传 0）
+     * @param knownTotalPages 站点自己说的总页数（或由作品数 ÷ 站点一页条数算出的）；拿不到传 null
+     * @param hasNext 站点那边**还可能有下一页**（见 [ArtistViewModel.hasNextAfter]）——
+     *   ⚠️ 这是「能不能前进」的**唯一**闸门，**不要**再去和总页数比较：
+     *   总数一旦是估算值，拿它当闸门就会在末页锁死自己（26.9.0~26.9.1 的「最多十页」）。
+     * @param page 已经确认有内容的那一页（调用方负责夹好，这里只兜个底）
      */
     fun resolve(
-        requested: Int,
-        loadedCount: Int,
+        page: Int,
+        maxLoadedPage: Int,
         knownTotalPages: Int?,
-        remoteHasMore: Boolean,
-        pageSize: Int,
+        hasNext: Boolean,
     ): PagerVerdict {
-        val safeLoaded = maxOf(loadedCount, 0)
-        val loadedPages = maxOf(1, (safeLoaded + pageSize - 1) / pageSize)
+        val safePage = maxOf(page, 1)
+        val loaded = maxOf(maxLoadedPage, safePage)
         val known = knownTotalPages?.takeIf { it > 0 }
-        // 总数拿不到就先按「已加载条数」画，翻页时再往上长。
-        val displayTotal = maxOf(known ?: 1, loadedPages)
-        // 站点已经确认没有了 → 总页数只能按实际拿到的算。
-        val totalPages = if (remoteHasMore) displayTotal else loadedPages
-        // ⚠️ 只画已经攒够条数的那一页：跳页要连着补拉好几批，中途把用户放到空页上更糟。
-        val page = requested.coerceIn(1, maxOf(1, loadedPages))
+        // 站点已经确认没有了 ⇒ 总页数只能按「实际翻到过几页」算，不把用户送进空白页；
+        // 还有 ⇒ 站点公布的总数优先（第一页进来就能一次画准），拿不到就跟着翻页往上长。
+        val totalPages = if (hasNext) maxOf(known ?: 0, loaded) else loaded
         return PagerVerdict(
-            page = page,
+            page = safePage,
             totalPages = totalPages,
-            canPrev = page > 1,
-            // ⭐ 本地已经有下一页的条数，或者站点那边可能还有 —— 与 totalPages 无关（死锁就是这么来的）。
-            canNext = safeLoaded > page * pageSize || remoteHasMore,
+            canPrev = safePage > 1,
+            // ⭐ 与 totalPages 彻底解耦：只看站点那边还有没有下一页（见 hasNext 的说明）。
+            canNext = hasNext,
+            numbers = strip(safePage, totalPages),
         )
     }
 
     /**
-     * 站点文案里的「共 N 部影片」→ 总页数；解析不出来就返回 null（调用方退回「已加载条数」口径）。
+     * 分页条要画哪几个页码（`null` = 省略号）。
+     *
+     * ## 为什么不是「1 2 3 4 … 34」
+     *
+     * 26.9.0~26.9.3 画的是「首页 + 当前页附近 + 末页」，用户很不满意：
+     * **「跨度太大，最好是只到 6，然后点了 6 之后会展开 7、8、9 三页」**。
+     * 末页那个锚点还会被误读成「点它就直接跳到最后一页」，而它其实只是个数字。
+     *
+     * 现在改成**跟着当前页长**：右端永远至少画到「当前页 + [STRIP_STEP]」，且至少画到第
+     * [STRIP_INITIAL] 个。于是
+     *
+     * | 当前页 | 画出来 |
+     * |---|---|
+     * | 1 | `1 2 3 4 5 6`（点 6 = 翻到第 6 页，同时右端长到 9） |
+     * | 6 | `1 … 6 7 8 9`（7/8/9 就是被「展开」出来的三页） |
+     * | 9 | `1 … 9 10 11 12` |
+     * | 34（共 34 页） | `1 … 31 32 33 34` |
+     *
+     * 左边太长时收成 `1 …` + 4 个数字（[STRIP_WINDOW]），一行最多 6 格 —— 页数再多也不会把
+     * 这一行撑爆，也**不会**出现「一下跨到末页」的跳变。
+     *
+     * @param page 当前页
+     * @param totalPages 总页数
+     */
+    fun strip(page: Int, totalPages: Int): List<Int?> {
+        if (totalPages <= 1) return emptyList()
+        val head = STRIP_INITIAL
+        if (totalPages <= head) return (1..totalPages).toList()
+        // 右端：至少画出「当前页 + 3」，而且第一屏至少画到第 6 个（用户说的「只到 6」）。
+        val end = minOf(totalPages, maxOf(page + STRIP_STEP, head))
+        // 还在开头附近（end 不超过第一屏）就老老实实从 1 画起，不要为了省格子去藏 2、3。
+        val start = if (end <= head) 1 else maxOf(1, end - (STRIP_WINDOW - 1))
+        return buildList {
+            if (start > 1) {
+                add(1)
+                add(null)
+            }
+            for (p in start..end) add(p)
+        }
+    }
+
+    /**
+     * 站点文案里的「共 N 部影片」→ **站点页数**；解析不出来就返回 null。
+     *
+     * ⚠️ 除数必须是**实测的站点一页条数**，不是应用内一页的条数（26.9.3 以前这里是
+     * 固定的 12，于是「87 部」被算成 8 页，而站点其实只有 2 页 —— 这就是用户报的
+     * 「页数做的也不对 / 有些作品遗失」）。站点一页条数由 `ArtistViewModel.sitePageSize`
+     * 从**真拉回来的那一页**量出来，所以这个换算只在已经拿到第一页之后才成立；
+     * 拿不到就返回 null（调用方退回「按已翻到的页数长」）。
      *
      * ## 两个必须当心的点
      *
-     * 1. **必须把千分位与尾巴删干净再转数字**。[COUNT_DIGITS] 是**贪婪**的：
+     * 1. **必须把千分位与尾巴删干净再转数字**。正则 `(\d[\d,\s.]*)` 是**贪婪**的：
      *    `87 Videos` 抠出来的是 `"87 "`、`5668 部影片` 抠出来的是 `"5668 "`，
      *    而带尾巴的字符串 `toIntOrNull()` **恒为 null**。26.9.0 就是死在这一步 ——
-     *    「总页数一次算准」这个功能其实**从来没有生效过**，于是总页数只剩
-     *    「已加载条数 / 12」一个来源，才有了用户报的「最多十页」。
+     *    「总页数一次算准」这个功能其实**从来没有生效过**。
      * 2. **`1.2K Videos` 这种简写不能当总数**：反推不出准确条数（1.2K 是 1200 还是 1249？），
-     *    宁可当「不知道」，让总页数跟着已加载条数往上长。
+     *    宁可当「不知道」，让总页数跟着已翻到的页数往上长。
      */
-    fun pagesFromCountText(raw: String?, pageSize: Int): Int? {
+    fun pagesFromCountText(raw: String?, perSitePage: Int): Int? {
+        if (perSitePage <= 0) return null
         val text = raw?.takeIf { it.isNotBlank() } ?: return null
         val match = COUNT_DIGITS.find(text) ?: return null
         val suffix = text.getOrNull(match.range.last + 1)
@@ -106,29 +161,7 @@ internal object ArtistPaging {
         if (digits.isEmpty() || digits.length > MAX_COUNT_DIGITS) return null
         val count = digits.toIntOrNull() ?: return null
         if (count <= 0) return null
-        return (count + pageSize - 1) / pageSize
-    }
-
-    /**
-     * 站点那边的**站点页数** → 应用内页数。
-     *
-     * hanime 的合成作者页头部没有「共 N 部影片」，只有搜索页页码条里的末页号
-     * （见 `Parser.hanimeSearchTotalPages`）。要换算成应用内页数，得知道**站点一页几条** ——
-     * 站点不给这个数，只能拿**实测**的值（拉回来的站点页里最大的那一页，见
-     * `ArtistViewModel.sitePageSize`），所以这是个**上界估计**：
-     * 末页通常不满，真实总条数会略少，界面上最多多出末页那一格；
-     * 用户点到那儿会被夹回真正的最后一页（站点确认没有之后总页数按实际拿到的算）。
-     *
-     * 宁可估大也不估小：估小会让「最后一页」看起来已经到了，而其实还有。
-     *
-     * @param siteTotalPages 站点自己公布的页数；拿不到传 null
-     * @param sitePageSize 站点一页实测条数（没拉到过任何一页时传 0 ⇒ 返回 null）
-     */
-    fun pagesFromSitePages(siteTotalPages: Int?, sitePageSize: Int, pageSize: Int): Int? {
-        val sitePages = siteTotalPages?.takeIf { it > 0 } ?: return null
-        val perSitePage = sitePageSize.takeIf { it > 0 } ?: return null
-        val items = sitePages.toLong() * perSitePage
-        return ((items + pageSize - 1) / pageSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        return (count + perSitePage - 1) / perSitePage
     }
 
     /**

@@ -446,6 +446,9 @@
     <string name="artist_page_no_videos">没有取到该作者的作品</string>
     <string name="artist_page_search_result_hint">该站没有作者页，下面是按名字搜索的结果，可能混入同名作者的作品。</string>
     <string name="artist_page_broken_args">作者信息读取失败</string>
+    <!-- 26.9.4：女优页的作品搜索（只在本地已加载的作品里筛，不发请求） -->
+    <string name="artist_work_search_hint">搜索作品（番号 / 标题）</string>
+    <string name="artist_work_search_empty">已加载的作品里没有匹配的</string>
     <!-- 订阅页两段：关注的作者（本机、三站通用、免登录）/ hanime 服务端订阅（需登录） -->
     <string name="follow_and_subscribe">关注与订阅</string>
     <!-- 跨站关注列表上的站点角标 -->

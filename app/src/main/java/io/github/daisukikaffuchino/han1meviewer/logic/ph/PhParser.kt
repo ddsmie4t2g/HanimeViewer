@@ -581,9 +581,19 @@ object PhParser {
         val doc = Jsoup.parse(body)
         val videos = artistVideoList(doc)
         val profile = if (page <= 1) artistProfile(doc) else null
+        // ⭐ 26.9.4：把「站点自己说还有没有下一页」原样带上去 —— 它是「下一页」按钮
+        // 最可靠的闸门（比「作品数 ÷ 一页条数」这种估算值可靠：估算偏小会让用户
+        // 以为已经到底了，正是「最后的作品翻不到」那类投诉的来源）。
+        val hasNext = hasArtistNextPage(doc)
         return when {
-            videos.isNotEmpty() -> PageLoadingState.Success(ArtistVideosPage(profile, videos))
-            hasArtistNextPage(doc) -> PageLoadingState.Success(ArtistVideosPage(profile, videos))
+            videos.isNotEmpty() -> PageLoadingState.Success(
+                ArtistVideosPage(profile, videos, hasNext = hasNext)
+            )
+
+            hasNext -> PageLoadingState.Success(
+                ArtistVideosPage(profile, videos, hasNext = true)
+            )
+
             else -> PageLoadingState.NoMoreData
         }
     }

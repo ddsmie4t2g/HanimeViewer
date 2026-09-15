@@ -200,6 +200,73 @@ object NjavParser {
     fun hasNextPage(body: String): Boolean =
         Jsoup.parse(body).selectFirst("a[rel=next]") != null
 
+    /**
+     * ⭐ 26.9.4：**女优页自己的页码条** → 一共几页；拿不到返回 null。
+     *
+     * 用户的要求原话是「njav 的女优界面存在自己的那一套页数 / 翻页机制，你直接用它那套就完事」。
+     * 于是这里不再拿作品数去反推页数（女优卡片上那个「5668 部影片」是**站点全站**口径，
+     * 拿它画页码条只会让用户点了没反应），而是**照着站点自己画出来的页码读**。
+     *
+     * ## 三条必须当心的地方
+     *
+     * 1. **只在页码条容器里读**：整页 `a[href*=page=]` 会连侧栏、页脚、语言变体一起收进来
+     *    （女优一览页有 1400+ 页，误收一个就是「总页数 1400」）。所以先从一个页码锚点
+     *    往上找「装着 ≥2 个页码链接、或者 class 里带 pag 的那个祖先」，只在它里面数。
+     * 2. **当前页常常是 `<span>` 而不是 `<a>`**（Laravel / Tailwind 分页都这么干）——
+     *    只读锚点会在**末页**少算一页（hanime 那条 `Parser.hanimeSearchTotalPages` 踩过）。
+     *    所以锚点与纯数字的 `<span>` 一起读。
+     * 3. **反爬挑战页**里当然什么都没有 ⇒ 返回 null，调用方退回「按已翻到的页数长」，
+     *    绝不凭空造一个总页数出来。
+     */
+    fun actressTotalPages(body: String): Int? {
+        if (isChallengePage(body)) return null
+        val doc = Jsoup.parse(body)
+        val anchors = doc.select("a[href*=page=]")
+        if (anchors.isEmpty()) return null
+        var scope: Element? = anchors.first()
+        while (scope != null) {
+            val links = scope.select("a[href*=page=]")
+            if (links.size >= 2 || scope.className().lowercase().contains("pag")) break
+            scope = scope.parent()
+        }
+        val root = scope ?: return null
+        // 「共 N 页」这类文案优先（它最直白）。
+        TOTAL_PAGES_TEXT.find(root.text())?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it > 0 }
+            ?.let { return it }
+        val numbers = buildList {
+            root.select("a[href*=page=]").forEach { anchor ->
+                PAGE_QUERY.find(anchor.attr("href"))?.groupValues?.get(1)?.toIntOrNull()?.let { add(it) }
+            }
+            root.select("a, span").forEach { element ->
+                val text = element.text().trim()
+                if (text.length in 1..3 && text.all { it.isDigit() }) {
+                    text.toIntOrNull()?.let { add(it) }
+                }
+            }
+        }
+        return numbers.filter { it > 0 }.maxOrNull()
+    }
+
+    /**
+     * 是不是**反爬挑战页**。
+     *
+     * 实测（2026-09-15）：`njavtv.com` 对非浏览器客户端会回一段混淆 JS
+     * （约 71 800 字节、正文里全是 `_0x…`、零张卡片），HTTP 状态码却是 **200**。
+     * 以前它会被 [videoList] 解析成「零条作品」⇒ 界面说「没有作品」，
+     * 用户完全不知道为什么 —— 现在如实说是站点在验证浏览器。
+     *
+     * ⚠️ 判据必须同时看「有 `_0x`」**和**「一张卡片都没有」：正常页面里也可能出现
+     * 零星的 `_0x` 字样（内联脚本变量名），只看一个会误判。
+     */
+    fun isChallengePage(body: String): Boolean =
+        body.contains("_0x") && !body.contains("thumbnail group")
+
+    /** 页码条里的 `?page=12`。 */
+    private val PAGE_QUERY = Regex("""[?&]page=(\d+)""")
+
+    /** 页码条里的「共 34 页」。 */
+    private val TOTAL_PAGES_TEXT = Regex("""共\s*(\d+)\s*[頁页]""")
+
     private fun parseCard(card: Element): HanimeInfo? {
         val slug = card.select("a[href]")
             .asSequence()

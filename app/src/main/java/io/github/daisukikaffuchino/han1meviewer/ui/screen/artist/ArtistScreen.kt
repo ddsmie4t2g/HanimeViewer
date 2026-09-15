@@ -27,8 +27,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -158,6 +160,7 @@ fun ArtistScreen(
                 onGoToPage = viewModel::goToPage,
                 onSortChange = viewModel::setSort,
                 onFilterChange = viewModel::setFilter,
+                onQueryChange = viewModel::setQuery,
             )
         }
     }
@@ -201,6 +204,7 @@ private fun ArtistVideoGrid(
     onGoToPage: (Int) -> Unit,
     onSortChange: (String?) -> Unit,
     onFilterChange: (String?) -> Unit,
+    onQueryChange: (String) -> Unit,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
@@ -233,9 +237,9 @@ private fun ArtistVideoGrid(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                if (state.videos.isNotEmpty()) {
+                if (!state.isSearching && state.videos.isNotEmpty()) {
                     // 只说「第 x / y 页」，不说「已加载 n 条」——
-                    // 后者会把「站点那边还有多少」暴露成噪音，用户关心的是一页 12 条翻了多久。
+                    // 后者会把「站点那边还有多少」暴露成噪音，用户关心的是一页翻了多久。
                     Text(
                         text = stringResource(
                             R.string.artist_page_page_indicator,
@@ -262,6 +266,18 @@ private fun ArtistVideoGrid(
             }
         }
 
+        // ⭐ 26.9.4：nJAV 女优页的**作品搜索**（用户要求：「女优作品太多，加一个搜索作品功能」）。
+        // 只在真正的女优页显示 —— 详情页给的作者名没有女优页时（退回按名字搜索）没有意义。
+        // ⚠️ 它只在**已经拉回来的作品**里筛，一次请求都不发；文案里如实写清楚。
+        if (state.artist.siteSource == SiteSource.Njav && state.artist.hasRealArtistPage) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                ArtistWorkSearchField(
+                    query = state.query,
+                    onQueryChange = onQueryChange,
+                )
+            }
+        }
+
         // ⭐ 站点没有真作者页时（hanime 全部、Pornhub 的 /users 上传者），如实说明这份列表是怎么来的：
         // 它是**按名字搜索**的结果，可能混进同名作者。宁可说清楚，也不要点进来的人误以为
         // 「这就是该作者的全部作品」—— 用户一开始抱怨的就是「点进去全都是视频」。
@@ -280,13 +296,26 @@ private fun ArtistVideoGrid(
         // 注意这里**不是**整页替身 —— 资料头在上面已经画出来了。
         if (state.videos.isEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                ArtistStatus(state = state.state, onRetry = onRetry)
+                if (state.isSearching) {
+                    // 搜索是本地筛选，空结果不是「作者没有作品」，别用那句空态文案。
+                    Text(
+                        text = stringResource(R.string.artist_work_search_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 40.dp),
+                    )
+                } else {
+                    ArtistStatus(state = state.state, onRetry = onRetry)
+                }
             }
             return@LazyVerticalGrid
         }
 
-        // 只画**这一页的 12 条**（2 列 × 6 行）。翻页由下面的分页条控制，
-        // 不再无限往下滚 —— 用户能知道「一共翻到第几页」，也能回到上一页。
+        // 只画**这一页**的作品（一页 = 站点自己的一页，40–59 条那种量级）。
+        // 翻页由下面的分页条控制，不再无限往下滚 —— 用户能知道「一共翻到第几页」。
         items(state.videos.size, key = { state.videos[it].videoCode }) { index ->
             val video = state.videos[index]
             VideoCardItem(
@@ -298,30 +327,34 @@ private fun ArtistVideoGrid(
             )
         }
 
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            ArtistPager(
-                page = state.page,
-                totalPages = state.totalPages,
-                canPrev = state.canPrev,
-                canNext = state.canNext,
-                isPaging = state.isPaging,
-                onPrev = onPrevPage,
-                onNext = onNextPage,
-                onGoToPage = onGoToPage,
-                footer = {
-                    // 补拉失败要说出来：否则「翻不动了」和「真的没有了」长得一模一样。
-                    val failure = state.state as? PageLoadingState.Error
-                    if (failure != null) {
-                        RetryRow(
-                            message = stringResource(
-                                R.string.load_failed_with_reason,
-                                failure.throwable.message.orEmpty(),
-                            ),
-                            onRetry = onRetry,
-                        )
-                    }
-                },
-            )
+        // 搜索时把分页条收起来：命中的是**跨页的本地结果**，与「第几页」没有关系。
+        if (!state.isSearching) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                ArtistPager(
+                    numbers = state.numbers,
+                    page = state.page,
+                    totalPages = state.totalPages,
+                    canPrev = state.canPrev,
+                    canNext = state.canNext,
+                    isPaging = state.isPaging,
+                    onPrev = onPrevPage,
+                    onNext = onNextPage,
+                    onGoToPage = onGoToPage,
+                    footer = {
+                        // 补拉失败要说出来：否则「翻不动了」和「真的没有了」长得一模一样。
+                        val failure = state.state as? PageLoadingState.Error
+                        if (failure != null) {
+                            RetryRow(
+                                message = stringResource(
+                                    R.string.load_failed_with_reason,
+                                    failure.throwable.message.orEmpty(),
+                                ),
+                                onRetry = onRetry,
+                            )
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -406,32 +439,43 @@ private fun ArtistSortFilterRow(
 }
 
 /**
- * 作品列表的**分页条**（26.8 引入，9.0 加编号）。
+ * 作品列表的**分页条**（26.8 引入，9.0 加编号，26.9.4 改成渐进展开）。
  *
- * 为什么要有它：站点一页给 30–49 条，直接铺出来是一条长瀑布 —— 用户既不知道一共多少，
- * 也没法退回去。这里固定「一页 12 条（2 列 × 6 行）」。
+ * 为什么要有它：站点一页给 40–59 条，直接铺出来是一条长瀑布 —— 用户既不知道一共多少，
+ * 也没法退回去。这里有编号，还能一眼看到「第几 / 共几页」。
  *
- * ## 9.0：从「上一页 / 下一页」扩成编号分页条
+ * ## ⭐ 26.9.4：页码**跟着当前页长**，不再「1 2 3 4 … 34」
  *
- * 只给两个按钮时，用户站在第 1 页要去第 9 页得点 8 次，而且**始终看不到一共有多少页**。
- * 现在：
- * - 总页数由站点公布的作品数一次算准（见 `ArtistViewModel.knownTotalPages`），
- *   所以第一页进来就能画出完整的页码条；
- * - 首页与末页**永远显示**（它们是「还有多少」的锚点），中间以当前页为中心开一个
- *   小窗口（[pagerItems]），缺口用 `…` 表示 —— 页数再多也不会把这一行撑爆；
- * - 「上一页 / 下一页」两个按钮**保留**（用户明确要求），放在页码条下面一行。
+ * 用户原话：**「假设一共有 34 页，你不能说排列直接说 1 2 3 4 省略号 34，这样跨度太大，
+ * 最好是只到 6，然后点了 6 之后会展开 7、8、9 三页」**。
+ * 现在页码表由 `ArtistPaging.strip` 算：
  *
- * ⚠️ [canNext] 只管「**能不能再往前拿一页**」（本地还有下一页 / 站点那边可能还有），
- * **不是**「到没到总页数」—— 用后者当闸门会让用户永远停在最后一页：
- * 想加载更多必须先点下一页，想点下一页又必须先加载更多（用户报的「最多十页」，
- * 完整推导见 `ArtistPaging`）。所以走到已加载的最后一页时按钮**依然是亮的**，
- * 点下去会去站点续拉；站点确实没有了才会变灰。
+ * | 站在第几页 | 画出来 |
+ * |---|---|
+ * | 1 | `1 2 3 4 5 6`（点 6 → 翻到第 6 页，同时右边长出 9） |
+ * | 6 | `1 … 6 7 8 9`（那三页就是被「展开」出来的） |
+ * | 34（共 34 页） | `1 … 31 32 33 34` |
  *
- * @param isPaging 正在续拉站点数据：此时按钮禁用并显示小转圈，而不是让用户重复点。
- * @param footer 分页条下方的补充内容（例如「补拉失败 + 重试」）。
+ * 左边太长时收成 `1 …` + 4 个数字，一行最多 6 格 —— 页数再多也不会把这一行撑爆。
+ *
+ * ## ⭐ 26.9.4：点页码是**跳页**，不是一路翻过去
+ *
+ * 一页 = 站点自己的一页（见 `ArtistPaging`），所以点第 34 页就是**要站点第 34 页**，
+ * 一次请求。26.9.3 及以前要把第 1..33 页全拉回来才知道第 34 页装的是什么
+ * （Pornhub 一页 1.2 MB，跳一次几十次请求）。
+ *
+ * ⚠️ [canNext] 只管「**站点那边还有没有下一页**」，**不是**「到没到总页数」——
+ * 用后者当闸门会让用户永远停在最后一页（想加载更多必须先点下一页，想点下一页又必须先
+ * 加载更多，26.9.0 的「最多十页」完整推导见 `ArtistPaging`）。所以走到已加载的最后一页时
+ * 按钮**依然是亮的**，点下去会去站点要下一页；站点确实没有了才会变灰。
+ *
+ * @param numbers 要画的页码（`null` = 省略号），由 `ArtistPaging.strip` 算好
+ * @param isPaging 正在拉这一页：此时按钮禁用并显示小转圈，而不是让用户重复点。
+ * @param footer 分页条下方的补充内容（例如「翻页失败 + 重试」）。
  */
 @Composable
 private fun ArtistPager(
+    numbers: List<Int?>,
     page: Int,
     totalPages: Int,
     canPrev: Boolean,
@@ -449,15 +493,14 @@ private fun ArtistPager(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // totalPages <= 1 时不画：只有一页还摆一排数字，纯属噪音。
-        if (totalPages > 1) {
-            val pagerItems = remember(page, totalPages) { pagerItems(page, totalPages) }
+        // totalPages <= 1 时 numbers 是空的：只有一页还摆一排数字，纯属噪音。
+        if (numbers.isNotEmpty()) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 PagerArrow(enabled = canPrev && !isPaging, text = "‹", onClick = onPrev)
-                pagerItems.forEach { number ->
+                numbers.forEach { number ->
                     if (number == null) {
                         Text(
                             text = "…",
@@ -503,40 +546,45 @@ private fun ArtistPager(
 }
 
 /**
- * 分页条要画哪几个页码。
+ * nJAV 女优页的**作品搜索框**（26.9.4 新增）。
  *
- * 返回的列表里 `null` 表示省略号。规则：
- * - 总页数不超过 [maxNumbers] 就全画；
- * - 否则**首页与末页永远画**（「一共有多少页」的锚点，缺了它页码条就失去意义），
- *   中间以当前页为中心开一个 [maxNumbers] 宽的窗口，夹在 `[1, totalPages]` 内。
+ * 用户的要求：「由于女优作品太多，njav 的女优界面加上一个搜索作品功能」。
+ * 女优页把作品一次全铺出来（站点自己不分页），作品多的女优几百部，
+ * 靠翻页找一部片子不现实。
+ *
+ * ⚠️ **本地筛选，不发请求**：输入过程中每敲一个字就联网，既慢又容易被站点的
+ * 反爬挑战页拦住（nJAV 有挑战页）。所以下面如实写着「已加载 N 部」，
+ * 让用户知道筛的是哪一批。
  */
-private fun pagerItems(page: Int, totalPages: Int, maxNumbers: Int = 3): List<Int?> {
-    if (totalPages <= 1) return emptyList()
-    if (totalPages <= maxNumbers) return (1..totalPages).toList()
-
-    val half = maxNumbers / 2
-    var start = page - half
-    var end = start + maxNumbers - 1
-    if (start < 1) {
-        start = 1
-        end = maxNumbers
-    }
-    if (end > totalPages) {
-        end = totalPages
-        start = totalPages - maxNumbers + 1
-    }
-
-    return buildList {
-        if (start > 1) {
-            add(1)
-            if (start > 2) add(null)
-        }
-        for (p in start..end) add(p)
-        if (end < totalPages) {
-            if (end < totalPages - 1) add(null)
-            add(totalPages)
-        }
-    }
+@Composable
+private fun ArtistWorkSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        singleLine = true,
+        placeholder = {
+            Text(
+                text = stringResource(R.string.artist_work_search_hint),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                TextButton(onClick = { onQueryChange("") }) {
+                    Text(
+                        text = stringResource(R.string.clear),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+        },
+    )
 }
 
 /** 页码条两端的 `‹` / `›`（等价于上一页 / 下一页，位置更顺手）。 */

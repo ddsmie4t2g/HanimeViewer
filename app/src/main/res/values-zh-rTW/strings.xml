@@ -433,6 +433,9 @@
     <string name="artist_page_no_videos">沒有取得該作者的作品</string>
     <string name="artist_page_search_result_hint">該站沒有作者頁，下面是依名字搜尋的結果，可能混入同名作者的作品。</string>
     <string name="artist_page_broken_args">作者資訊讀取失敗</string>
+    <!-- 26.9.4：女優頁的作品搜尋（只在本地已載入的作品裡篩，不發請求） -->
+    <string name="artist_work_search_hint">搜尋作品（番號 / 標題）</string>
+    <string name="artist_work_search_empty">已載入的作品裡沒有符合的</string>
     <!-- 訂閱頁兩段：關注的作者（本機、三站通用、免登入）/ hanime 伺服器端訂閱（需登入） -->
     <string name="follow_and_subscribe">關注與訂閱</string>
     <!-- 跨站關注列表上的站點角標 -->

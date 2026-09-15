@@ -441,6 +441,9 @@ Recommendations are as follows:\n
     <string name="artist_page_no_videos">No works found for this artist</string>
     <string name="artist_page_search_result_hint">This site has no artist page, so the list below is a name search — works by namesakes may be mixed in.</string>
     <string name="artist_page_broken_args">Could not read the artist info</string>
+    <!-- 26.9.4：女优页的作品搜索（只在本地已加载的作品里筛，不发请求） -->
+    <string name="artist_work_search_hint">Search works (code / title)</string>
+    <string name="artist_work_search_empty">No loaded work matches that</string>
     <!-- 订阅页两段：关注的作者（本机、三站通用、免登录）/ hanime 服务端订阅（需登录） -->
     <string name="follow_and_subscribe">Follows &amp; Subscriptions</string>
     <!-- 跨站关注列表上的站点角标 -->

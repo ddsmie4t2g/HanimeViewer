@@ -7,169 +7,170 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 作者页分页条的回归测试。
+ * 作者页分页的回归测试（26.9.4 重写）。
  *
- * 用户报的现象：**不管作者还是女优有多少视频，最多只显示十页**。
- * 根因是两个 bug 叠在一起（详见 [ArtistPaging] 的类注释）：
+ * 26.9.4 把分页模型换成了**一页 = 站点自己的一页**（见 [ArtistPaging] 的类注释），
+ * 这一组测试钉住三件事：
  *
- * 1. 站点作品数文案解析恒失败（`87 Videos` 抠出 `"87 "`，`toIntOrNull()` 为 null）
- *    ⇒ 总页数只剩「已加载条数 / 12」一个来源；
- * 2. 「下一页」要求「还没到总页数」⇒ 站在最后一页**死锁**。已加载正好 120 条（=10 页）时，
- *    用户就永远停在「第 10 / 10 页」。
- *
- * 这一组测试把两件事都钉住：**什么时候必须还能翻**、**什么文案才算得出总页数**。
+ * 1. **页码条是渐进展开的**：先只到 6，点 6 之后才长出 7、8、9（用户 2026-09-15 的要求）；
+ * 2. **「下一页」只看站点那边有没有**，永远不要拿「总页数」当闸门
+ *    （26.9.0 的「不管多少作品最多十页」就是那么来的）；
+ * 3. **总页数用站点口径**：站点公布的页数 / 页码条优先，其次是「作品数 ÷ 实测站点一页条数」。
  */
 class ArtistPagingTest {
 
-    /** 与 `ArtistViewModel.PAGE_SIZE` 同一个口径（12 条/页）。 */
-    private val pageSize = ArtistViewModel.PAGE_SIZE
+    /** Pornhub 作者页实测的一页条数（跳页 / 换算都按这个量级想）。 */
+    private val phPageSize = 49
+
+    //<editor-fold desc="分页条：渐进展开">
 
     /**
-     * ⭐ 主回归：已加载 120 条（正好 10 页）时，「下一页」必须还能点。
-     *
-     * 这条红过就是用户报的「最多十页」又回来了。
+     * ⭐ 主回归（用户原话：「假设一共有 34 页，不能直接排 1 2 3 4 … 34，跨度太大，
+     * 最好是只到 6，然后点了 6 之后会展开 7、8、9 三页」）。
      */
     @Test
-    fun loadedPrefixFillingWholePagesStillAllowsNext() {
+    fun stripStartsAtSixThenExpandsByThree() {
+        // 第一屏：只到 6。
+        assertEquals(listOf(1, 2, 3, 4, 5, 6), ArtistPaging.strip(1, 34))
+        // 点 6 → 翻到第 6 页，右边长出 7、8、9（左边收成 `1 …`）。
+        assertEquals(listOf(1, null, 6, 7, 8, 9), ArtistPaging.strip(6, 34))
+        // 再点 9 → 12。
+        assertEquals(listOf(1, null, 9, 10, 11, 12), ArtistPaging.strip(9, 34))
+        // 站在末页：右边不再长，左边收着。
+        assertEquals(listOf(1, null, 31, 32, 33, 34), ArtistPaging.strip(34, 34))
+    }
+
+    /** 页数少的时候全画出来，不要为了「统一」去藏页。 */
+    @Test
+    fun stripShowsEverythingWhenPagesAreFew() {
+        assertEquals(emptyList<Int?>(), ArtistPaging.strip(1, 1))
+        assertEquals(listOf(1, 2, 3), ArtistPaging.strip(1, 3))
+        assertEquals(listOf(1, 2, 3, 4, 5, 6), ArtistPaging.strip(4, 6))
+    }
+
+    /** 页码条一行最多 6 格：页数再多也不会把这一行撑爆（屏宽是硬约束）。 */
+    @Test
+    fun stripNeverGrowsWiderThanBudget() {
+        for (page in 1..999) {
+            assertTrue("第 $page 页画太宽了", ArtistPaging.strip(page, 999).size <= 6)
+        }
+    }
+
+    /** 当前页永远画得出来（否则用户翻到远处会看不到自己在哪）。 */
+    @Test
+    fun stripAlwaysContainsCurrentPage() {
+        for (page in 1..200) {
+            val numbers = ArtistPaging.strip(page, 200).filterNotNull()
+            assertTrue("第 $page 页不在页码条里：$numbers", page in numbers)
+        }
+    }
+
+    //</editor-fold>
+
+    //<editor-fold desc="能不能前进 / 总页数">
+
+    /**
+     * ⭐ 主回归：已经翻到的页数正好撑满整数页时，「下一页」必须还能点。
+     *
+     * 26.9.0 就是在这里死锁的（`canNext = page < totalPages`，而 totalPages 是估算值）。
+     * 现在 [ArtistPaging.resolve] 只看 `hasNext`。
+     */
+    @Test
+    fun canNextIgnoresTotalPages() {
         val verdict = ArtistPaging.resolve(
-            requested = 10,
-            loadedCount = 120,
+            page = 10,
+            maxLoadedPage = 10,
             knownTotalPages = null,
-            remoteHasMore = true,
-            pageSize = pageSize,
+            hasNext = true,
         )
         assertEquals(10, verdict.page)
-        assertEquals(10, verdict.totalPages)
         assertTrue("站点那边还有下一页时必须给翻", verdict.canNext)
     }
 
-    /** 站点一页 49 条（Pornhub 实测）：第一页进来就该能翻，走到本地最后一页也还能继续。 */
+    /** 站点自己说了总页数（hanime 的 Laravel 页码条 / nJAV 女优页的页码条）：第一页就画准。 */
     @Test
-    fun firstSitePageStillLetsUserGoForward() {
-        val first = ArtistPaging.resolve(1, 49, null, remoteHasMore = true, pageSize = pageSize)
-        assertEquals(5, first.totalPages)
-        assertTrue(first.canNext)
-
-        val last = ArtistPaging.resolve(5, 49, null, remoteHasMore = true, pageSize = pageSize)
-        assertEquals(5, last.page)
-        assertTrue(last.canNext)
-    }
-
-    /** 站点公布了作品数：页码条一次画准（5668 部 ⇒ 473 页）；跳页先停在「已拿到条数」的那一页。 */
-    @Test
-    fun knownSiteCountDrivesTotalPages() {
+    fun siteOwnPageCountWins() {
         val verdict = ArtistPaging.resolve(
-            requested = 473,
-            loadedCount = 49,
-            knownTotalPages = 473,
-            remoteHasMore = true,
-            pageSize = pageSize,
+            page = 1,
+            maxLoadedPage = 1,
+            knownTotalPages = 20,
+            hasNext = true,
         )
-        // 目标页的 12 条还没攒够 ⇒ 停在能画出来的最后一页，等补拉完再回来。
-        assertEquals(5, verdict.page)
-        assertEquals(473, verdict.totalPages)
+        assertEquals(20, verdict.totalPages)
         assertTrue(verdict.canNext)
     }
 
-    /** 站点那边确认没有了：总页数按实际拿到的算，人不被送进空白页，「下一页」也该灰掉。 */
+    /** 站点那边确认没有了：总页数按实际翻到的算，人不被送进空白页，「下一页」也该灰掉。 */
     @Test
     fun exhaustedSiteStopsAtLastLoadedPage() {
         val verdict = ArtistPaging.resolve(
-            requested = 11,
-            loadedCount = 120,
-            knownTotalPages = null,
-            remoteHasMore = false,
-            pageSize = pageSize,
+            page = 3,
+            maxLoadedPage = 3,
+            knownTotalPages = 20,
+            hasNext = false,
         )
-        assertEquals(10, verdict.page)
-        assertEquals(10, verdict.totalPages)
+        assertEquals(3, verdict.totalPages)
         assertFalse(verdict.canNext)
     }
 
-    /** 本地已经攒下了下一页 ⇒ 就算站点那边到头了也能继续翻（最后一页是部分页的情况）。 */
+    /** 拿不到任何总数时，总页数跟着「已经翻到第几页」往上长（这就是「动态调整」）。 */
     @Test
-    fun localNextPageWorksEvenWhenSiteSaysNoMore() {
-        assertTrue(
-            ArtistPaging.resolve(1, 30, null, remoteHasMore = false, pageSize = pageSize).canNext
-        )
-        assertFalse(
-            ArtistPaging.resolve(3, 30, null, remoteHasMore = false, pageSize = pageSize).canNext
-        )
+    fun totalPagesGrowWhileBrowsing() {
+        assertEquals(1, ArtistPaging.resolve(1, 1, null, true).totalPages)
+        assertEquals(4, ArtistPaging.resolve(4, 4, null, true).totalPages)
     }
 
     /** 上一页只看当前页；第 1 页没有上一页。 */
     @Test
     fun canPrevFollowsCurrentPage() {
-        assertFalse(ArtistPaging.resolve(1, 120, null, true, pageSize).canPrev)
-        assertTrue(ArtistPaging.resolve(3, 120, null, true, pageSize).canPrev)
+        assertFalse(ArtistPaging.resolve(1, 5, null, true).canPrev)
+        assertTrue(ArtistPaging.resolve(3, 5, null, true).canPrev)
     }
 
-    /** 页码越界（点太远 / 负数）一律夹回合法范围，不越界取切片。 */
+    /** 页号 0 / 负数一律当第 1 页。 */
     @Test
-    fun requestedPageIsClamped() {
-        assertEquals(1, ArtistPaging.resolve(0, 49, null, true, pageSize).page)
-        assertEquals(1, ArtistPaging.resolve(-5, 49, null, true, pageSize).page)
-        assertEquals(5, ArtistPaging.resolve(9999, 49, null, true, pageSize).page)
+    fun pageIsAtLeastOne() {
+        assertEquals(1, ArtistPaging.resolve(0, 5, null, true).page)
+        assertEquals(1, ArtistPaging.resolve(-5, 5, null, true).page)
     }
 
-    /** 一条都还没加载（首屏 loading）时按 1 页画，别把自己算崩。 */
-    @Test
-    fun emptyPrefixIsOnePage() {
-        val verdict = ArtistPaging.resolve(1, 0, null, remoteHasMore = true, pageSize = pageSize)
-        assertEquals(1, verdict.page)
-        assertEquals(1, verdict.totalPages)
-        assertFalse(verdict.canPrev)
-    }
+    //</editor-fold>
+
+    //<editor-fold desc="作品数文案 → 页数">
 
     /**
-     * ⭐ 站点文案里的作品数必须解析得出来。
+     * ⭐ 站点文案里的作品数必须解析得出来（26.9.0 这里是**恒 null**：抠出来的字符串带尾巴，
+     * `toIntOrNull()` 永远是 null，于是「总页数一次算准」从来没生效过）。
      *
-     * 26.9.0 这里是**恒 null**（抠出来的字符串带尾巴），所以「总页数一次算准」从来没生效过。
+     * ⚠️ 除数必须是**站点一页条数**（实测值），不是应用内一页的条数 —— 后者就是
+     * 「页数做的也不对 / 有些作品遗失」的来源。
      */
     @Test
     fun countTextWithTrailingTextStillParses() {
-        assertEquals(8, ArtistPaging.pagesFromCountText("87 Videos", pageSize))
-        assertEquals(473, ArtistPaging.pagesFromCountText("5668 部影片", pageSize))
-        assertEquals(103, ArtistPaging.pagesFromCountText("1,234 部影片", pageSize))
-        assertEquals(103, ArtistPaging.pagesFromCountText("1234 videos", pageSize))
+        // Pornhub：87 部 ÷ 49 条/页 = 2 页（不是 87 ÷ 12 = 8 页）。
+        assertEquals(2, ArtistPaging.pagesFromCountText("87 Videos", phPageSize))
+        assertEquals(97, ArtistPaging.pagesFromCountText("5668 部影片", 59))
+        assertEquals(31, ArtistPaging.pagesFromCountText("1,234 部影片", 40))
+        assertEquals(42, ArtistPaging.pagesFromCountText("1234 videos", 30))
     }
 
-    /** `1.2K` / `3M` 这类简写反推不出准确条数 ⇒ 当「不知道」，退回已加载条数口径。 */
+    /** `1.2K` / `3M` 这类简写反推不出准确条数 ⇒ 当「不知道」，退回「按已翻到的页数长」。 */
     @Test
     fun abbreviatedCountsAreNotTrusted() {
-        assertNull(ArtistPaging.pagesFromCountText("1.2K Videos", pageSize))
-        assertNull(ArtistPaging.pagesFromCountText("3M 部影片", pageSize))
+        assertNull(ArtistPaging.pagesFromCountText("1.2K Videos", phPageSize))
+        assertNull(ArtistPaging.pagesFromCountText("3M 部影片", phPageSize))
     }
 
-    /** 解析不出来 / 0 一律当「不知道」。 */
+    /** 解析不出来 / 0 / 不知道站点一页几条 一律当「不知道」。 */
     @Test
     fun unparsableCountsFallBackToNull() {
-        assertNull(ArtistPaging.pagesFromCountText(null, pageSize))
-        assertNull(ArtistPaging.pagesFromCountText("   ", pageSize))
-        assertNull(ArtistPaging.pagesFromCountText("暂无", pageSize))
-        assertNull(ArtistPaging.pagesFromCountText("0 部影片", pageSize))
+        assertNull(ArtistPaging.pagesFromCountText(null, phPageSize))
+        assertNull(ArtistPaging.pagesFromCountText("   ", phPageSize))
+        assertNull(ArtistPaging.pagesFromCountText("暂无", phPageSize))
+        assertNull(ArtistPaging.pagesFromCountText("0 部影片", phPageSize))
+        // ⚠️ 还没拉到任何一页时不知道站点页容量，别拿 12 之类的数硬算。
+        assertNull(ArtistPaging.pagesFromCountText("87 Videos", 0))
     }
 
-    /**
-     * ⭐ **站点总页数 → 应用内页数**（hanime 作者页唯一的「一共多少页」来源）。
-     *
-     * 实测：普通模板 59 条/站点页 × 20 页、带分类的简化模板 41 条/站点页 × 13 页。
-     * 换算要乘站点一页实测条数，所以是**上界**（末页不满 ⇒ 估出来比真实略多一两页），
-     * 用户点到估出来的末页会被夹回真正的最后一页 —— 宁可估大也不估小。
-     */
-    @Test
-    fun siteTotalPagesConvertToAppPages() {
-        assertEquals(99, ArtistPaging.pagesFromSitePages(20, 59, pageSize))
-        assertEquals(45, ArtistPaging.pagesFromSitePages(13, 41, pageSize))
-        // 只有一页时也要给出 1，而不是 0。
-        assertEquals(1, ArtistPaging.pagesFromSitePages(1, 5, pageSize))
-    }
-
-    /** 站点页数 / 实测条数缺一边就没法换算 ⇒ null，调用方退回「已加载条数」口径。 */
-    @Test
-    fun sitePagesNeedBothInputs() {
-        assertNull(ArtistPaging.pagesFromSitePages(null, 59, pageSize))
-        assertNull(ArtistPaging.pagesFromSitePages(20, 0, pageSize))
-        assertNull(ArtistPaging.pagesFromSitePages(0, 59, pageSize))
-    }
+    //</editor-fold>
 }

@@ -990,10 +990,14 @@ object NetworkRepo {
      *
      * | 数据源 | 取数方式 | 分页 |
      * |---|---|---|
-     * | Pornhub `/pornstar|/model/<slug>` | 站点作者页 HTML | **真分页**（`link rel=next`） |
+     * | Pornhub `/pornstar|/model/<slug>` | 站点作者页 HTML | **真分页**（`link rel=next`，40–49 条/页） |
      * | Pornhub `/users…`（无作者页） | 退回按名字搜索（JSON 接口） | 有（30 条/页，但会混进同名者） |
-     * | nJAV | 女优页 `/cn/actresses/<编码名>` | 无（站点反爬，见 [njavArtistFlow]） |
-     * | hanime | **合成**：按名字（+分类）搜索 | 有 |
+     * | nJAV | 女优页 `/cn/actresses/<编码名>` | 站点自己的页码条（拿得到就用，见 [njavArtistFlow]） |
+     * | hanime | **合成**：按名字（+分类）搜索 | 有（Laravel 分页，41/59 条/页） |
+     *
+     * ⭐ 26.9.4 起**一页就是站点自己的一页**（应用页号 = 站点页号），不再做
+     * 「应用内 12 条/页」的换算 —— 那套换算正是「末页 404 / 作品遗失 / 跳页要拉几十次」
+     * 三个问题的来源。页面条数由站点决定，末页不满很正常。
      *
      * ⚠️ 分流认的是 [ArtistRef.siteSource]（作者自己的站点），**不是用户当前在哪个站** ——
      * 「在 hanime 域名下点一个 Pornhub 关注的人」必须去问 Pornhub（26.6.3 的 404 就出在这）。
@@ -1143,6 +1147,13 @@ object NetworkRepo {
                         profile = null,
                         videos = state.info,
                         siteTotalPages = siteTotalPages,
+                        // 站点页码条说得很清楚就用它；拿不到（页码条被简化模板去掉时）
+                        // 退回「这一页有东西 ⇒ 后面可能还有」，多试一页总比把作品藏起来好。
+                        hasNext = when {
+                            state.info.isEmpty() -> false
+                            siteTotalPages != null -> page < siteTotalPages
+                            else -> true
+                        },
                     )
                 )
 
@@ -1174,11 +1185,14 @@ object NetworkRepo {
             }
             val body = response.body()?.string().orEmpty()
             val list = PhParser.videoList(body)
+            val hasNext = PhParser.hasNextPage(body, page)
             emit(
-                if (list.isEmpty() && !PhParser.hasNextPage(body, page)) {
+                if (list.isEmpty() && !hasNext) {
                     PageLoadingState.NoMoreData
                 } else {
-                    PageLoadingState.Success(ArtistVideosPage(profile = null, videos = list))
+                    PageLoadingState.Success(
+                        ArtistVideosPage(profile = null, videos = list, hasNext = hasNext)
+                    )
                 }
             )
             return@flow
@@ -1195,14 +1209,21 @@ object NetworkRepo {
     /**
      * nJAV 作者页（女优页）。
      *
-     * ⚠️ **实测（2026-09-13）：nJAV 的作者页没有分页。**
-     * 女优页 `/actresses/<编码名>` 服务端渲染出来的卡片就是全部能拿到的（实测某位女优 4 部），
-     * 页面上**没有** `a[rel=next]`；而任何 `?page=N`（无论列表页还是女优页）都会返回
-     * 一段 **JS 反爬挑战页**（约 71 KB、零卡片、无 rel=next）—— 非浏览器客户端拿不到内容。
+     * ## ⭐ 26.9.4：页数改成**站点自己那一套**
      *
-     * 所以这里只请求第一页，翻页判据交给 [NjavParser.hasNextPage]（恒为 false）；
-     * 界面表现为「加载到底」，而不是转圈或报错。**不要**为此写个假的 `?page=` 循环：
-     * 那只会把挑战页当成空数据，白跑一趟还容易被站点加重限流。
+     * 用户的要求：「njav 的女优界面存在自己的那一套页数 / 翻页机制，你直接用它那套就完事」。
+     * 于是这里不再拿作品数反推页数（女优卡片上那个「5668 部影片」是站点全站口径），
+     * 而是把**页面上的页码条**原样读出来当总页数（[NjavParser.actressTotalPages]），
+     * 「有没有下一页」也优先听站点的 `a[rel=next]`（[NjavParser.hasNextPage]）。
+     * 读不到就一律留 null / false —— **不凭空造页数**，界面退回「按已翻到的页数长」。
+     *
+     * ## ⚠️ 站点有反爬挑战页（2026-09-15 复核）
+     *
+     * `njavtv.com` 对非浏览器客户端会回一段混淆 JS（HTTP **200**、约 71.8 KB、零卡片），
+     * 而且被 Cloudflare 边缘**连挑战页本身一起缓存**（实测 `cf-cache-status: HIT`
+     * 的 200 响应正文就是挑战脚本）。以前它会被解析成「零条作品」⇒ 界面说「没有作品」，
+     * 用户完全不知道为什么翻不动。现在识别出来并**如实报错**（[NjavParser.isChallengePage]），
+     * 界面上能看到「站点要求浏览器验证」+ 重试按钮。
      *
      * 拿不到站点作者页时（关注表里只有名字）退回站点搜索 —— 与 Pornhub 的兜底同一逻辑。
      */
@@ -1224,15 +1245,33 @@ object NetworkRepo {
             throw ParseException("nJAV: HTTP ${response.code()} - $url")
         }
         val body = response.body()?.string().orEmpty()
+        if (NjavParser.isChallengePage(body)) {
+            throw ParseException("nJAV：站点要求浏览器验证（反爬挑战页），请稍后重试")
+        }
         val list = NjavParser.videoList(body)
         // 资料头（身材 / 生日）只在第一页解析一次 —— 它在页面上是同一个块，
         // 每页都解析一遍纯属浪费；而且排序/筛选切换会重新拉第一页，天然会刷新。
         val profile = if (page <= 1) NjavParser.actressProfile(body) else null
+        val siteTotalPages = NjavParser.actressTotalPages(body)
+        val hasNextLink = NjavParser.hasNextPage(body)
         emit(
-            if (list.isEmpty() && !NjavParser.hasNextPage(body)) {
+            if (list.isEmpty() && !hasNextLink && (siteTotalPages == null || page >= siteTotalPages)) {
                 PageLoadingState.NoMoreData
             } else {
-                PageLoadingState.Success(ArtistVideosPage(profile = profile, videos = list))
+                PageLoadingState.Success(
+                    ArtistVideosPage(
+                        profile = profile,
+                        videos = list,
+                        siteTotalPages = siteTotalPages,
+                        // 站点自己的「下一页」链接最权威；没有链接但它说一共 N 页时按页数判断。
+                        hasNext = when {
+                            hasNextLink -> true
+                            siteTotalPages != null -> page < siteTotalPages
+                            list.isEmpty() -> false
+                            else -> null
+                        },
+                    )
+                )
             }
         )
     }.catch { e ->

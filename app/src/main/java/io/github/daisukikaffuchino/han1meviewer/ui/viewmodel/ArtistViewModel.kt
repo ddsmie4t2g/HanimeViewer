@@ -19,51 +19,42 @@ import kotlinx.coroutines.launch
 /**
  * 作者页的状态。
  *
- * ## 26.8：作品列表改成**翻页**（12 条/页）
+ * ## ⭐⭐ 26.9.4：分页重做 —— **一页 = 站点自己的一页**
  *
- * 之前是「一次加载、无限往下滚」：站点一页给 30–49 条，用户看到一条长瀑布，
- * 既不知道「到底有多少」，也没法回到「刚才那一页」。现在固定 **一页 12 条**
- * ＋ 上一页/下一页。
+ * 26.8 起是「应用内固定 12 条一页」（2 列 × 6 行），总页数用「站点公布的作品数 ÷ 12」倒推。
+ * 用户在 26.9.3 上把三个毛病一起报了上来（详见 [ArtistPaging] 的类注释）：
  *
- * ## 9.0 两处改动
+ * - **末页 404**：「不足以支持 12 个的那一页」要凑满 12 条就得去要站点**下一页**，
+ *   而那一页已经不存在 ⇒ 站点 404 ⇒ 用户明明还有 6 部作品却翻不过去；
+ * - **作品遗失**：估算出来的总页数可能比真实少，末页连入口都没有；
+ * - **跳页 = 一路翻页**：应用页与站点页没有对应关系，点第 34 页只能把 1..33 全拉一遍
+ *   （Pornhub 一页 1.2 MB，几十次请求）。
  *
- * 1. **排版改成 2 列 × 6 行**（原来是 3 列 × 4 行）。3 列时每格封面被压得很窄，
- *    封面上的编号/标题看不清 —— 用户明确要求「一行两个，一页六行」。
- * 2. **总页数一次算准**：总页数改为优先取**站点公布的作品总数**（见 [knownTotalPages]），
- *    不再只按「已加载条数 / 12」一页页长出来。旧口径下用户站在第 1 页永远看到
- *    「1 / 1」，翻一页变「2 / 2」，「到底有多少页」这件事从头到尾没人告诉他，
- *    分页条也就没法画出「1 2 3 … N」。
+ * 现在**站点的一页就是应用的一页**：
  *
- * ## 修「最多只显示十页」
+ * | | 以前 | 现在 |
+ * |---|---|---|
+ * | 一页几条 | 固定 12 | **站点说了算**（hanime 41/59、Pornhub 40–49、nJAV 视站点） |
+ * | 跳页 | 从当前页一路拉到目标页 | **直接要那一页**，1 次请求 |
+ * | 总页数 | 作品数 ÷ 12 | 站点自己说的（页码条）→ 作品数 ÷ **实测站点一页条数** → 按已翻到的页数长 |
+ * | 末页不满 | 被判成 404 | 本来就是站点的一页，照常显示 |
  *
- * 用户报的是：**不管作者还是女优有多少视频，最多显示十页**。两个原因叠在一起，
- * 都在 [ArtistPaging] 那边钉着（那份纯数学有单测）：
+ * 页面缓存按**站点页号**存（[sitePages]），所以来回翻页是零请求；搜索框（[setQuery]）
+ * 在**已经拉回来的作品**里筛，不发一次请求。
  *
- * 1. [knownTotalPages] 拗不出数字（`87 Videos` / `5668 部影片` 里抠出来的字符串带尾巴，
- *    `toIntOrNull()` 恒 null）⇒ 总页数**只剩「已加载条数 / 12」这一个来源**；
- * 2. 「下一页」当时要求「还没到总页数」⇒ 站在最后一页就**死锁**了：想加载更多必须先点下一页，
- *    想点下一页又必须先加载更多。已加载条数正好是 12 的整数倍时（Pornhub 作者页 40–49 条/页
- *    ×3 ≈ 120 条 = 10 页）就正好卡在十页。
+ * ## ⚠️ 两种「页」在这里已经统一
  *
- * 现在：总数照站点公布的值算，「下一页」只看「本地有没有下一页 / 站点还有没有」。
+ * [page] 既是站点页号、也是界面上的页号 —— 不再有 26.9.3 那种「站点一页 59 条、
+ * 应用一页 12 条」的换算（那套换算正是上面的三个 bug 的来源）。
  *
- * ## 总页数的两条来源（第二条是这次补上的）
- *
- * 1. **作品数文案**（`87 Videos` / `5668 部影片`）—— Pornhub 详情页的主模特块、nJAV 女优卡片带；
- * 2. **站点自己的总页数** —— hanime 的合成作者页两条文案都没有，改成读搜索页页码条里的末页号
- *    （`ArtistVideosPage.siteTotalPages` + [ArtistPaging.pagesFromSitePages]，是上界估计）。
- *
- * 两条都拿不到时按「已加载条数」长，且**永远能继续翻**（这就是上面那个死锁的修法）。
- *
- * ⚠️ 两种「页」是分开的，别混：
- * - **应用内一页 12 条**：[page]（用户看到的、也是唯一该给用户看的口径）；
- * - **站点一页 30–59 条**：内部累积用，用户翻到第 12 条之外时自动去续拉。
- *
- * @param videos **当前这一页**的 12 条
- * @param page 当前页（1 起）
- * @param totalPages 总页数：优先由站点公布的作品总数算出，拿不到才退回「已加载条数 / 12」
- * @param canPrev / [canNext] 翻页按钮是否可用（[canNext] 还包含「站点那边可能还有」）
- * @param isPaging 正在为翻页补拉站点数据（界面显示小转圈，而不是整页 loading）
+ * @param videos **当前这一页**的作品
+ * @param page 当前页（1 起，与站点页号一一对应）
+ * @param totalPages 总页数：站点口径优先，拿不到就按已翻到的页数长
+ * @param numbers 分页条要画的页码（`null` = 省略号）；见 [ArtistPaging.strip]
+ * @param canPrev / [canNext] 翻页按钮是否可用（[canNext] **只**看站点那边还有没有下一页）
+ * @param isPaging 正在拉这一页（界面显示小转圈，而不是整页 loading）
+ * @param query 作品搜索框里的字（只筛本地已加载的作品，nJAV 女优页用得多）
+ * @param loadedCount / [matchCount] 本地已加载 / 命中筛选 的作品数
  */
 data class ArtistUiState(
     val artist: ArtistRef = ArtistRef(name = ""),
@@ -71,6 +62,7 @@ data class ArtistUiState(
     val videos: List<HanimeInfo> = emptyList(),
     val page: Int = 1,
     val totalPages: Int = 1,
+    val numbers: List<Int?> = emptyList(),
     val canPrev: Boolean = false,
     val canNext: Boolean = false,
     val state: PageLoadingState<*> = PageLoadingState.Loading,
@@ -79,7 +71,14 @@ data class ArtistUiState(
     val sort: String? = null,
     /** nJAV 女优页筛选（`filters=`），null = 全部。其它站点恒为 null。 */
     val filter: String? = null,
-)
+    /** 作品搜索框的内容（三个站点都能用；筛选只在本地已加载的作品里做）。 */
+    val query: String = "",
+    val loadedCount: Int = 0,
+    val matchCount: Int = 0,
+) {
+    /** 搜索框里有没有在筛。 */
+    val isSearching: Boolean get() = query.isNotBlank()
+}
 
 /**
  * 作者页 ViewModel。
@@ -91,33 +90,52 @@ class ArtistViewModel : ViewModel() {
     private val _state = MutableStateFlow(ArtistUiState())
     val state: StateFlow<ArtistUiState> = _state.asStateFlow()
 
-    /** 已从站点累积下来的全部作品（跨多个「站点页」）。 */
-    private var loaded: List<HanimeInfo> = emptyList()
+    /**
+     * 已经拉回来的**站点页**：页号 → 那一页的作品。
+     *
+     * `emptyList()` 也是一个合法值（拉过、站点说这一页没有）—— 有它才不会再拉第二次。
+     */
+    private val sitePages = HashMap<Int, List<HanimeInfo>>()
 
-    /** 站点那边的页码（内部累积用，与用户看到的 [ArtistUiState.page] 不是一回事）。 */
-    private var remotePage = 1
-    private var remoteHasMore = true
-    private var loading = false
+    /** 本地已加载的全部作品（按加载顺序去重），搜索框在它上面筛。 */
+    private val pool = LinkedHashMap<String, HanimeInfo>()
+
+    /** 已经**拿到过内容**的最大站点页（一页都没拿到就是 0）。 */
+    private var maxLoadedPage = 0
 
     /**
-     * 站点那边这份列表**一共几页**（站点自己的分页口径；拿不到为 null）。
+     * 站点自己公布的这份列表**一共几页**（拿不到为 null）。
      *
-     * 目前只有 hanime 的合成作者页给（搜索页页码条里的末页号，见
-     * [NetworkRepo.getArtistVideos] → `Parser.hanimeSearchTotalPages`）——
-     * Pornhub / nJAV 的作者页头部有「共 N 部影片」，那条线走 [knownTotalPages] 的文案解析。
+     * 两条来源：
+     * 1. **页码条**：hanime 的搜索页是 Laravel 分页、nJAV 女优页也有自己的页码条
+     *    （`NetworkRepo` 解析成 `ArtistVideosPage.siteTotalPages`）；
+     * 2. **作品数 ÷ 实测站点一页条数**（[ArtistPaging.pagesFromCountText]）——
+     *    Pornhub 只有「87 Videos」这句文案，用它配合实测页大小换算。
+     *
+     * ⚠️ nJAV **不认作品数文案**（女优页卡片上那个数是站点全站口径），但**认页码条** ——
+     * 这正是用户说的「njav 的女优界面存在自己的那一套页数，直接用它那套」。
      */
     private var siteTotalPages: Int? = null
 
     /**
      * 实测「站点一页几条」（拉回来的站点页里最大的那一页）。
      *
-     * 把站点页数换算成应用内页数要用它（站点不给这个数）。取**最大**而不是第一页：
-     * 站点页被解析器去重/过滤后条数会偏小，取最大才接近站点自己的一页容量。
+     * 取**最大**而不是第一页：站点末页常常不满，拿末页的条数当页容量会把总页数算多。
      */
     private var sitePageSize = 0
 
-    /** 拉到新一批后要跳到第几页（null = 停在原地）。 */
+    /**
+     * 站点在**已翻到的最远处**之后还可能有下一页。
+     *
+     * ⚠️ 这是「能不能前进」的唯一闸门（见 [ArtistPaging.resolve] 的 hasNext 说明），
+     * **不要**再去和总页数比较 —— 总数一旦是估算值，那样就会在末页锁死自己。
+     */
+    private var siteHasMore = true
+
+    /** 正在拉的那一页（失败后重试要用同一个目标）。 */
     private var pendingPage: Int? = null
+
+    private var loading = false
 
     private var boundKey: String? = null
 
@@ -144,29 +162,50 @@ class ArtistViewModel : ViewModel() {
         restart(keepSort = true)
     }
 
-    /** 清空已加载内容后重新开始（排序/筛选变化，以及首次绑定时用）。 */
+    /**
+     * 作品搜索框（26.9.4）。
+     *
+     * ⭐ **只在本地已加载的作品里筛，一次请求都不发**：输入过程中每敲一个字就联网，
+     * 既慢又容易被站点限流（nJAV 有反爬挑战页）。
+     *
+     * 对 nJAV 女优页尤其有用 —— 女优页一次就把作品全铺出来（站点自己不分页），
+     * 作品多的女优（几百部）只能靠搜。筛的是[pool]（跨已翻过的页），
+     * 所以「已加载 N 部 / 命中 M 部」两个数要在界面上如实说出来。
+     */
+    fun setQuery(value: String) {
+        if (_state.value.query == value) return
+        _state.value = _state.value.copy(query = value)
+        _state.value = pageState(_state.value.page)
+    }
+
+    /** 清空已加载内容后重新开始（排序 / 筛选变化，以及首次绑定时用）。 */
     private fun restart(keepSort: Boolean) {
-        loaded = emptyList()
-        remotePage = 1
-        remoteHasMore = true
-        loading = false
-        pendingPage = null
-        // 换人 / 换排序 / 换筛选都作废：站点总页数与实测站点页条数都是「上一份列表」的。
+        sitePages.clear()
+        pool.clear()
+        maxLoadedPage = 0
         siteTotalPages = null
         sitePageSize = 0
+        siteHasMore = true
+        loading = false
+        pendingPage = null
         val current = _state.value
         _state.value = current.copy(
             videos = emptyList(),
             page = 1,
             totalPages = 1,
+            numbers = emptyList(),
             canPrev = false,
             canNext = false,
             state = PageLoadingState.Loading,
             isPaging = false,
             sort = if (keepSort) current.sort else null,
             filter = if (keepSort) current.filter else null,
+            // 搜索词跟着人/排序走：换一位作者还留着上一位的关键词，只会让人以为没作品。
+            query = "",
+            loadedCount = 0,
+            matchCount = 0,
         )
-        loadRemotePage()
+        fetchPage(1)
     }
 
     /**
@@ -237,11 +276,11 @@ class ArtistViewModel : ViewModel() {
         }
     }
 
-    /** 重试（首页失败、以及翻页补拉失败都走它）。 */
+    /** 重试（首屏失败、以及翻页失败都走它）。失败时 [pendingPage] 没被清掉，所以重试的是**同一页**。 */
     fun retry() {
         if (boundKey == null || loading) return
-        _state.value = _state.value.copy(state = PageLoadingState.Loading)
-        loadRemotePage()
+        val target = pendingPage ?: _state.value.page
+        fetchPage(target)
     }
 
     fun nextPage() = goToPage(_state.value.page + 1)
@@ -249,222 +288,218 @@ class ArtistViewModel : ViewModel() {
     fun prevPage() = goToPage(_state.value.page - 1)
 
     /**
-     * 跳到第 [target] 页（分页条用它，[nextPage] / [prevPage] 也是）。
+     * 跳到第 [target] 页。
+     *
+     * ⭐ 26.9.4 起这里是**真跳页**：应用页号 = 站点页号，所以「去第 34 页」= 要站点第 34 页，
+     * **一次请求**。26.9.3 及以前是「从当前页一路拉到目标页」（Pornhub 一页 1.2 MB，
+     * 跳一次几十次请求）—— 用户原话「现在的跳转其实还是翻页……这样不是请求变多了吗」。
      *
      * 三种情形：
-     * - **往回翻**：本地已经有那 12 条，直接换页，不联网；
-     * - **往前翻、本地已攒够**：同上；
-     * - **往前翻、本地不够**（用户直接点了第 5 页）：记下目标，交给 [loadRemotePage]
-     *   **连着**拉够为止 —— 这是 26.8 会「点了没反应」的地方。
-     *
-     * ⚠️ 这里的 [ArtistUiState.canNext] 是**唯一**的前进闸门，它现在只看
-     * 「本地有没有下一页 / 站点还有没有」，不再看「到没到总页数」——
-     * 后者会让用户永远停在最后一页（见 [ArtistPaging] 与类注释里的「最多十页」）。
+     * - **这一页已经拉回来过**：直接换页，**零请求**（来回翻页不该联网）；
+     * - **还没拉过**：记下目标，交给 [fetchPage]（1 次请求，成不成都只试这一次）；
+     * - **站点那边确认没有了**：不再往后放人（往前翻仍然允许，那些页在缓存里）。
      */
     fun goToPage(target: Int) {
         val current = _state.value
         if (loading) return
         val safe = target.coerceAtLeast(1)
         if (safe == current.page) return
-        if (safe < current.page) {
-            // 往回翻永远不需要联网：已经看过的那几页一定还在 loaded 里。
+        if (sitePages.containsKey(safe)) {
+            pendingPage = null
             _state.value = pageState(safe)
             return
         }
-        if (!current.canNext) return
-        if (loaded.size >= safe * PAGE_SIZE || !remoteHasMore) {
-            _state.value = pageState(safe)
-            return
-        }
+        if (safe > current.page && !current.canNext) return
         pendingPage = safe
-        loadRemotePage()
+        fetchPage(safe)
     }
 
     /**
-     * 拉取 / 续拉站点数据。
+     * 拉取站点第 [target] 页。
      *
-     * ⚠️ 一次「跳到第 n 页」可能需要连着拉**好几个站点页**：站点一页给 30–59 条，
-     * 而应用内一页只有 [PAGE_SIZE] 条。所以这里是个循环，直到
-     * 「本地攒够了第 [pendingPage] 页要的条数」或「站点那边没有了」为止。
-     * 26.8 的版本只拉一次，于是用户从第 1 页直接点第 5 页时会停在第 1 页不动
-     * （`pendingPage` 被丢掉），看起来就是「点了没反应」。
-     *
-     * ⚠️ 但一次跳页**最多补拉 [MAX_SITE_PAGES_PER_JUMP] 个站点页**：现在总页数可能来自
-     * 站点公布的作品总数（几千条 ⇒ 上百页），页码条上的数字点一下就一路拉到底的话，
-     * 那是几十次 1.2 MB（Pornhub 作者页）的请求 —— 站点不乐意，用户也只看到转圈。
-     * 到上限就停在「现在能画出来的最后一页」，用户再点一次继续（分页条会如实显示进度）。
+     * 只拉这一页 —— 不预取、不连拉（跳页次数由用户决定，每次 1 个请求）。
      */
-    private fun loadRemotePage() {
-        if (loading || !remoteHasMore) {
-            pendingPage?.let { target ->
-                pendingPage = null
-                _state.value = pageState(target)
-            }
-            return
-        }
-        loading = true
+    private fun fetchPage(target: Int) {
+        if (loading) return
         val artist = _state.value.artist
         val sort = _state.value.sort
         val filter = _state.value.filter
-        // ⭐ 「用户想去第几页」在发请求前**定格**，整个手势都用它。
-        //    collect 里会把 pendingPage 清掉，若每轮循环都重新读它，第二轮读到的就是 null
-        //    ⇒ 循环提前 break，一次跳页**只拉两批**（26.8 那句「点了没反应」的另一半：
-        //    即使按钮点得动，点第 40 页也只前进两三页）。
-        //    不会有别的操作在补拉期间改它：`loading` 为真时 goToPage / loadRemotePage 直接返回。
-        val appTarget = pendingPage
+        loading = true
+        pendingPage = target
         _state.value = _state.value.copy(
-            state = if (loaded.isEmpty()) PageLoadingState.Loading else _state.value.state,
-            isPaging = loaded.isNotEmpty(),
+            // 手里已经有内容时不清空画面（翻页只是补一页，不该整页转圈）。
+            state = if (sitePages.isEmpty()) PageLoadingState.Loading else _state.value.state,
+            isPaging = sitePages.isNotEmpty(),
         )
         viewModelScope.launch {
-            var fetchedPages = 0
-            while (true) {
-                val remoteTarget = remotePage
-                var stop = false
-                fetchedPages++
-                NetworkRepo.getArtistVideos(artist, remoteTarget, sort, filter).collect { result ->
-                    when (result) {
-                        is PageLoadingState.Success -> {
-                            val info = result.info
-                            val existing = loaded.mapTo(mutableSetOf()) { it.videoCode }
-                            val fresh = info.videos.filterNot { it.videoCode in existing }
-                            loaded = loaded + fresh
-                            // ⭐ 站点总页数 / 实测站点页条数：分页条「一共多少页」的另一条来源
-                            // （hanime 的作者页没有「共 N 部影片」文案，只有这一条）。见 knownTotalPages。
-                            info.siteTotalPages?.takeIf { it > 0 }?.let { siteTotalPages = it }
-                            sitePageSize = maxOf(sitePageSize, info.videos.size)
-                            // 「这一批有没有新东西」比「站点说没说还有下一页」可靠：
-                            // 两个站点的空页/重复页形态都不一样。
-                            remoteHasMore = info.videos.isNotEmpty() && fresh.isNotEmpty()
-                            remotePage = remoteTarget + 1
-                            pendingPage = null
-                            val next = pageState(appTarget ?: _state.value.page)
-                            // ⚠️ 这里**不**清 isPaging：一次跳页可能要连着补拉好几批
-                            // （见函数注释的上限），第一批回来就熄灯的话，用户会以为已经好了，
-                            // 而后面几批还在路上。统一在循环结束后清。
-                            _state.value = next.copy(
-                                profile = info.profile ?: _state.value.profile,
-                            )
-                            // ⭐ 9.0：打开作者页第一页 = 这位作者的新作都知道了 ⇒ 角标清零。
-                            // 只在站点第 1 页做，往后翻页不该反复改写关注表。
-                            if (remoteTarget == 1) {
-                                val codes = loaded.take(PAGE_SIZE).map { it.videoCode }
-                                viewModelScope.launch {
-                                    runCatching { FollowedArtistStore.markSeen(artist, codes) }
-                                }
-                            }
+            var failure: Throwable? = null
+            NetworkRepo.getArtistVideos(artist, target, sort, filter).collect { result ->
+                when (result) {
+                    is PageLoadingState.Success -> {
+                        val info = result.info
+                        val items = info.videos.distinctBy { it.videoCode }
+                        if (items.isNotEmpty()) {
+                            // 只有**满页**才代表站点页容量；末页不满很正常，别把容量记小。
+                            sitePageSize = maxOf(sitePageSize, items.size)
+                            maxLoadedPage = maxOf(maxLoadedPage, target)
+                            pool.putAll(items.associateBy { it.videoCode })
                         }
-
-                        is PageLoadingState.NoMoreData -> {
-                            remoteHasMore = false
-                            pendingPage = null
-                            val profile = _state.value.profile
-                            _state.value = if (loaded.isEmpty() && appTarget == null) {
-                                _state.value.copy(state = PageLoadingState.NoMoreData, isPaging = false)
-                            } else {
-                                pageState(appTarget ?: _state.value.page).copy(
-                                    profile = profile,
-                                    isPaging = false,
-                                )
-                            }
-                            stop = true
+                        sitePages[target] = items
+                        info.siteTotalPages?.takeIf { it > 0 }?.let { siteTotalPages = it }
+                        siteHasMore = hasNextAfter(target, items, info.hasNext)
+                        pendingPage = null
+                        if (items.isEmpty() && target > 1) {
+                            // 站点这一页是空的（页号越界 / 反爬空页）⇒ 列表到头了，
+                            // 把人放回**真正有内容的最后一页**，而不是让他看一张空白页。
+                            clampToLastPage()
+                        } else {
+                            val next = pageState(target)
+                            _state.value = info.profile?.let { next.copy(profile = it) } ?: next
+                            if (target == 1) markSeen(items)
                         }
-
-                        is PageLoadingState.Error -> {
-                            pendingPage = null
-                            _state.value = _state.value.copy(
-                                state = PageLoadingState.Error(result.throwable),
-                                isPaging = false,
-                            )
-                            stop = true
-                        }
-
-                        is PageLoadingState.Loading -> Unit
                     }
+
+                    is PageLoadingState.NoMoreData -> {
+                        sitePages[target] = emptyList()
+                        siteHasMore = false
+                        pendingPage = null
+                        // 站点说这一页没有 ⇒ 列表就到这里，估计出来的总页数要收回来。
+                        siteTotalPages = maxOf(maxLoadedPage, 1).takeIf { maxLoadedPage > 0 }
+                        clampToLastPage()
+                    }
+
+                    is PageLoadingState.Error -> {
+                        // ⚠️ 不清 pendingPage：重试要重试**同一页**。
+                        failure = result.throwable
+                    }
+
+                    is PageLoadingState.Loading -> Unit
                 }
-                if (stop) break
-                // 只有「用户点了一个更远的页、而本地还不够」时才继续拉。
-                val want = appTarget ?: break
-                if (!remoteHasMore || loaded.size >= want * PAGE_SIZE) break
-                // 见函数注释：一次跳页的补拉上限。
-                if (fetchedPages >= MAX_SITE_PAGES_PER_JUMP) break
             }
             loading = false
-            // ⭐ 小转圈到这里才熄：一批回来就熄会让用户以为「已经好了」，而后面几批还在路上。
-            _state.value = _state.value.copy(isPaging = false)
+            val error = failure
+            if (error != null) {
+                // 保留画面上的那一页（videos 不动），错误只挂在列表末尾 ——
+                // 「翻不动」和「这一页没了」在界面上必须长得不一样。
+                _state.value = _state.value.copy(
+                    state = PageLoadingState.Error(error),
+                    isPaging = false,
+                )
+            } else {
+                _state.value = _state.value.copy(isPaging = false)
+            }
         }
     }
 
-    /**
-     * 由 [loaded] 算出「第 page 页」的状态（12 条 + 翻页可用性）。
-     *
-     * 口径全部在 [ArtistPaging.resolve] 里（纯数学、有单测）：总数优先用站点公布的作品数，
-     * 拿不到就按已加载条数算；「下一页」只看「本地有没有 / 站点还有没有」，
-     * **不**看「到没到总页数」—— 那正是「最多十页」的死锁来源。
-     */
-    private fun pageState(page: Int): ArtistUiState {
-        val verdict = ArtistPaging.resolve(
-            requested = page,
-            loadedCount = loaded.size,
-            knownTotalPages = knownTotalPages(),
-            remoteHasMore = remoteHasMore,
-            pageSize = PAGE_SIZE,
-        )
-        val slice = loaded.drop((verdict.page - 1) * PAGE_SIZE).take(PAGE_SIZE)
-        return _state.value.copy(
-            videos = slice,
-            page = verdict.page,
-            totalPages = verdict.totalPages,
-            canPrev = verdict.canPrev,
-            canNext = verdict.canNext,
-            state = if (loaded.isEmpty()) PageLoadingState.NoMoreData
-            else PageLoadingState.Success(loaded),
-        )
+    /** 站点这一页之后还有没有下一页（[siteHasMore] 的取值）。 */
+    private fun hasNextAfter(target: Int, items: List<HanimeInfo>, siteSays: Boolean?): Boolean {
+        // 站点自己说得很清楚（`rel=next` 有没有）就听它的。
+        if (siteSays != null) return siteSays
+        if (items.isEmpty()) return false
+        val known = knownTotalPages()
+        return known == null || target < known
     }
 
+    /** 夹回「真正有内容的最后一页」（越界页 / 空页的兜底）。 */
+    private fun clampToLastPage() {
+        val back = lastPageWithItems().coerceAtLeast(1)
+        _state.value = pageState(back)
+    }
+
+    /** 本地缓存里最后一个**有作品**的页号（一页都没有就是 1）。 */
+    private fun lastPageWithItems(): Int =
+        sitePages.entries.filter { it.value.isNotEmpty() }.maxOfOrNull { it.key } ?: 1
+
     /**
-     * 站点公布的作品数 / 站点自己的页数 → 总页数；两条都拿不到就是 null。
+     * 站点公布的「一共几页」，两条来源取大的那个（宁可估大也不估小 —— 估小会让用户
+     * 以为已经到最后一页了）。
      *
-     * 作者页头部那点信息比「已加载条数」权威得多 —— 它是站点自己算的，
-     * 而且**第一页就拿到了**，所以分页条一进页面就能画出完整的「1 2 3 … N」。
-     *
-     * 两条来源（取大的那个，宁可估大也不估小 —— 估小会让用户以为「已经到最后一页了」）：
-     * 1. **作品数文案**（`87 Videos` / `5668 部影片`）：Pornhub、nJAV 的卡片带这句；
-     *    文案怎么解析（含为什么 `1.2K` 不能信）见 [ArtistPaging.pagesFromCountText]。
-     * 2. **站点自己的总页数**（hanime 搜索页页码条里的末页号）⇒ [ArtistPaging.pagesFromSitePages]。
-     *    hanime 的合成作者页两条文案都没有，只有这一条。
+     * ⚠️ nJAV **不认作品数文案**（女优页卡片上那个数是站点全站口径），但**认页码条**
+     * （[siteTotalPages]）—— 用户要的正是「用它自己那一套页数」。
      */
     private fun knownTotalPages(): Int? {
-        // ⚠️ nJAV 的女优页站点不给分页（`?page=` 只回反爬挑战页，见 NetworkRepo.njavArtistFlow），
-        // 而卡片上那个「5668 部影片」是**站点全站**的口径 —— 拿它画页码条，用户点第 12 页
-        // 只会得到一次「点了没反应」。这条路不认作品数文案。
         val byCountText = if (_state.value.artist.siteSource == SiteSource.Njav) {
             null
         } else {
             ArtistPaging.pagesFromCountText(
                 _state.value.profile?.videoCount?.takeIf { it.isNotBlank() }
                     ?: _state.value.artist.videoCount.takeIf { it.isNotBlank() },
-                PAGE_SIZE,
+                // 除数必须是**实测的站点一页条数**（第一页回来之后就有了）。
+                sitePageSize,
             )
         }
-        val bySitePages = ArtistPaging.pagesFromSitePages(siteTotalPages, sitePageSize, PAGE_SIZE)
-        return listOfNotNull(byCountText, bySitePages).maxOrNull()
+        return listOfNotNull(byCountText, siteTotalPages).maxOrNull()
+    }
+
+    /** 搜索框当前命中哪些作品（在[pool]上做，**不联网**）。 */
+    private fun searchResults(query: String): List<HanimeInfo> {
+        val needle = query.trim()
+        if (needle.isEmpty()) return emptyList()
+        return pool.values.filter { info ->
+            info.videoCode.contains(needle, ignoreCase = true) ||
+                    info.title.contains(needle, ignoreCase = true)
+        }
+    }
+
+    /**
+     * 由缓存算出「第 [page] 页」的状态。
+     *
+     * 口径全部在 [ArtistPaging.resolve] 里（纯数学、有单测）：
+     * 总页数用站点口径（页码条 / 作品数 ÷ 实测站点页条数），拿不到就按已翻到的页数长；
+     * 「下一页」只看站点那边还有没有，**不**看「到没到总页数」——
+     * 那正是 26.9.0「最多十页」的死锁来源。
+     */
+    private fun pageState(page: Int): ArtistUiState {
+        val query = _state.value.query.trim()
+        val searching = query.isNotEmpty()
+        val items = if (searching) searchResults(query) else sitePages[page].orEmpty()
+        // 搜索是在本地池子上筛的，和「第几页」没有关系 ⇒ 搜索时把翻页闸门全关掉
+        // （界面会整个收起分页条），但 **page 保持不动** —— 清空搜索词就回到原来那一页。
+        val canNext = !searching && (page < maxLoadedPage || siteHasMore)
+        val verdict = ArtistPaging.resolve(
+            page = page,
+            maxLoadedPage = maxLoadedPage,
+            knownTotalPages = knownTotalPages(),
+            hasNext = canNext,
+        )
+        return _state.value.copy(
+            videos = items,
+            page = verdict.page,
+            totalPages = verdict.totalPages,
+            numbers = verdict.numbers,
+            canPrev = !searching && verdict.canPrev,
+            canNext = canNext,
+            query = _state.value.query,
+            loadedCount = pool.size,
+            matchCount = if (searching) items.size else pool.size,
+            state = when {
+                items.isNotEmpty() -> PageLoadingState.Success(items)
+                searching -> PageLoadingState.Success(emptyList<HanimeInfo>())
+                sitePages.isEmpty() -> PageLoadingState.Loading
+                else -> PageLoadingState.NoMoreData
+            },
+        )
+    }
+
+    /** 打开作者页第一页 = 这位作者的新作都知道了 ⇒ 角标清零。只在站点第 1 页做。 */
+    private fun markSeen(items: List<HanimeInfo>) {
+        if (items.isEmpty()) return
+        val artist = _state.value.artist
+        val codes = items.take(FIRST_PAGE_SEEN_LIMIT).map { it.videoCode }
+        viewModelScope.launch {
+            runCatching { FollowedArtistStore.markSeen(artist, codes) }
+        }
     }
 
     companion object {
-        /** ⭐ 一页 12 条。 */
-        const val PAGE_SIZE = 12
-
-        /** ⭐ 2 列 —— 12 条正好 6 行。9.0 从 3 列改过来：3 列时封面太窄，标题看不清。 */
+        /** ⭐ 2 列 —— 封面上的编号/标题看得清（9.0 从 3 列改过来）。 */
         const val COLUMNS = 2
 
         /**
-         * ⭐ 一次跳页最多补拉几个**站点页**（站点一页 30–59 条）。
+         * 清零新作角标时最多记多少条。
          *
-         * 站点公布的作品总数可能是几千条 ⇒ 上百页，页码条点一下就一路拉到底的话，
-         * 那是几十次 1.2 MB（Pornhub 作者页）的请求。到上限先停在「现在能画出来的最后一页」，
-         * 用户再点一次继续 —— 比「转圈转到天荒地老」和「点了没反应」都好。
+         * 站点一页 40–59 条，全记下来会把关注表写得很肥；用户打开作者页看到的也就是第一页。
          */
-        private const val MAX_SITE_PAGES_PER_JUMP = 20
+        private const val FIRST_PAGE_SEEN_LIMIT = 20
     }
 }
