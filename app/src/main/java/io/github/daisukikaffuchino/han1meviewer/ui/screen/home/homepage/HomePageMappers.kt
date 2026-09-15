@@ -56,11 +56,15 @@ fun buildCategoryList(
         // ⚠️ **必须卡 `isPornhubSite`**：借用的槽位 `newAnimeTrailer` 在 hanime 那边
         //    装的是「本月新番预告」的真实数据（见 `Parser.homePageVer2`），
         //    不卡的话 hanime 首页会凭空多出一行叫「推荐」、内容却是新番预告。
+        //
+        // ⭐ 26.9.6：形态改成 **CAROUSEL**（一屏一张大图、左右滑），其他行仍是 ROW。
+        //    只改「怎么画」，取数一个字没动。
         if (!isPornhubSite) null else HomeCategory(
             key = HOME_CATEGORY_RECOMMENDED,
             titleRes = R.string.ph_recommended,
             genre = PhParser.RECOMMENDED_MARKER,
-            videos = homePage.newAnimeTrailer
+            videos = homePage.newAnimeTrailer,
+            style = HomeCategoryStyle.CAROUSEL
         ),
         // ── 最新 ───────────────────────────────────────────────────────────
         HomeCategory(

@@ -25,6 +25,7 @@ import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.componen
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.AppUpdateCard
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.BannerCarousel
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.CategoryRow
+import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.component.FeaturedCarousel
 
 /**
  * 渲染首页可滚动内容区域。
@@ -117,23 +118,43 @@ fun HomePageContent(
         }
         categories.forEach { category ->
             item(key = "category_${category.titleRes}") {
-                CategoryRow(
-                    title = stringResource(category.titleRes),
-                    videos = category.videos,
-                    onMoreClick = {
-                        val params = category.toAdvancedSearchParams()
-                        if (params.isNotEmpty()) {
-                            onEvent(HomeUiEvent.NavigateToSearchAdvanced(params))
-                        }
-                    },
-                    onVideoClick = { code ->
-                        onEvent(HomeUiEvent.OpenVideo(code))
-                    },
-                    onVideoLongClick = { _, _ ->
-                       // onEvent(HomeUiEvent.LongPressVideoCopy(code, title))
-                    },
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
+                // 取数完全一样，只有「怎么画」按 style 分流（见 HomeCategoryStyle）。
+                // ⚠️ 分支**写平在这里**，别抽成扩展函数 —— 抽出去会让 `state`
+                //    遮蔽 `items(...)`，报一长串 receiver type mismatch。
+                when (category.style) {
+                    HomeCategoryStyle.CAROUSEL -> FeaturedCarousel(
+                        title = stringResource(category.titleRes),
+                        videos = category.videos,
+                        onMoreClick = {
+                            val params = category.toAdvancedSearchParams()
+                            if (params.isNotEmpty()) {
+                                onEvent(HomeUiEvent.NavigateToSearchAdvanced(params))
+                            }
+                        },
+                        onVideoClick = { code ->
+                            onEvent(HomeUiEvent.OpenVideo(code))
+                        },
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+
+                    HomeCategoryStyle.ROW -> CategoryRow(
+                        title = stringResource(category.titleRes),
+                        videos = category.videos,
+                        onMoreClick = {
+                            val params = category.toAdvancedSearchParams()
+                            if (params.isNotEmpty()) {
+                                onEvent(HomeUiEvent.NavigateToSearchAdvanced(params))
+                            }
+                        },
+                        onVideoClick = { code ->
+                            onEvent(HomeUiEvent.OpenVideo(code))
+                        },
+                        onVideoLongClick = { _, _ ->
+                            // onEvent(HomeUiEvent.LongPressVideoCopy(code, title))
+                        },
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
             }
         }
     }
