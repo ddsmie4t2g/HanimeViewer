@@ -134,7 +134,8 @@ class VideoViewModel(
                     LocalListRepository.observeIsWatchLater(code),
                     LocalListRepository.observeListCodes(code),
                     LocalListRepository.observePlaylists(),
-                ) { isFavorite, isWatchLater, listCodes, playlists ->
+                    LocalListRepository.observeFavoriteCollections(),
+                ) { isFavorite, isWatchLater, listCodes, playlists, collections ->
                     video.copy(
                         isFav = isFavorite,
                         myList = HanimeVideo.MyList(
@@ -153,6 +154,18 @@ class VideoViewModel(
                                             code = playlist.listCode,
                                             title = playlist.title,
                                             isSelected = playlist.listCode in listCodes,
+                                        )
+                                    )
+                                }
+                                // ⭐ 9.0：收藏夹排在播放清单之后，用 isCollection 标记，
+                                // 让弹窗能给它们单独一个分组标题。
+                                collections.forEach { collection ->
+                                    add(
+                                        HanimeVideo.MyList.MyListInfo(
+                                            code = collection.listCode,
+                                            title = collection.title,
+                                            isSelected = collection.listCode in listCodes,
+                                            isCollection = true,
                                         )
                                     )
                                 }
@@ -289,7 +302,10 @@ class VideoViewModel(
                     }
                 }
             } else {
-                NetworkRepo.getHanimeVideo(videoCode)
+                // ⭐ 9.0 跨站点：关注 / 订阅 / 观看历史 / 收藏夹里的片子可能属于**别的站**，
+                //    一律按当前数据源去问会拿到 403/500，界面显示成「可能该影片不存在」。
+                //    这里改用「先用当前数据源、失败再试另外两个站」的入口。
+                NetworkRepo.getHanimeVideoAnySite(videoCode)
             }
             flow.collect { state ->
                 val emitState = when {

@@ -162,9 +162,22 @@ fun SubscriptionContent(
             // 登录 → 读 hanime 服务端（实时、以取关为准）；
             // 未登录 → 读本机那份同步副本（登录时自动存下来的，见 FollowedArtistStore）。
             val hanimeCards = if (uiState.isLoggedIn) {
-                uiState.artists.map { ArtistCard(it.artistName, it.avatar) }
+                uiState.artists.map {
+                    // 服务端订阅那一份只有名字 ⇒ 身份键给空，靠名字兜底。
+                    ArtistCard(
+                        it.artistName,
+                        it.avatar,
+                        unread = unreadOf(uiState.unread, "", it.artistName),
+                    )
+                }
             } else {
-                hanimeLocal.map { ArtistCard(it.name, it.avatar) }
+                hanimeLocal.map {
+                    ArtistCard(
+                        it.name,
+                        it.avatar,
+                        unread = unreadOf(uiState.unread, it.followKey, it.name),
+                    )
+                }
             }
             if (!everythingEmpty) {
                 item(span = { GridItemSpan(videoColumns) }, key = "section-hanime") {
@@ -231,7 +244,13 @@ fun SubscriptionContent(
                             },
                             list.size,
                         ),
-                        cards = list.map { ArtistCard(it.name, it.avatar) },
+                        cards = list.map {
+                            ArtistCard(
+                                it.name,
+                                it.avatar,
+                                unread = unreadOf(uiState.unread, it.followKey, it.name),
+                            )
+                        },
                         artistRows = artistRows,
                         artistColumns = artistColumns,
                         onClickArtist = { index ->
@@ -362,7 +381,22 @@ private data class ArtistCard(
     val name: String,
     val avatar: String,
     val badge: String? = null,
+    /** 新作数（9.0）。0 = 不画角标。 */
+    val unread: Int = 0,
 )
+
+/**
+ * 查某位作者的**未读新作数**（9.0）。
+ *
+ * 两把钥匙都要试：
+ * - 本机关注拿得出身份键（`ArtistRef.followKey`）；
+ * - hanime 服务端订阅那一份**只有名字和头像**，算不出身份键。
+ *
+ * `FollowedArtistStore.unreadLookup` 把两种键都放了进去；为 0 的作者不在表里，
+ * 所以查不到就是 0（这也是为什么可以直接用 `?:`）。
+ */
+private fun unreadOf(unread: Map<String, Int>, followKey: String, name: String): Int =
+    unread[followKey] ?: unread[name.trim().lowercase()] ?: 0
 
 /**
  * 已订阅 / 已关注作者的横向格子区域。
@@ -441,6 +475,7 @@ private fun ArtistListSection(
                                         avatar = card.avatar,
                                     ),
                                     badgeText = card.badge,
+                                    unreadCount = card.unread,
                                     onClickArtist = { onClickArtist(itemIndex) },
                                     onLongClickArtist = { onLongClickArtist(itemIndex) },
                                 )

@@ -20,6 +20,16 @@ object MyWatchLaterRoute : HanimeScreen
 @Serializable
 object MyPlaylistRoute : HanimeScreen
 
+/**
+ * **收藏夹**（9.0 新增）。
+ *
+ * 与 [MyPlaylistRoute]（播放清单）是两个互不相干的入口：底层的表是同一张，
+ * 靠 `LocalListEntity.kind` 分开（`playlist` / `favorite_collection`），
+ * 所以收藏夹里存的东西不会出现在播放清单页，反之亦然。
+ */
+@Serializable
+object MyFavoritesRoute : HanimeScreen
+
 @Serializable
 object SubscriptionRoute : HanimeScreen
 
@@ -88,14 +98,6 @@ data class ArtistRoute(
 
 @Serializable
 object PreviewRoute : HanimeScreen
-
-@Serializable
-object GetchuPreviewRoute : HanimeScreen
-
-@Serializable
-data class GetchuPreviewDetailRoute(
-    val id: String,
-) : HanimeScreen
 
 @Serializable
 data class PreviewCommentRoute(

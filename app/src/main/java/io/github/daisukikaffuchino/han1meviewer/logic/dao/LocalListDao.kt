@@ -21,6 +21,13 @@ data class LocalPlaylistRow(
 @Dao
 interface LocalListDao {
 
+    /**
+     * 列出「某一类」用户自建列表（`kind` 见 [io.github.daisukikaffuchino.han1meviewer.logic.LocalListRepository]）。
+     *
+     * ⭐ 9.0 起把 `kind` 变成参数：原来这里写死 `kind = 'playlist'`，于是「播放清单」
+     * 与「收藏夹」只能共用一张表却没法各查各的。两者的行结构完全一样（标题 / 简介 /
+     * 封面 / 条目数），只是分类不同 —— 所以查询也只需要换一个 `kind`。
+     */
     @Query(
         """
         SELECT l.listCode, l.title, l.desc, l.createdAt, l.updatedAt,
@@ -28,11 +35,11 @@ interface LocalListDao {
                (SELECT coverUrl FROM LocalListItemEntity i WHERE i.listCode = l.listCode
                 ORDER BY addedAt DESC LIMIT 1) AS coverUrl
         FROM LocalListEntity l
-        WHERE l.kind = 'playlist'
+        WHERE l.kind = :kind
         ORDER BY l.createdAt DESC
         """
     )
-    fun observePlaylists(): Flow<List<LocalPlaylistRow>>
+    fun observeListsByKind(kind: String): Flow<List<LocalPlaylistRow>>
 
     @Query(
         """
@@ -41,11 +48,11 @@ interface LocalListDao {
                (SELECT coverUrl FROM LocalListItemEntity i WHERE i.listCode = l.listCode
                 ORDER BY addedAt DESC LIMIT 1) AS coverUrl
         FROM LocalListEntity l
-        WHERE l.kind = 'playlist'
+        WHERE l.kind = :kind
         ORDER BY l.createdAt DESC
         """
     )
-    suspend fun getPlaylistsOnce(): List<LocalPlaylistRow>
+    suspend fun getListsOnceByKind(kind: String): List<LocalPlaylistRow>
 
     @Query("SELECT * FROM LocalListEntity WHERE listCode = :listCode LIMIT 1")
     suspend fun getPlaylist(listCode: String): LocalListEntity?

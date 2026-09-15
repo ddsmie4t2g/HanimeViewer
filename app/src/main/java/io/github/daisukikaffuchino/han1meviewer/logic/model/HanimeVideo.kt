@@ -109,6 +109,14 @@ data class HanimeVideo(
             val code: String,
             val title: String,
             var isSelected: Boolean,
+            /**
+             * ⭐ 9.0：这一项是**收藏夹**而不是播放清单。
+             *
+             * 「加入清单」弹窗里两者并排显示，靠它决定要不要在收藏夹那一段前
+             * 插一个小标题分组 —— 不加的话，用户看不出哪些名字属于播放清单、
+             * 哪些属于收藏夹（两者都可以叫任何名字）。
+             */
+            val isCollection: Boolean = false,
         )
 
         val titleArray get() = myListInfo.mapToArray(MyListInfo::title)

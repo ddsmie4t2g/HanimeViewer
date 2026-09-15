@@ -159,6 +159,7 @@ fun MainActivityContent(
         isLoggedIn = isLoggedIn,
         isLoading = headerIsLoading,
         currentSite = SettingsRepository.baseUrl,
+        siteSource = SettingsRepository.siteSource,
         checkInEnabled = checkInEnabled,
         onAvatarClick = {
             if (isLoggedIn) {

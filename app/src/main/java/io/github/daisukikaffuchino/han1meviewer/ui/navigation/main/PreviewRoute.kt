@@ -11,8 +11,6 @@ import io.github.daisukikaffuchino.han1meviewer.ui.viewmodel.PreviewViewModel
 fun PreviewRouteScreen(
     activity: MainActivity,
     onBack: () -> Unit,
-    onNavigateToGetchuPreview: () -> Unit,
-    onNavigateToGetchuDetail: (String) -> Unit,
     onNavigateToPreviewComment: (String, String) -> Unit,
     onNavigateToVideo: (String) -> Unit,
 ) {
@@ -21,8 +19,6 @@ fun PreviewRouteScreen(
 
     PreviewScreen(
         onBack = onBack,
-        onNavigateToGetchuPreview = onNavigateToGetchuPreview,
-        onNavigateToGetchuDetail = onNavigateToGetchuDetail,
         onNavigateToPreviewComment = onNavigateToPreviewComment,
         onNavigateToVideo = onNavigateToVideo,
         previewViewModel = previewViewModel,

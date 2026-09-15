@@ -17,12 +17,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import io.github.daisukikaffuchino.han1meviewer.PREVIEW_COMMENT_PREFIX
-import io.github.daisukikaffuchino.han1meviewer.HANIME_BASE_URL
+import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimePreview
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
 import io.github.daisukikaffuchino.han1meviewer.ui.preview.ComponentPreview
@@ -38,9 +37,7 @@ import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.PreviewIm
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.PreviewImageViewerState
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.PreviewMonthHeaderState
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.PreviewRouteUiState
-import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.PreviewTab
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.PreviewUiState
-import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.getchupreview.GetchuPreviewViewModel
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.currentCodeFrom
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.isPreviewDiscontinued
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.previewMonthOf
@@ -58,7 +55,6 @@ import java.time.LocalDate
  * 渲染委托给 [io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.PreviewContent]。
  *
  * @param onBack 返回回调
- * @param onNavigateToGetchuPreview 打开 Getchu 新番预告页回调
  * @param onNavigateToPreviewComment 打开预览评论页回调
  * @param onNavigateToVideo 打开视频详情回调
  * @param previewViewModel 预览 ViewModel
@@ -68,8 +64,6 @@ import java.time.LocalDate
 @Composable
 fun PreviewScreen(
     onBack: () -> Unit,
-    onNavigateToGetchuPreview: () -> Unit,
-    onNavigateToGetchuDetail: (String) -> Unit,
     onNavigateToPreviewComment: (String, String) -> Unit,
     onNavigateToVideo: (String) -> Unit,
     previewViewModel: PreviewViewModel,
@@ -80,9 +74,6 @@ fun PreviewScreen(
     val imageLoader = remember(context) { SingletonImageLoader.get(context) }
     val previewState = previewViewModel.previewFlow.collectAsStateWithLifecycle().value
     val archiveState = previewViewModel.archiveFlow.collectAsStateWithLifecycle().value
-    // Getchu 发售表就是 /previews/{yyyyMM} 那个月历页的数据源，日期码格式与本站一致。
-    val getchuViewModel: GetchuPreviewViewModel = viewModel()
-    val getchuState = getchuViewModel.previewFlow.collectAsStateWithLifecycle().value
     val commentCount = PreviewCommentPrefetcher.here(commentViewModel)
         .commentFlow
         .collectAsStateWithLifecycle()
@@ -125,16 +116,6 @@ fun PreviewScreen(
     }
     var imageViewerState by remember { mutableStateOf<PreviewImageViewerState?>(null) }
     var monthAnimationDirection by remember { mutableIntStateOf(1) }
-    /**
-     * 日历页当前在哪个标签。
-     *
-     * 默认停在**已上架**：用户点「日历 / 新番」想知道的是「这个月已经出来的里番有哪些」，
-     * 那是 hanime 的按上市月列表；Getchu 的发售表（还没发售的预定表）留在第二个标签里。
-     * 26.8.4 曾把默认放在发售表上，可那一版里「已上架」因为检索条件过窄整月为空，
-     * 于是用户点进来看到的不是他要的那批。
-     */
-    var selectedTabOrdinal by rememberSaveable { mutableIntStateOf(PreviewTab.Hanime.ordinal) }
-    val selectedTab = PreviewTab.entries[selectedTabOrdinal]
     val currentDateCode = routeState.currentDateCode
     val selectedIndex = routeState.selectedIndex
     /** 当前月份是否已进入站方预告停更区间（202605 起）：是则改用「按上市月份检索」 */
@@ -214,16 +195,11 @@ fun PreviewScreen(
         monthHeaderState = monthHeaderState,
         imageViewerState = imageViewerState,
         archiveState = archiveState,
-        selectedTab = selectedTab,
-        getchuState = getchuState,
     )
 
     val handleEvent: (PreviewEvent) -> Unit = { event ->
         when (event) {
             PreviewEvent.OnBack -> onBack()
-            is PreviewEvent.OnSelectTab -> selectedTabOrdinal = event.tab.ordinal
-            is PreviewEvent.OnOpenGetchuDetail -> onNavigateToGetchuDetail(event.id)
-            PreviewEvent.OnRetryGetchu -> getchuViewModel.getPreview(currentDateCode)
             is PreviewEvent.OnPrevMonth -> {
                 monthAnimationDirection = -1
                 routeState = routeState.copy(
@@ -251,9 +227,11 @@ fun PreviewScreen(
             }
             PreviewEvent.OnDismissImageViewer -> { imageViewerState = null }
             is PreviewEvent.OnOpenVideo -> event.videoCode?.let(onNavigateToVideo)
-            PreviewEvent.OnOpenGetchuPreview -> onNavigateToGetchuPreview()
+            // 「访问网页版」= 站方自己的预告页。
+            // ⚠️ 用 `SettingsRepository.hanimeBaseUrl` 而不是 `HANIME_BASE_URL`：后者会跟着
+            // 当前数据源变成 njavtv.com / pornhub.com（见 MEMORY 里 2026-09-14 那条教训）。
             PreviewEvent.OnOpenWebPreview -> uriHandler.openUri(
-                "https://www.getchu.com/"
+                "${SettingsRepository.hanimeBaseUrl}previews/${uiState.routeState.currentDateCode}"
             )
             is PreviewEvent.OnOpenComment -> onNavigateToPreviewComment(event.label, event.dateCode)
             PreviewEvent.OnRetryLoad -> {
@@ -277,19 +255,12 @@ fun PreviewScreen(
 
     LaunchedEffect(currentDateCode) {
         if (isArchiveMonth) {
-            // 站方预告已停更：两个数据源各取各的 ——
-            // 「发售表」= Getchu 该月预定发售；「已上架」= hanime 该月已上线。
+            // 站方预告已停更：改用站内检索列出该月已上线的里番。
             val year = previewYearOf(currentDateCode)
             val month = previewMonthOf(currentDateCode)
             if (year != null && month != null) {
                 previewViewModel.loadArchiveMonth(year, month)
             }
-            getchuViewModel.getPreview(currentDateCode)
-            // 顺手把前后一个月也取回来（只落缓存、不动画面）：翻月是这一页最常见的
-            // 动作，而一次发售表请求经中转要 500–700 ms，预取能让翻月接近瞬时。
-            // ⚠️ 只预取「已经到的月份」：往后的月份 Getchu 还没有发售表，白打一次请求。
-            getchuViewModel.preloadPreview(prevDateCode)
-            if (nextDateCode <= thisMonthCode) getchuViewModel.preloadPreview(nextDateCode)
         } else {
             previewViewModel.clearArchive()
             previewViewModel.getHanimePreview(currentDateCode)

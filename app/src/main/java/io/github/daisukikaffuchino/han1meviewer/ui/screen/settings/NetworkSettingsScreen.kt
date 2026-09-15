@@ -32,9 +32,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.daisukikaffuchino.han1meviewer.R
-import io.github.daisukikaffuchino.han1meviewer.logic.network.DiagItem
-import io.github.daisukikaffuchino.han1meviewer.logic.network.DiagLevel
-import io.github.daisukikaffuchino.han1meviewer.logic.network.DiagReport
 import io.github.daisukikaffuchino.han1meviewer.logic.network.DohConfig
 import io.github.daisukikaffuchino.han1meviewer.logic.network.HProxySelector
 import io.github.daisukikaffuchino.han1meviewer.ui.component.ChoiceDialog
@@ -140,12 +137,6 @@ fun NetworkSettingsScreen(
     onDismissDelayTest: () -> Unit,
     onDismissDohTest: () -> Unit,
     onApplyProxy: (ProxyConfig) -> Unit,
-    /** 一键网络诊断：null 表示还没跑/已关闭，null + isDiagnosing 表示正在跑。 */
-    diagReport: DiagReport? = null,
-    isDiagnosing: Boolean = false,
-    onOpenDiagnostics: () -> Unit = {},
-    onDismissDiagnostics: () -> Unit = {},
-    onCopyDiagReport: (DiagReport) -> Unit = {},
     /** 中转节点池。 */
     showRelayNodes: Boolean = false,
     relayNodeUi: RelayNodeUiState = RelayNodeUiState(),
@@ -156,11 +147,6 @@ fun NetworkSettingsScreen(
     mirrorUi: MirrorUiState = MirrorUiState(),
     mirrorActions: MirrorActions = MirrorActions(),
     onOpenMirrorPool: () -> Unit = {},
-    /** 一键网络自愈。 */
-    showSelfHeal: Boolean = false,
-    selfHealUi: SelfHealUiState = SelfHealUiState(),
-    selfHealActions: SelfHealActions = SelfHealActions(),
-    onOpenSelfHeal: () -> Unit = {},
     embedded: Boolean = false,
 ) {
     var showDomainDialog by rememberSaveable { mutableStateOf(false) }
@@ -273,15 +259,6 @@ fun NetworkSettingsScreen(
         )
     }
 
-    if (isDiagnosing || diagReport != null) {
-        DiagDialog(
-            report = diagReport,
-            onDismiss = onDismissDiagnostics,
-            onRerun = onOpenDiagnostics,
-            onCopy = onCopyDiagReport,
-        )
-    }
-
     if (showRelayNodes) {
         RelayNodesDialog(
             state = relayNodeUi,
@@ -293,13 +270,6 @@ fun NetworkSettingsScreen(
         MirrorPoolDialog(
             state = mirrorUi,
             actions = mirrorActions,
-        )
-    }
-
-    if (showSelfHeal) {
-        SelfHealDialog(
-            state = selfHealUi,
-            actions = selfHealActions,
         )
     }
 
@@ -405,18 +375,6 @@ fun NetworkSettingsScreen(
                     summary = stringResource(R.string.test_doh_summary),
                     iconRes = R.drawable.ic_router,
                     onClick = onOpenDohTest,
-                )
-                SettingNavigationItem(
-                    title = stringResource(R.string.diag_run),
-                    summary = stringResource(R.string.diag_run_summary),
-                    iconRes = R.drawable.ic_dns,
-                    onClick = onOpenDiagnostics,
-                )
-                SettingNavigationItem(
-                    title = stringResource(R.string.self_heal),
-                    summary = stringResource(R.string.self_heal_summary),
-                    iconRes = R.drawable.ic_heal,
-                    onClick = onOpenSelfHeal,
                 )
             }
         }
@@ -672,81 +630,6 @@ private fun DohTestDialog(
         },
         dismissButton = {},
     )
-}
-
-@Composable
-private fun DiagDialog(
-    report: DiagReport?,
-    onDismiss: () -> Unit,
-    onRerun: () -> Unit,
-    onCopy: (DiagReport) -> Unit,
-) {
-    val items = report?.items.orEmpty()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.diag_title)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (items.isEmpty()) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-                Column(
-                    modifier = Modifier
-                        .heightIn(max = 420.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items.forEach { item -> DiagRow(item) }
-                }
-                if (report != null && !report.finished) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
-        },
-        confirmButton = {
-            if (report?.finished == true) {
-                TextButton(onClick = { onCopy(report) }) {
-                    Text(stringResource(R.string.diag_copy))
-                }
-            }
-            TextButton(onClick = onRerun) {
-                Text(stringResource(R.string.diag_rerun))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.confirm))
-            }
-        },
-    )
-}
-
-@Composable
-private fun DiagRow(item: DiagItem) {
-    val color = when (item.level) {
-        DiagLevel.PASS -> Color(0xFF4CAF50)
-        DiagLevel.WARN -> Color(0xFFFFC107)
-        DiagLevel.FAIL -> Color(0xFFF44336)
-        DiagLevel.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(text = "●", color = color)
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(text = item.title, style = MaterialTheme.typography.titleSmall)
-            Text(
-                text = item.detail,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            item.advice?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = color,
-                )
-            }
-        }
-    }
 }
 
 @Composable

@@ -1,6 +1,7 @@
 package io.github.daisukikaffuchino.han1meviewer.ui.screen.artist
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -125,8 +126,9 @@ fun ArtistScreen(
     val profile = state.profile
     val displayName = profile?.name?.takeIf { it.isNotBlank() }
         ?: target.name.ifBlank { stringResource(R.string.artist_page_title) }
-    // ⭐ 26.8：用户要求的排版 —— **3 列**，一页 12 条正好 4 行。
-    // 不再按屏宽自适应：列数一变，「一页 12 条 = 几行」就不确定了。
+    // ⭐ 9.0：用户要求的排版 —— **2 列**，一页 12 条正好 6 行。
+    // 26.8 是 3 列 × 4 行，但 3 列时每格封面被压得很窄，封面上的编号/标题看不清。
+    // 与「按屏宽自适应」也刻意不同：列数一变，「一页 12 条 = 几行」就不确定了。
     val videoColumns = ArtistViewModel.COLUMNS
 
     HanimeScaffold(title = displayName, onBack = navigateBack) { innerPadding ->
@@ -153,6 +155,7 @@ fun ArtistScreen(
                 onRetry = viewModel::retry,
                 onPrevPage = viewModel::prevPage,
                 onNextPage = viewModel::nextPage,
+                onGoToPage = viewModel::goToPage,
                 onSortChange = viewModel::setSort,
                 onFilterChange = viewModel::setFilter,
             )
@@ -195,6 +198,7 @@ private fun ArtistVideoGrid(
     onRetry: () -> Unit,
     onPrevPage: () -> Unit,
     onNextPage: () -> Unit,
+    onGoToPage: (Int) -> Unit,
     onSortChange: (String?) -> Unit,
     onFilterChange: (String?) -> Unit,
 ) {
@@ -281,7 +285,7 @@ private fun ArtistVideoGrid(
             return@LazyVerticalGrid
         }
 
-        // 只画**这一页的 12 条**（3 列 × 4 行）。翻页由下面的翻页行控制，
+        // 只画**这一页的 12 条**（2 列 × 6 行）。翻页由下面的分页条控制，
         // 不再无限往下滚 —— 用户能知道「一共翻到第几页」，也能回到上一页。
         items(state.videos.size, key = { state.videos[it].videoCode }) { index ->
             val video = state.videos[index]
@@ -303,6 +307,7 @@ private fun ArtistVideoGrid(
                 isPaging = state.isPaging,
                 onPrev = onPrevPage,
                 onNext = onNextPage,
+                onGoToPage = onGoToPage,
                 footer = {
                     // 补拉失败要说出来：否则「翻不动了」和「真的没有了」长得一模一样。
                     val failure = state.state as? PageLoadingState.Error
@@ -401,14 +406,23 @@ private fun ArtistSortFilterRow(
 }
 
 /**
- * 作品列表的**翻页行**（26.8）。
+ * 作品列表的**分页条**（26.8 引入，9.0 加编号）。
  *
  * 为什么要有它：站点一页给 30–49 条，直接铺出来是一条长瀑布 —— 用户既不知道一共多少，
- * 也没法退回去。这里固定「一页 12 条（3 列 × 4 行）」，用上一页/下一页控制，
- * 页数随加载增长（翻到已知边界时后台续拉，用户感觉不到停顿）。
+ * 也没法退回去。这里固定「一页 12 条（2 列 × 6 行）」。
+ *
+ * ## 9.0：从「上一页 / 下一页」扩成编号分页条
+ *
+ * 只给两个按钮时，用户站在第 1 页要去第 9 页得点 8 次，而且**始终看不到一共有多少页**。
+ * 现在：
+ * - 总页数由站点公布的作品数一次算准（见 `ArtistViewModel.knownTotalPages`），
+ *   所以第一页进来就能画出完整的页码条；
+ * - 首页与末页**永远显示**（它们是「还有多少」的锚点），中间以当前页为中心开一个
+ *   小窗口（[pagerItems]），缺口用 `…` 表示 —— 页数再多也不会把这一行撑爆；
+ * - 「上一页 / 下一页」两个按钮**保留**（用户明确要求），放在页码条下面一行。
  *
  * @param isPaging 正在续拉站点数据：此时按钮禁用并显示小转圈，而不是让用户重复点。
- * @param footer 翻页行下方的补充内容（例如「补拉失败 + 重试」）。
+ * @param footer 分页条下方的补充内容（例如「补拉失败 + 重试」）。
  */
 @Composable
 private fun ArtistPager(
@@ -419,6 +433,7 @@ private fun ArtistPager(
     isPaging: Boolean,
     onPrev: () -> Unit,
     onNext: () -> Unit,
+    onGoToPage: (Int) -> Unit,
     footer: @Composable () -> Unit = {},
 ) {
     Column(
@@ -426,8 +441,37 @@ private fun ArtistPager(
             .fillMaxWidth()
             .padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        // totalPages <= 1 时不画：只有一页还摆一排数字，纯属噪音。
+        if (totalPages > 1) {
+            val pagerItems = remember(page, totalPages) { pagerItems(page, totalPages) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                PagerArrow(enabled = canPrev && !isPaging, text = "‹", onClick = onPrev)
+                pagerItems.forEach { number ->
+                    if (number == null) {
+                        Text(
+                            text = "…",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 2.dp),
+                        )
+                    } else {
+                        PagerNumber(
+                            number = number,
+                            selected = number == page,
+                            enabled = !isPaging,
+                            onClick = { onGoToPage(number) },
+                        )
+                    }
+                }
+                PagerArrow(enabled = canNext && !isPaging, text = "›", onClick = onNext)
+            }
+        }
+
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -449,6 +493,99 @@ private fun ArtistPager(
             }
         }
         footer()
+    }
+}
+
+/**
+ * 分页条要画哪几个页码。
+ *
+ * 返回的列表里 `null` 表示省略号。规则：
+ * - 总页数不超过 [maxNumbers] 就全画；
+ * - 否则**首页与末页永远画**（「一共有多少页」的锚点，缺了它页码条就失去意义），
+ *   中间以当前页为中心开一个 [maxNumbers] 宽的窗口，夹在 `[1, totalPages]` 内。
+ */
+private fun pagerItems(page: Int, totalPages: Int, maxNumbers: Int = 3): List<Int?> {
+    if (totalPages <= 1) return emptyList()
+    if (totalPages <= maxNumbers) return (1..totalPages).toList()
+
+    val half = maxNumbers / 2
+    var start = page - half
+    var end = start + maxNumbers - 1
+    if (start < 1) {
+        start = 1
+        end = maxNumbers
+    }
+    if (end > totalPages) {
+        end = totalPages
+        start = totalPages - maxNumbers + 1
+    }
+
+    return buildList {
+        if (start > 1) {
+            add(1)
+            if (start > 2) add(null)
+        }
+        for (p in start..end) add(p)
+        if (end < totalPages) {
+            if (end < totalPages - 1) add(null)
+            add(totalPages)
+        }
+    }
+}
+
+/** 页码条两端的 `‹` / `›`（等价于上一页 / 下一页，位置更顺手）。 */
+@Composable
+private fun PagerArrow(enabled: Boolean, text: String, onClick: () -> Unit) {
+    val view = LocalView.current
+    val contentColor = if (enabled) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .clickable(enabled = enabled) {
+                VibrationUtil.performHapticFeedback(view)
+                onClick()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text = text, color = contentColor, style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+/** 单个页码。当前页用主色填充，其余是静音底。 */
+@Composable
+private fun PagerNumber(number: Int, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val view = LocalView.current
+    val background = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val contentColor = if (selected) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(background)
+            .clickable(enabled = enabled && !selected) {
+                VibrationUtil.performHapticFeedback(view)
+                onClick()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = number.toString(),
+            color = contentColor,
+            style = MaterialTheme.typography.labelLarge,
+        )
     }
 }
 

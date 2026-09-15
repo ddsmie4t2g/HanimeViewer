@@ -1,5 +1,6 @@
 package io.github.daisukikaffuchino.han1meviewer.ui.screen.home.myplaylist
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -49,6 +50,9 @@ import io.github.daisukikaffuchino.utils.VibrationUtil
  * @param navigateBack 返回回调
  * @param onClickItem 点击视频项回调
  * @param onLongClickItem 长按视频项回调
+ * @param titleRes 顶栏标题。⭐ 9.0：收藏夹复用本页面，标题要能换（默认 [R.string.my_list]）。
+ * @param createLabelRes 新建按钮 / 新建弹窗的标题（收藏夹用 [R.string.create_new_collection]）。
+ * @param emptyListRes 一条列表都没有时的提示。
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -57,6 +61,9 @@ fun PlaylistScreen(
     navigateBack: () -> Unit,
     onClickItem: (String) -> Unit,
     onLongClickItem: (String, String) -> Unit,
+    @StringRes titleRes: Int = R.string.my_list,
+    @StringRes createLabelRes: Int = R.string.create_new_playlist,
+    @StringRes emptyListRes: Int = R.string.no_custom_playlist_hint,
 ) {
     val state by viewModel.myPlaylistsFlow.collectAsState()
     val uiState by viewModel.mainUiState.collectAsState()
@@ -124,7 +131,7 @@ fun PlaylistScreen(
 
     HanimeScaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        title = stringResource(R.string.my_list),
+        title = stringResource(titleRes),
         onBack = navigateBack,
         scrollBehavior = scrollBehavior,
         floatingActionButton = {
@@ -136,14 +143,14 @@ fun PlaylistScreen(
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_add),
-                    contentDescription = stringResource(R.string.create_new_playlist)
+                    contentDescription = stringResource(createLabelRes)
                 )
             }
         },
     ) { innerPadding ->
         if (showCreatePlaylistDialog) {
             PlaylistEditDialog(
-                title = stringResource(R.string.create_new_playlist),
+                title = stringResource(createLabelRes),
                 onConfirm = { title, description ->
                     handleEvent(PlaylistEvent.OnCreatePlaylist(title, description))
                 },
@@ -165,7 +172,12 @@ fun PlaylistScreen(
                     if (uiState.playlists.isEmpty()) {
                         LoadingIndicator(Modifier.align(Alignment.Center))
                     } else {
-                        PlaylistContent(uiState = uiState, onEvent = handleEvent, rawState = state)
+                        PlaylistContent(
+                            uiState = uiState,
+                            onEvent = handleEvent,
+                            rawState = state,
+                            emptyHintRes = emptyListRes,
+                        )
                     }
                 }
 
@@ -179,12 +191,22 @@ fun PlaylistScreen(
                             picRes = R.drawable.h_chan_sad
                         )
                     } else {
-                        PlaylistContent(uiState = uiState, onEvent = handleEvent, rawState = state)
+                        PlaylistContent(
+                            uiState = uiState,
+                            onEvent = handleEvent,
+                            rawState = state,
+                            emptyHintRes = emptyListRes,
+                        )
                     }
                 }
 
                 is WebsiteState.Success -> {
-                    PlaylistContent(uiState = uiState, onEvent = handleEvent, rawState = state)
+                    PlaylistContent(
+                            uiState = uiState,
+                            onEvent = handleEvent,
+                            rawState = state,
+                            emptyHintRes = emptyListRes,
+                        )
                 }
             }
 

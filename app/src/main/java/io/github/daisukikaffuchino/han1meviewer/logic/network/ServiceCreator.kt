@@ -4,7 +4,6 @@ import io.github.daisukikaffuchino.han1meviewer.logic.network.HProxyAuthenticato
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.CdnRelayInterceptor
 import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.CloudflareInterceptor
-import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.GetchuInterceptor
 import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.SpeedLimitInterceptor
 import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.UrlLoggingInterceptor
 import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.UserAgentInterceptor
@@ -12,7 +11,6 @@ import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavPlaybackIntercept
 import io.github.daisukikaffuchino.utils.applicationContext
 import io.github.daisukikaffuchino.utils.unsafeLazy
 import okhttp3.Cache
-import okhttp3.CookieJar
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import retrofit2.Retrofit
@@ -43,12 +41,6 @@ object ServiceCreator {
         .build()
         .create(T::class.java)
 
-    inline fun <reified T> createGetchu(baseUrl: String): T = Retrofit.Builder()
-        .baseUrl(baseUrl)
-        .client(getchuClient)
-        .build()
-        .create(T::class.java)
-
     /**
      * OkHttpClient
      */
@@ -58,45 +50,11 @@ object ServiceCreator {
     var downloadClient: OkHttpClient = buildDownloadClient()
         private set
 
-    var getchuClient: OkHttpClient = buildGetchuClient()
-        private set
-
     /**
      * Rebuild OkHttpClient
      */
     fun rebuildOkHttpClient() {
         hClient = buildHClient()
-        getchuClient = buildGetchuClient()
-    }
-
-    /**
-     * getchu（新番预告 / 发售表）专用 client。
-     *
-     * ⚠️ 26.8.3：**只有这一个 client** 额外挂 [CdnRelay] 的信任链与改道拦截器 ——
-     * `www.getchu.com` 从大陆直连不通（用户看到的就是「连接被中断，可能是当前网络不稳定
-     * 或服务器主动断开」，那句话把「域名级不可达」说成了线路抖动，所以重试没有意义），
-     * 而中转服务器（`build/relay/relay.py` v5）的白名单里已经有 `getchu.com`。
-     *
-     * 拦截器顺序有讲究：[CdnRelayInterceptor] 放在 [GetchuInterceptor] **之后**。
-     * 请求头（UA / Referer / Cookie / Accept）由 GetchuInterceptor 补，CdnRelayInterceptor
-     * 只换 URL。顺序反过来的话 URL 已经被换成中转地址，再按「原始 host」补头就会补错，
-     * 中转侧也拿不到 getchu 要的 `Referer`（不带 Referer 会 403）。
-     *
-     * ⚠️ 别顺手把 26.8.4 那套连接池 / 调度器（`NetworkTuning`）也搬回来 ——
-     * 用户明确报过那一套把网络改坏了，本版就是把它整体撤掉之后重发的。
-     */
-    private fun buildGetchuClient(): OkHttpClient {
-        return OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .sslSocketFactory(CdnRelay.sslContext.socketFactory, CdnRelay.trustManager)
-            .addInterceptor(UrlLoggingInterceptor())
-            .addInterceptor(GetchuInterceptor())
-            .addInterceptor(CdnRelayInterceptor())
-            .cookieJar(CookieJar.NO_COOKIES)
-            .proxySelector(HProxySelector())
-            .proxyAuthenticator(HProxyAuthenticator.http)
-            .dns(dns)
-            .build()
     }
 
     /**

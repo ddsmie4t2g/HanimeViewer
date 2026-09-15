@@ -46,6 +46,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.daisukikaffuchino.han1meviewer.R
+import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.MainDrawerDestination
 import io.github.daisukikaffuchino.han1meviewer.ui.preview.ComponentPreview
 import io.github.daisukikaffuchino.han1meviewer.ui.theme.HanimeDefaults
@@ -64,6 +65,14 @@ fun MainActivityScaffold(
     isLoggedIn: Boolean,
     isLoading: Boolean,
     currentSite: String,
+    /**
+     * 当前数据源（9.0）。
+     *
+     * 抽屉里有些条目**只对一个站点有意义** —— 「hanime 站点账号」是 hanime 站自己的
+     * 登录态（订阅 / 在线清单 / 评论），切到 nJAV / Pornhub 之后它就是一个
+     * 点了也没用的东西（用户的原话：「njav 站点时侧边栏里的 hanime 站点账号就不应该存在」）。
+     */
+    siteSource: SiteSource,
     checkInEnabled: Boolean,
     onAvatarClick: () -> Unit,
     onAvatarLongClick: () -> Unit,
@@ -98,6 +107,7 @@ fun MainActivityScaffold(
             isLoggedIn = isLoggedIn,
             isLoading = isLoading,
             currentSite = currentSite,
+            siteSource = siteSource,
             checkInEnabled = checkInEnabled,
             onAvatarClick = onAvatarClick,
             onAvatarLongClick = onAvatarLongClick,
@@ -157,6 +167,7 @@ private fun MainDrawerContent(
     isLoggedIn: Boolean,
     isLoading: Boolean,
     currentSite: String,
+    siteSource: SiteSource,
     checkInEnabled: Boolean,
     onAvatarClick: () -> Unit,
     onAvatarLongClick: () -> Unit,
@@ -186,12 +197,15 @@ private fun MainDrawerContent(
         )
         MainDrawerSection(
             titleRes = R.string.account_section,
-            items = listOf(
+            items = buildList {
                 // 自建账号在前：**一个号统筹三个站点**（关注 / 本机清单 / 观看记录）。
-                MainDrawerDestination.MyAccount,
-                // hanime 站点账号在后，名字里就写明只属于 hanime（订阅/清单/评论）。
-                MainDrawerDestination.SiteAccount,
-            ),
+                add(MainDrawerDestination.MyAccount)
+                // hanime 站点账号是 hanime 自己的登录态（订阅/在线清单/评论），
+                // 名字里就写明只属于 hanime。
+                // ⭐ 9.0：切到 nJAV / Pornhub 时**不显示**它 —— 那两个站没有「hanime 账号」
+                // 这回事，摆在那里只会让人点进去发现什么都做不了（用户报的原话）。
+                if (siteSource == SiteSource.Hanime1) add(MainDrawerDestination.SiteAccount)
+            },
             selectedDestination = selectedDestination,
             onItemClick = { onDrawerItemSelected(it) },
         )
@@ -201,6 +215,8 @@ private fun MainDrawerContent(
                 MainDrawerDestination.WatchLater,
                 MainDrawerDestination.FavVideo,
                 MainDrawerDestination.Playlist,
+                // ⭐ 9.0：收藏夹与播放清单并列，但作用域互不相干（各自查各自的 kind）。
+                MainDrawerDestination.Favorites,
                 MainDrawerDestination.Subscription,
             ),
             selectedDestination = selectedDestination,
@@ -341,6 +357,7 @@ private fun MainActivityScaffoldPreview() {
             isLoggedIn = true,
             isLoading = false,
             currentSite = "https://hanime1.me/",
+            siteSource = SiteSource.Hanime1,
             checkInEnabled = true,
             onAvatarClick = {},
             onAvatarLongClick = {},

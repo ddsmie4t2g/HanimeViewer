@@ -124,20 +124,9 @@ object CdnRelay {
      */
     private val BLOCKED_HOSTS = setOf(
         "hembed.com",   // hanime 全部视频（vdownload.hembed.com）与全部封面图
-        "fourhoi.com",  // nJAV 封面
+        "fourhoi.com",  // nJAV 封面与女优头像
         "pornhub.com",  // Pornhub 站点本体（HTML / JSON API）
         "phncdn.com",   // Pornhub 全部封面与视频 CDN（pix-*.phncdn.com / ev-h.phncdn.com …）
-
-        // 「新番预告 / 发售表」的数据源（`all/month_title.html`，EUC-JP 的 HTML）。
-        //
-        // ⚠️ 26.8.3：**只把 getchu 这一个域名挂回来**，其余网络改动一律保持 26.8.2 的基线。
-        // 原因：`www.getchu.com` 从大陆直连不通（用户实测就是那句「连接被中断」），
-        // 而中转那台服务器的白名单里已经有它（`build/relay/relay.py` v5 的 ALLOW_SUFFIXES）。
-        //
-        // ⚠️ 刻意**不放**进 ALWAYS_RELAY_HOSTS：getchu 在海外能直连，海外用户不该被强绕
-        // 一趟美国；代价只是大陆用户进程内第一次请求白撞一次 RST，之后 [isKnownDead]
-        // 记着，后面全走中转。
-        "getchu.com",
     )
 
     /**
@@ -207,6 +196,45 @@ object CdnRelay {
     fun isKnownDead(host: String): Boolean = directIsKnownDead.contains(host.lowercase())
 
     fun markKnownDead(host: String) = directIsKnownDead.add(host.lowercase())
+
+    /**
+     * 「此刻正有请求在试探该 host 的直连」。
+     *
+     * ## 为什么需要它
+     *
+     * [directIsKnownDead] 只挡得住**已经失败过**的请求。而冷启动那一瞬间，
+     * 首页/列表页会**同时**发出 20–30 个封面请求（同一批图都在 `vdownload.hembed.com`
+     * 或 `fourhoi.com` 上）—— 那时还没有任何一次失败可以借鉴，于是 30 个请求
+     * **一起**去撞同一堵墙，每个都白等 0.8–2.6 s。用户感知就是
+     * 「一打开 App，封面转半天才出来」。
+     *
+     * 这里让同一 host 的并发请求里**只有第一个**去试直连，其余直接走中转。
+     * 一次撞墙就够得出结论了 —— 直连能不能通是 host 级的事实，跟并发数无关。
+     *
+     * ## 为什么不是「一律中转」
+     *
+     * 挂了自己的代理 / VPN 的用户**直连是通的**（`hembed` 只在境内被墙），
+     * 强制中转会把他们本来最快的那条路堵死。这个「只探一次」的闸门刚好要的是
+     * 两全：省掉重复撞墙，又不剥夺「有人本来就能直连」这件事。
+     *
+     * ⚠️ 闸门只在**试探期间**关着，探完立刻放行，所以不存在「一旦走过中转就永远走中转」。
+     * 万一某个线程异常退出导致闸门没复位，后果也只是该 host 这一次会话多绕中转
+     * （图片照样出得来），不会黑图。
+     */
+    private val directProbeInFlight = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * 尝试成为该 host 的**唯一**直连试探者。
+     *
+     * @return true = 由本次请求负责试直连（用完必须 [endDirectProbe]）；
+     *         false = 已有别的请求在试，本次直接走中转。
+     */
+    fun tryBeginDirectProbe(host: String): Boolean = directProbeInFlight.add(host.lowercase())
+
+    /** 释放试探闸门。**必须放在 `finally` 里**，否则该 host 会一直被别人当作「正在探测」。 */
+    fun endDirectProbe(host: String) {
+        directProbeInFlight.remove(host.lowercase())
+    }
 
     /** 用户可在设置里关掉（隐私 / 自己的线路本来就能直连时没必要绕）。 */
     val enabled: Boolean

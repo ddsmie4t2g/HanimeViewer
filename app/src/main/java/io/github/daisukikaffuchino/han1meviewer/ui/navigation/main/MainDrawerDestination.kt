@@ -59,6 +59,18 @@ enum class MainDrawerDestination(
         iconRes = R.drawable.ic_format_list_bulleted,
         titleRes = R.string.play_list,
     ),
+    /**
+     * **收藏夹**（9.0 新增）。
+     *
+     * 与 [Playlist] 分开成两个入口（用户明确要求「新建独立收藏夹」）：
+     * 播放清单是「连着看完的一串」，收藏夹是「按主题收起来的最爱」，
+     * 混在一起时两边都得靠标题去猜。
+     */
+    Favorites(
+        route = MyFavoritesRoute,
+        iconRes = R.drawable.ic_book,
+        titleRes = R.string.favorite_collections,
+    ),
     Subscription(
         route = SubscriptionRoute,
         iconRes = R.drawable.ic_subscribtion,

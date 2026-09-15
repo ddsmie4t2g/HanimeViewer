@@ -2,6 +2,7 @@ package io.github.daisukikaffuchino.han1meviewer.logic.network
 
 import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.CdnRelayInterceptor
 import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.ImageRelayInterceptor
+import io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.ImageRetryInterceptor
 import io.github.daisukikaffuchino.utils.unsafeLazy
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -22,6 +23,9 @@ import java.util.concurrent.TimeUnit
  *   URL 不外泄给第三方）。正常情况下轮不到下面那层。
  * - [ImageRelayInterceptor]：上一层的**兜底** —— 只有自建中转也拿不到时才退到 `wsrv.nl`。
  *   保留它是因为它不依赖任何自有设施，自建中转哪天挂了封面还不至于全黑。
+ * - [ImageRetryInterceptor]（9.0）：**装在最外层**，跨洋链路抖一次不至于让这张封面永久
+ *   停在 `loadfailed`。放最外层是有意的：重试会重新走一遍「直连还是中转」的判定，
+ *   第一次撞墙留下的 [CdnRelay.isKnownDead] 结论能让重试直接走中转。
  */
 object ImageNetworkClient {
 
@@ -33,6 +37,7 @@ object ImageNetworkClient {
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)
             .dns(HDns())
+            .addInterceptor(ImageRetryInterceptor())
             .addInterceptor(CdnRelayInterceptor())
             .addInterceptor(ImageRelayInterceptor())
             .build()

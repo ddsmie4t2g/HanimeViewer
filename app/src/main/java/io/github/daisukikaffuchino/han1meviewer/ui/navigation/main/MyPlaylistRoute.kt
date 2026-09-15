@@ -32,7 +32,11 @@ fun MyPlaylistRouteScreen(
             },
         )
     } else {
-        val viewModel: LocalPlayListViewModel = viewModel(key = "local_playlist")
+        // ⭐ 9.0：`LocalPlayListViewModel` 现在带一个 `kind` 参数（默认 = 播放清单），
+        // 所以显式给 initializer，不再依赖「全默认参数 ⇒ 合成无参构造 + 反射」那条路。
+        val viewModel: LocalPlayListViewModel = viewModel(key = "local_playlist") {
+            LocalPlayListViewModel()
+        }
         PlaylistScreen(
             viewModel = viewModel,
             navigateBack = onBack,

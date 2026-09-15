@@ -34,11 +34,11 @@ import io.github.daisukikaffuchino.han1meviewer.ui.theme.HanimeDefaults
  *
  * | 数据源 | 按钮 | 去向 |
  * |---|---|---|
- * | hanime | 📅 日历 / 新番 | [PreviewRoute]（Getchu 发售表 + 按上市月归档） |
+ * | hanime | 📅 日历 / 新番 | [PreviewRoute]（按上市月归档 + 站方预告） |
  * | nJAV | 👥 浏览（女优一览 / 女优排行） | [ActressGalleryRoute] |
  * | Pornhub | **不显示** | —— |
  *
- * 为什么 Pornhub 干脆不给：日历页读的是 hanime 按月归档与 Getchu 预告，
+ * 为什么 Pornhub 干脆不给：日历页读的是 hanime 按月归档，
  * Pornhub 下点进去只有一整页空态（`getHanimeArchiveByMonth` 对 AV 站直接返回
  * NoMoreData），摆在那里只会让人以为坏了。
  */

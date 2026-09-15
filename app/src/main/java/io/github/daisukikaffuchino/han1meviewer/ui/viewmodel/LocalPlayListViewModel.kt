@@ -24,9 +24,21 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * 免登录本地播放清单 ViewModel，实现与在线版相同的 [PlaylistController] 接口。
+ * 免登录本地「自建列表」ViewModel，实现与在线版相同的 [PlaylistController] 接口。
+ *
+ * ⭐ 9.0 起用一个 `kind` 参数同时服务两种列表：
+ * - `PLAYLIST_KIND` → 播放清单（`MyPlaylistRoute`）
+ * - `FAVORITE_COLLECTION_KIND` → **收藏夹**（`MyFavoritesRoute`）
+ *
+ * 两者的行为完全一样（新建 / 改名 / 删除 / 增删条目），差别只有「查哪一类」，
+ * 所以没有拆成两个 ViewModel —— 拆开只会让两边的 bug 各修一遍。
+ *
+ * ⚠️ [kind] 有默认值 ⇒ Kotlin 会额外生成一个无参构造，原来
+ * `viewModel(key = "local_playlist")` 那种反射式创建照样能用。
  */
-class LocalPlayListViewModel : ViewModel(), PlaylistController {
+class LocalPlayListViewModel(
+    private val kind: String = LocalListRepository.PLAYLIST_KIND,
+) : ViewModel(), PlaylistController {
 
     private val _myPlaylistsFlow = MutableStateFlow<WebsiteState<Playlists>>(WebsiteState.Loading)
     override val myPlaylistsFlow: StateFlow<WebsiteState<Playlists>> = _myPlaylistsFlow.asStateFlow()
@@ -89,7 +101,7 @@ class LocalPlayListViewModel : ViewModel(), PlaylistController {
 
     init {
         viewModelScope.launch {
-            LocalListRepository.observePlaylists().collect { playlists ->
+            LocalListRepository.observeListsByKind(kind).collect { playlists ->
                 _cachedMyPlayList.value = playlists
                 _myPlaylistsFlow.value = WebsiteState.Success(Playlists(playlists))
                 _noMorePlaylists.value = true
@@ -104,7 +116,7 @@ class LocalPlayListViewModel : ViewModel(), PlaylistController {
             if (page == 1 || forceReload) {
                 _myPlaylistsFlow.value = WebsiteState.Loading
             }
-            val playlists = LocalListRepository.getPlaylistsOnce()
+            val playlists = LocalListRepository.getListsOnceByKind(kind)
             _cachedMyPlayList.value = playlists
             _myPlaylistsFlow.value = WebsiteState.Success(Playlists(playlists))
             _noMorePlaylists.value = true
@@ -210,7 +222,7 @@ class LocalPlayListViewModel : ViewModel(), PlaylistController {
     override fun createPlaylist(title: String, description: String) {
         viewModelScope.launch {
             runCatching {
-                LocalListRepository.createPlaylist(title, description)
+                LocalListRepository.createList(kind, title, description)
             }.onSuccess {
                 _createPlaylistFlow.emit(WebsiteState.Success(Unit))
             }.onFailure {

@@ -1,6 +1,7 @@
 package io.github.daisukikaffuchino.han1meviewer.logic.account
 
 import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
+import io.github.daisukikaffuchino.han1meviewer.logic.LocalListRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.dao.HistoryDatabase
 import io.github.daisukikaffuchino.han1meviewer.logic.dao.LocalListDatabase
@@ -89,6 +90,21 @@ object AccountSync {
     private const val CODE_FAVORITE = "likes"
     private const val CODE_WATCH_LATER = "save"
 
+    /**
+     * 自建列表的「本地 kind」→「快照里的 kind」（9.0）。
+     *
+     * 快照里的名字与本地**故意不完全一样**：`playlist` 两边同名是历史原因，
+     * 收藏夹则另起 `favorite_collection`。老客户端读到不认识的 kind 只会
+     * 原样留在 JSON 里（服务端把它当不透明数据），不会误当成播放清单写回本机。
+     */
+    private val KINDS_WITH_CODE = listOf(
+        LocalListRepository.PLAYLIST_KIND to "playlist",
+        LocalListRepository.FAVORITE_COLLECTION_KIND to "favorite_collection",
+    )
+
+    /** [KINDS_WITH_CODE] 的反查表：[apply] 写回本机时用。 */
+    private val CODE_TO_KIND = KINDS_WITH_CODE.associate { (local, code) -> code to local }
+
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -101,20 +117,23 @@ object AccountSync {
 
     /** 把本机数据打成一个快照。 */
     suspend fun snapshot(): AccountSnapshot {
-        val playlists = localListDao.getPlaylistsOnce()
+        // ⭐ 9.0：自建列表现在有两类（播放清单 / 收藏夹），一起同步 ——
+        // 不然换台机器登录，「收藏夹」会凭空消失。
         val lists = buildList {
-            playlists.forEach { row ->
-                add(
-                    ListSnapshot(
-                        listCode = row.listCode,
-                        kind = "playlist",
-                        title = row.title,
-                        desc = row.desc,
-                        createdAt = row.createdAt,
-                        updatedAt = row.updatedAt,
-                        items = localListDao.getItems(row.listCode).map { it.toSnapshot() },
+            for ((kind, code) in KINDS_WITH_CODE) {
+                localListDao.getListsOnceByKind(kind).forEach { row ->
+                    add(
+                        ListSnapshot(
+                            listCode = row.listCode,
+                            kind = code,
+                            title = row.title,
+                            desc = row.desc,
+                            createdAt = row.createdAt,
+                            updatedAt = row.updatedAt,
+                            items = localListDao.getItems(row.listCode).map { it.toSnapshot() },
+                        )
                     )
-                )
+                }
             }
             // 内置列表：没有元数据行，但**条目必须同步**（它们就是「我喜欢」与「稍后再看」）。
             listOf(CODE_FAVORITE to "favorite", CODE_WATCH_LATER to "watchLater").forEach { (code, kind) ->
@@ -255,11 +274,12 @@ object AccountSync {
         )
 
         snapshot.lists.forEach { list ->
-            if (list.kind == "playlist" && list.listCode.isNotBlank()) {
+            val localKind = CODE_TO_KIND[list.kind]
+            if (localKind != null && list.listCode.isNotBlank()) {
                 localListDao.upsertPlaylist(
                     LocalListEntity(
                         listCode = list.listCode,
-                        kind = "playlist",
+                        kind = localKind,
                         title = list.title,
                         desc = list.desc,
                         createdAt = if (list.createdAt > 0) list.createdAt else System.currentTimeMillis(),

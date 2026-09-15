@@ -184,6 +184,12 @@ fun TopNavigation(
                 onNavigateToVideo = onNavigateToVideo,
             )
         }
+        entry<MyFavoritesRoute> {
+            MyFavoritesRouteScreen(
+                onBack = onBack,
+                onNavigateToVideo = onNavigateToVideo,
+            )
+        }
         entry<SubscriptionRoute> {
             SubscriptionRouteScreen(
                 onBack = onBack,
@@ -528,28 +534,10 @@ fun TopNavigation(
             PreviewRouteScreen(
                 activity = activity,
                 onBack = onBack,
-                onNavigateToGetchuPreview = {
-                    backStack.add(GetchuPreviewRoute)
-                },
-                onNavigateToGetchuDetail = { id -> backStack.add(GetchuPreviewDetailRoute(id)) },
                 onNavigateToPreviewComment = { date, dateCode ->
                     backStack.add(PreviewCommentRoute(date, dateCode))
                 },
                 onNavigateToVideo = onNavigateToVideo,
-            )
-        }
-        entry<GetchuPreviewRoute>(metadata = pageTransition()) {
-            GetchuPreviewRouteScreen(
-                onBack = onBack,
-                onNavigateToDetail = { id -> backStack.add(GetchuPreviewDetailRoute(id)) },
-            )
-        }
-        entry<GetchuPreviewDetailRoute>(metadata = pageTransition()) { route ->
-            GetchuPreviewDetailRouteScreen(
-                route = route,
-                onBack = onBack,
-                onNavigateToDetail = { id -> backStack.add(GetchuPreviewDetailRoute(id)) },
-                onNavigateToVideoUrl = { url -> backStack.add(VideoRoute("-1", url)) },
             )
         }
         entry<PreviewCommentRoute>(metadata = pageTransition()) { route ->

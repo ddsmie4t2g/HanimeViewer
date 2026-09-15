@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import io.github.daisukikaffuchino.han1meviewer.ui.component.ExpandableRichText
 import io.github.daisukikaffuchino.han1meviewer.ui.component.HapticButton as Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -129,10 +130,15 @@ fun AppUpdateCard(
             }
 
             if (updateInfo.updateDescription.isNotBlank()) {
-                Text(
+                // ⭐ 9.0：更新日志按 **markdown** 渲染。
+                // `update.json` 的 `updateDescription` 本来就是 markdown（标题、加粗、表格、
+                // 引用块），以前是原样 `Text` 出来的 —— 用户看到的就是一堆 `#` 和 `**`。
+                // maxCollapsedLines 给到 8：更新说明短不了，但也不该让首页被它占满。
+                ExpandableRichText(
                     text = updateInfo.updateDescription,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    markdown = true,
+                    showContainer = false,
+                    maxCollapsedLines = 8,
                 )
             }
 

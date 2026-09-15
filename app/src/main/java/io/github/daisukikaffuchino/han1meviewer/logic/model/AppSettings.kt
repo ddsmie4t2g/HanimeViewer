@@ -177,15 +177,6 @@ data class AppSettings(
      */
     val extraMirrorsJson: String = "",
     /**
-     * 一键自愈的历史记录（JSON 数组，最多 10 条）。
-     *
-     * 只存「改动几处 / 失败几处 / 是否切了镜像」这几个数字，文案由界面按当前语言现拼 ——
-     * 存成文案的话，换语言后历史记录会永远停在当时那种语言。
-     *
-     * 由 [io.github.daisukikaffuchino.han1meviewer.logic.NetworkSelfHeal] 读写。
-     */
-    val selfHealLogJson: String = "",
-    /**
      * 置顶的搜索词（JSON 数组）。置顶的排在搜索结果页历史列表最前，且不会被自动裁剪。
      *
      * 放在设置里而不是新开一张表：置顶只是一个「顺序」问题，为它加一列就要写一次
@@ -362,6 +353,16 @@ data class AppSettings(
     val horizontalCardCountMedium: Float = 4.1f,
     val horizontalCardCountExpanded: Float = 5.1f,
     val subscriptionArtistRows: Int = 1,
+    /**
+     * **关注作者的新作提醒方式**（9.0）。
+     *
+     * 取值见 `ArtistUpdateChecker.MODE_*`：`0` = 关闭，`1` = 只在软件内显示角标，
+     * `2` = 角标 + 手机通知。
+     *
+     * 用 `Int` 而不是枚举：DataStore 这一层只有 `bool/int/string` 三个原语，
+     * 而取值只有三个、且必须容忍「读到不认识的数」（降级到 0），用 Int 最省事。
+     */
+    val followUpdateAlert: Int = 0,
     val homeCategoryOrder: List<String> = emptyList(),
     val hiddenHomeCategoryKeys: Set<String> = emptySet(),
     val alwaysShowUpdateCard: Boolean = false,

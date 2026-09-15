@@ -51,6 +51,24 @@ object FollowedArtistStore {
         val subscriberCount: String = "",
         /** hanime 兜底搜索用的类型检索键（见 [ArtistRef.genreKey]）。 */
         val genreKey: String = "",
+        /**
+         * **新作提醒**（9.0）：上次检查发现、而用户**还没看过**的作品数。
+         *
+         * 界面拿它画头像右上角的红点数字；`0` = 没有新作。
+         * 用户打开该作者页后由 [markSeen] 清零。
+         */
+        val newCount: Int = 0,
+        /**
+         * **新作提醒**（9.0）：上次打开作者页时**第一页**的作品码（最多 12 个）。
+         *
+         * 判「新作」的办法就是拿站点第一页码跟它对差集 —— 只在本地存 12 个短字符串，
+         * 比存「上次看到的时间点」可靠得多（站点给的时间粒度是「日期」，
+         * 同一天传的多部片子分不出来）。
+         *
+         * ⚠️ **空 = 从未看过这个人**：此时 [ArtistUpdateChecker] 只做「把当前第一页
+         * 记下来」，绝不把整页都报成新作（否则第一次开启提醒，所有关注者都会亮红点）。
+         */
+        val seenCodes: List<String> = emptyList(),
     ) {
         /**
          * 身份键：**规范化后的主页地址**（见 [ArtistRef.identityKey]）。
@@ -165,6 +183,93 @@ object FollowedArtistStore {
         if (k.isEmpty()) return false
         return all.any { it.key == k }
     }
+
+    // ──────────────────────────────────── 新作提醒（9.0）
+
+    /**
+     * 未读新作数查询表：**身份键 → 数量**，并且**额外把小写名字也当键写一份**。
+     *
+     * 为什么要名字这一份：订阅页在「已登录 hanime」时显示的是**服务端订阅**
+     * （[mergeSubscriptionItems] 存下来的那份只有名字和头像，没有作者主页地址，
+     * 算不出身份键）。不给名字兜底，这些人的红点永远不会亮。
+     *
+     * ⚠️ 只在 `newCount > 0` 时才写入 ⇒ 值为 0 时查不到，调用方 `?: 0` 即可。
+     * 名字冲突时**先来的赢**（[putIfAbsent] 语义）：宁可少报，也不要给不相干的人亮红点。
+     *
+     * 读一次会反序列化整份关注表，所以界面要**一次取完、循环里查 map**，
+     * 不要每张卡片都来读它。
+     */
+    val unreadLookup: Map<String, Int>
+        get() = buildMap {
+            all.forEach { item ->
+                if (item.newCount <= 0) return@forEach
+                putIfAbsent(item.key, item.newCount)
+                val name = item.name.trim().lowercase()
+                if (name.isNotEmpty()) putIfAbsent(name, item.newCount)
+            }
+        }
+
+    /**
+     * 写入一轮「新作检查」的结果，返回真正被改动的条数。
+     *
+     * @param results 身份键 → [UpdateResult]
+     */
+    suspend fun applyUpdateResults(results: Map<String, UpdateResult>): Int {
+        if (results.isEmpty()) return 0
+        val list = all
+        var changed = 0
+        val updated = list.map { item ->
+            val result = results[item.key] ?: return@map item
+            val merged = item.copy(
+                newCount = result.newCount,
+                // 只在「首次看到」时补种第一页；已有记录**不动** ——
+                // 动了就等于把新作当成看过了，红点当场消失。
+                seenCodes = result.seedCodes ?: item.seenCodes,
+            )
+            if (merged != item) {
+                changed++
+                merged
+            } else {
+                item
+            }
+        }
+        if (changed > 0) save(updated)
+        return changed
+    }
+
+    /**
+     * 标记「这位作者的新作都看过了」——打开作者页时调用，角标清零。
+     *
+     * @param firstPageCodes 当前第一页的作品码（作者页首页拿到的那些）
+     *
+     * ⚠️ 只在**内容真的变了**才落盘：作者页每次打开都会调它，无条件写会把
+     * 关注表所在的那份 DataStore 频繁改写（并让所有订阅它的界面反复重组）。
+     */
+    suspend fun markSeen(ref: ArtistRef, firstPageCodes: List<String>) {
+        val k = ref.followKey
+        if (k.isEmpty()) return
+        val list = all
+        var changed = false
+        val updated = list.map { item ->
+            if (!sameIdentity(item, k)) return@map item
+            if (item.newCount == 0 && item.seenCodes == firstPageCodes) return@map item
+            changed = true
+            item.copy(newCount = 0, seenCodes = firstPageCodes)
+        }
+        if (changed) save(updated)
+    }
+
+    /**
+     * 一轮新作检查对**某一位作者**的结论。
+     *
+     * @param newCount 未读新作数
+     * @param seedCodes 非 null 表示「这位从未记录过第一页」，用它补种；
+     *   null 表示「保留原来那份」。
+     */
+    data class UpdateResult(
+        val newCount: Int,
+        val seedCodes: List<String>? = null,
+    )
 
     /**
      * 有多少位 **nJAV** 关注者还缺头像（26.8.2）。
@@ -309,6 +414,11 @@ object FollowedArtistStore {
                 videoCount = first.videoCount.ifBlank { item.videoCount },
                 subscriberCount = first.subscriberCount.ifBlank { item.subscriberCount },
                 genreKey = first.genreKey.ifBlank { item.genreKey },
+                // 新作提醒（9.0）：两条同身份记录合并时，
+                // 未读数**取大**（宁可多留一个红点，也不要让用户漏掉新作）；
+                // 已看过的第一页取「非空」的那份。
+                newCount = maxOf(first.newCount, item.newCount),
+                seenCodes = first.seenCodes.ifEmpty { item.seenCodes },
             )
             if (merged != first) byIdentity[id] = merged
             // 无论如何这一条都算「变了」：它被合并掉了（哪怕一点新信息都没带），

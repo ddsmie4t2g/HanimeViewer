@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.last
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -103,15 +104,62 @@ object NetworkRepo {
             )
         }
 
-    fun getHanimeVideo(videoCode: String): Flow<VideoLoadingState<HanimeVideo>> =
-        when {
-            SettingsRepository.isNjavSite -> njavVideoFlow(videoCode)
-            SettingsRepository.isPornhubSite -> phVideoFlow(videoCode)
-            else -> videoIOFlow(
+    /**
+     * 按**指定站点**取影片详情。
+     *
+     * @param site 不给就按用户当前的数据源取（原来的行为）。
+     *   显式传值是为了跨站点打开（见 [getHanimeVideoAnySite]）：关注 / 订阅 /
+     *   观看历史 / 收藏夹里混着三个站点的片子，编号必须送回它自己的站点才认得。
+     */
+    fun getHanimeVideo(
+        videoCode: String,
+        site: SiteSource = SettingsRepository.siteSource,
+    ): Flow<VideoLoadingState<HanimeVideo>> =
+        when (site) {
+            SiteSource.Njav -> njavVideoFlow(videoCode)
+            SiteSource.Pornhub -> phVideoFlow(videoCode)
+            SiteSource.Hanime1 -> videoIOFlow(
                 request = { HanimeNetwork.hanimeService.getHanimeVideo(videoCode) },
                 action = Parser::hanimeVideoVer2
             )
         }
+
+    /**
+     * **跨站点**取影片详情（9.0）。
+     *
+     * ## 它修的是什么
+     *
+     * 用户的原话：「点进关注与订阅，或者观看与历史，去看那些与该站点不同的视频，
+     * 直接显示视频不存在」。根因是：这些列表跨三个站点，而打开影片时只带了
+     * `videoCode`，取数一律按**当前数据源**去问。于是拿一个 nJAV 的编号去问 hanime，
+     * 站点回 403/500 ⇒ [HanimeNotFoundException] ⇒ 界面显示「可能该影片不存在」。
+     * 片子明明存在，只是不在这个站上。
+     *
+     * ## 做法
+     *
+     * 先按**当前数据源**取（绝大多数情况第一次就命中，不产生额外请求），
+     * 取不到再依次试另外两个站，谁认得这个编号就用谁的。全部都不认得才把
+     * **最后一次的错误**抛出去 —— 那才是「真的不存在」。
+     *
+     * ⚠️ 只解决「能不能打开」。影片里的收藏 / 评分这类**写操作**仍然按当前数据源走
+     * （见 `VideoRouteActions.toggleFavorite`），跨站点的写操作不在本次范围内。
+     */
+    fun getHanimeVideoAnySite(videoCode: String): Flow<VideoLoadingState<HanimeVideo>> = flow {
+        val current = SettingsRepository.siteSource
+        // 当前数据源排第一：命中就不必去问另外两个站。
+        val candidates = listOf(current) + SiteSource.entries.filter { it != current }
+        emit(VideoLoadingState.Loading)
+        var last: VideoLoadingState<HanimeVideo> = VideoLoadingState.NoContent
+        for (site in candidates) {
+            val state = getHanimeVideo(videoCode, site).last()
+            if (state is VideoLoadingState.Success) {
+                emit(state)
+                return@flow
+            }
+            last = state
+        }
+        emit(last)
+    }.flowOn(Dispatchers.IO)
 
     fun getHanimePreview(date: String): Flow<WebsiteState<HanimePreview>> =
         when {

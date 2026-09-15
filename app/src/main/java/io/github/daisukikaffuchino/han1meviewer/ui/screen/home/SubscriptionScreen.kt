@@ -28,6 +28,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.daisukikaffuchino.han1meviewer.R
+import io.github.daisukikaffuchino.han1meviewer.logic.ArtistUpdateChecker
 import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
 import io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
@@ -109,6 +110,26 @@ fun SubscriptionScreen(
     }
 
     /**
+     * ⭐ 9.0：作者头像右上角的**新作角标**。
+     *
+     * 和 [localFollowed] 同一个来源（关注表 JSON）—— [ArtistUpdateChecker] 把结果写回去，
+     * 这里就会自动重算，角标出现或消失，不需要额外的界面状态。
+     */
+    val localUnread = remember(settings.followedArtistsJson) {
+        FollowedArtistStore.unreadLookup
+    }
+
+    /**
+     * ⭐ 9.0：进页面顺手查一轮「关注的人有没有新作」。
+     *
+     * 节流在 [ArtistUpdateChecker] 里（同一进程 30 分钟内只跑一次），所以这里不必自己判断 ——
+     * 反复进出订阅页不会反复发几十个请求。设置里关掉提醒时检查器直接返回，连网络都不发。
+     */
+    LaunchedEffect(Unit) {
+        runCatching { ArtistUpdateChecker.check() }
+    }
+
+    /**
      * ⭐ 未登录 hanime 时，这一页读的是**用户自己账号里那份数据**。
      *
      * 于是进页面时顺手从自建账号拉一次（带 5 分钟节流，见 [AccountRepository.isSyncStale]）：
@@ -172,6 +193,7 @@ fun SubscriptionScreen(
         canLoadMore = canLoadMore,
         error = (state as? WebsiteState.Error)?.throwable,
         showCached = state is WebsiteState.Loading && cachedArtists.value.isNotEmpty(),
+        unread = localUnread,
     )
 
     ChoiceDialog(
@@ -205,6 +227,8 @@ fun SubscriptionScreen(
 
             SubscriptionEvent.OnRefresh -> {
                 isRefreshing = true
+                // ⭐ 9.0：下拉刷新同时也是「手动查新作」——用户明确要求刷新时的不该被节流挡住。
+                scope.launch { runCatching { ArtistUpdateChecker.check(force = true) } }
                 if (isLoggedIn) {
                     viewModel.loadMySubscriptions(forceReload = true)
                 } else {

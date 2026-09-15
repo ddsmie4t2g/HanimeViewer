@@ -41,6 +41,11 @@ object SettingsRepository : SettingsStore {
     val loginStateFlow by lazy { settings.map { it.isAlreadyLogin }.stateIn(scope, SharingStarted.Eagerly, current.isAlreadyLogin) }
     val checkInEnabledFlow by lazy { settings.map { it.checkInEnabled }.stateIn(scope, SharingStarted.Eagerly, current.checkInEnabled) }
 
+    /** 「关注作者新作提醒」方式（9.0）。取值见 `ArtistUpdateChecker.MODE_*`。 */
+    val followUpdateAlertFlow by lazy {
+        settings.map { it.followUpdateAlert }.stateIn(scope, SharingStarted.Eagerly, current.followUpdateAlert)
+    }
+
     /**
      * ⭐ 详情页的「喜欢 / 我的清单」状态该从哪读：**本机库** 还是 hanime 服务端。
      *
@@ -81,6 +86,9 @@ object SettingsRepository : SettingsStore {
     val videoQuality get() = current.videoQuality
     val showPlayedIndicator get() = current.showPlayedIndicator
     val isCheckInEnabled get() = current.checkInEnabled
+
+    /** 「关注作者新作提醒」方式（9.0）的同步读取版本。 */
+    val followUpdateAlert get() = current.followUpdateAlert
     val fakeLauncherIcon get() = current.fakeLauncherIcon
     /**
      * 当前站点根地址。自定义镜像优先。
@@ -138,8 +146,6 @@ object SettingsRepository : SettingsStore {
     val appendCustomMirrorPath get() = current.appendCustomMirrorPath
     /** 用户自建镜像池（JSON）。内置镜像不在这里，见 [io.github.daisukikaffuchino.han1meviewer.logic.network.MirrorStore]。 */
     val extraMirrorsJson get() = current.extraMirrorsJson
-    /** 一键自愈的历史记录（JSON）。只存数字，文案由界面现拼。 */
-    val selfHealLogJson get() = current.selfHealLogJson
     /** 置顶搜索词（JSON）。 */
     val pinnedSearchesJson get() = current.pinnedSearchesJson
     /** 本地关注作者（JSON）。见 [FollowedArtistStore]。 */
@@ -258,6 +264,10 @@ object SettingsRepository : SettingsStore {
     suspend fun setLauncherIcon(value: String) = update { it.copy(fakeLauncherIcon = value) }
     suspend fun setHapticFeedback(value: Boolean) = update { it.copy(hapticFeedbackEnabled = value) }
     suspend fun setCheckInEnabled(value: Boolean) = update { it.copy(checkInEnabled = value) }
+
+    /** 「关注作者新作提醒」方式（9.0）。取值收敛到 0..2，见 `ArtistUpdateChecker.MODE_*`。 */
+    suspend fun setFollowUpdateAlert(value: Int) =
+        update { it.copy(followUpdateAlert = value.coerceIn(0, 2)) }
     suspend fun setUsePrivateStorage(value: Boolean) = update { it.copy(usePrivateStorage = value) }
     suspend fun setDownloadStorage(usePrivate: Boolean, path: String?) = update { it.copy(usePrivateStorage = usePrivate, safDownloadPath = path) }
     suspend fun setDownloadCountLimit(value: Int) = update { it.copy(downloadCountLimit = value) }

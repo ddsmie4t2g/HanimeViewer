@@ -67,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import io.github.daisukikaffuchino.han1meviewer.R
@@ -628,10 +629,21 @@ private fun OnlineWatchHistoryScreen(
                 isEmpty = state is PageLoadingState.NoMoreData && items.isEmpty(),
                 onRetry = { onRefresh(sort) },
                 error = {
+                    // ⭐ 9.0：**在线**观看历史读的是 hanime 服务端的观看记录，
+                    // 没登录 hanime 时它必然拉不到 —— 但以前这里一律显示「加载失败，请重试」，
+                    // 于是「没登录」被说成了「服务器坏了」，用户怎么点重试都不会好
+                    // （他报的就是这一条：怀疑是自己账号的问题）。
+                    // 现在按登录态分文案：没登录就直说要先登录。
+                    val loggedIn by SettingsRepository.loginStateFlow.collectAsStateWithLifecycle()
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         ErrorContent(
-                            title = stringResource(R.string.load_failed_retry),
-                            onRetry = { onRefresh(sort) },
+                            title = if (loggedIn) {
+                                stringResource(R.string.load_failed_retry)
+                            } else {
+                                stringResource(R.string.online_history_login_required)
+                            },
+                            // 没登录时「重试」只会再失败一次，索性不给按钮，别让它误导用户。
+                            onRetry = if (loggedIn) ({ onRefresh(sort) }) else null,
                         )
                     }
                 },

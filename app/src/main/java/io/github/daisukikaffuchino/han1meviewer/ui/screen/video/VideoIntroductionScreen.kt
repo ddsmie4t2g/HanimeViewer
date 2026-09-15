@@ -1,5 +1,6 @@
 package io.github.daisukikaffuchino.han1meviewer.ui.screen.video
 
+import androidx.annotation.StringRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -651,6 +652,17 @@ private fun QuickCheckInDialog(
     )
 }
 
+/**
+ * 「加入清单」弹窗里的一行：一个分组标题，或某个可勾选的清单。
+ *
+ * ⭐ 9.0：引入它只是为了把「播放清单」和「收藏夹」分成两段，
+ * [Entry] 里的下标**必须指回 `myListInfo` 的原始下标** —— 勾选状态是按原下标存的。
+ */
+private sealed interface MyListRow {
+    data class Header(@StringRes val titleRes: Int) : MyListRow
+    data class Entry(val index: Int) : MyListRow
+}
+
 @Composable
 private fun MyListDialog(
     myList: HanimeVideo.MyList,
@@ -661,7 +673,29 @@ private fun MyListDialog(
     var selectedStates by remember(myList.myListInfo) {
         mutableStateOf(myList.myListInfo.map { it.isSelected })
     }
-    val hasCustomPlaylist = myList.myListInfo.any { it.code != "save" }
+    val entries = myList.myListInfo
+    val hasCustomPlaylist = entries.any { it.code != "save" }
+
+    // ⭐ 9.0：播放清单与收藏夹分成两段。两者的标题都是用户自己起的名字，
+    // 不加分组标题的话根本看不出某一行是播放清单还是收藏夹。
+    val rows = remember(entries) {
+        buildList<MyListRow> {
+            var playlistHeaderAdded = false
+            var collectionHeaderAdded = false
+            entries.forEachIndexed { index, info ->
+                if (info.isCollection) {
+                    if (!collectionHeaderAdded) {
+                        collectionHeaderAdded = true
+                        add(MyListRow.Header(R.string.favorite_collections))
+                    }
+                } else if (info.code != "save" && !playlistHeaderAdded) {
+                    playlistHeaderAdded = true
+                    add(MyListRow.Header(R.string.play_list))
+                }
+                add(MyListRow.Entry(index))
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -679,29 +713,41 @@ private fun MyListDialog(
                     modifier = Modifier.heightIn(max = 320.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(myList.myListInfo.indices.toList()) { index ->
-                        val info = myList.myListInfo[index]
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .toggleable(
-                                    value = selectedStates[index],
-                                    onValueChange = { checked ->
-                                        VibrationUtil.performHapticFeedback(view)
-                                        selectedStates =
-                                            selectedStates.toMutableList()
-                                                .also { it[index] = checked }
-                                    },
-                                )
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Checkbox(
-                                checked = selectedStates[index],
-                                onCheckedChange = null,
+                    items(rows) { row ->
+                        when (row) {
+                            is MyListRow.Header -> Text(
+                                text = stringResource(row.titleRes),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp),
                             )
-                            Text(info.title)
+
+                            is MyListRow.Entry -> {
+                                val index = row.index
+                                val info = entries[index]
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .toggleable(
+                                            value = selectedStates[index],
+                                            onValueChange = { checked ->
+                                                VibrationUtil.performHapticFeedback(view)
+                                                selectedStates =
+                                                    selectedStates.toMutableList()
+                                                        .also { it[index] = checked }
+                                            },
+                                        )
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Checkbox(
+                                        checked = selectedStates[index],
+                                        onCheckedChange = null,
+                                    )
+                                    Text(info.title)
+                                }
+                            }
                         }
                     }
                 }

@@ -55,6 +55,8 @@ private enum class HomeSettingsChoiceDialog {
     VideoQuality,
     AppLanguage,
     DisplayDensity,
+    /** 「关注作者新作提醒」（9.0）。 */
+    FollowUpdateAlert,
 }
 
 /** Renders one settings category while keeping the existing preference callbacks intact. */
@@ -80,6 +82,8 @@ fun HomeSettingsScreen(
     onTabletModeChange: (Boolean) -> Unit,
     onVideoLandscapeLayoutStyleChange: (String) -> Unit,
     onCheckInEnabledChange: (Boolean) -> Unit,
+    /** 「关注作者新作提醒」方式（9.0）：0=关闭 / 1=仅软件内 / 2=软件内+通知。 */
+    onFollowUpdateAlertChange: (Int) -> Unit,
     onDisableCommentsChange: (Boolean) -> Unit,
     onCollapseDownloadedGroupChange: (Boolean) -> Unit,
     onSearchGridColumnsConfigChange: (SearchGridColumnsConfig) -> Unit,
@@ -156,6 +160,21 @@ fun HomeSettingsScreen(
         onSelect = {
             activeDialog = null
             onOpenAppLanguageSettings(it)
+        },
+    )
+    ChoiceDialog(
+        visible = activeDialog == HomeSettingsChoiceDialog.FollowUpdateAlert,
+        title = stringResource(R.string.follow_update_alert_title),
+        options = listOf(
+            stringResource(R.string.follow_update_alert_off) to "0",
+            stringResource(R.string.follow_update_alert_in_app) to "1",
+            stringResource(R.string.follow_update_alert_notification) to "2",
+        ),
+        selectedValue = state.followUpdateAlert.toString(),
+        onDismiss = { activeDialog = null },
+        onSelect = { value ->
+            activeDialog = null
+            onFollowUpdateAlertChange(value.toInt())
         },
     )
     ChoiceDialog(
@@ -392,6 +411,19 @@ fun HomeSettingsScreen(
                                 onSelect = onVideoLandscapeLayoutStyleChange,
                             )
                         }
+                        SettingNavigationItem(
+                            title = stringResource(R.string.follow_update_alert_title),
+                            summary = stringResource(R.string.follow_update_alert_summary),
+                            valueText = stringResource(
+                                when (state.followUpdateAlert) {
+                                    1 -> R.string.follow_update_alert_in_app
+                                    2 -> R.string.follow_update_alert_notification
+                                    else -> R.string.follow_update_alert_off
+                                }
+                            ),
+                            iconRes = R.drawable.ic_subscribtion,
+                            onClick = { activeDialog = HomeSettingsChoiceDialog.FollowUpdateAlert },
+                        )
                         SettingSwitchItem(
                             title = stringResource(R.string.enable_check_in_feature),
                             summary = stringResource(R.string.enable_check_in_feature_summary),
@@ -669,6 +701,7 @@ private fun HomeSettingsScreenPreview() {
             onTabletModeChange = {},
             onVideoLandscapeLayoutStyleChange = {},
             onCheckInEnabledChange = {},
+            onFollowUpdateAlertChange = {},
             onDisableCommentsChange = {},
             onCollapseDownloadedGroupChange = {},
             onSearchGridColumnsConfigChange = {},
@@ -735,6 +768,7 @@ private fun previewHomeSettingsState() = HomeSettingsUiState(
     horizontalCardCountSummary = "1.5 / 2.1 / 4.1 / 5.1",
     horizontalCardCountConfig = HorizontalCardCountConfig(),
     checkInEnabled = true,
+    followUpdateAlert = 0,
     homeCategoryItems = emptyList(),
     homeCategoryOrder = emptyList(),
     hiddenHomeCategoryKeys = emptySet(),

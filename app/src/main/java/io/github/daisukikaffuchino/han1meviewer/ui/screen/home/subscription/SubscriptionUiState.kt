@@ -29,6 +29,9 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionVideosIt
  * @param canLoadMore 是否可加载更多
  * @param error 错误信息，null 表示无错误
  * @param showCached 是否只展示缓存数据（Loading/Error 时保留旧数据）
+ * @param unread **新作提醒**（9.0）：作者 → 未读新作数。键同时含**身份键**与
+ *   **小写名字**（服务端订阅那一份只有名字，见 `FollowedArtistStore.unreadLookup`）。
+ *   值为 0 的作者不在这里 —— 查不到就是 0。
  */
 data class SubscriptionUiState(
     val followed: List<ArtistRef> = emptyList(),
@@ -40,6 +43,7 @@ data class SubscriptionUiState(
     val currentPage: Int = 1,
     val error: Throwable? = null,
     val showCached: Boolean = false,
+    val unread: Map<String, Int> = emptyMap(),
 )
 
 /**

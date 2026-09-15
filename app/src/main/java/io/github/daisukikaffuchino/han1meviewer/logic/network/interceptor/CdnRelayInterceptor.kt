@@ -64,7 +64,23 @@ class CdnRelayInterceptor : Interceptor {
             return relay(chain, request, null)
         }
 
-        val direct = runCatching { chain.proceed(request) }
+        // 同一 host 的并发请求里只让**第一个**去试直连（见 CdnRelay.tryBeginDirectProbe）。
+        // 冷启动时首页那 20–30 张封面是同时发的，如果一个一个去撞墙，
+        // 「一次 2 秒」会变成「30 次 2 秒」压在同一条网络上，用户看到的就是
+        // 「一打开 App，封面转半天」。拿不到闸门的请求直接先走中转 ——
+        // 反正直连能不能通是 host 级的事实，探一次就够了。
+        if (!CdnRelay.tryBeginDirectProbe(host)) {
+            if (CdnRelay.cachedReachable == false) return chain.proceed(request)
+            return relay(chain, request, null)
+        }
+
+        val direct = try {
+            runCatching { chain.proceed(request) }
+        } finally {
+            // ⚠️ 必须在 finally 里释放：链上任何一环抛异常都要让下一个请求能再试，
+            //    否则该 host 这一次会话就永远被当作「正在探测」，全走中转。
+            CdnRelay.endDirectProbe(host)
+        }
         direct.getOrNull()?.let { if (it.isSuccessful) return it }
 
         // 走到这里只可能是「抛异常」。4xx/5xx 的场景在上面就已经返回了。

@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
  * nJAV（njavtv.com）站点入口。
  *
  * 这里**没有**复用 hanime 的 [io.github.daisukikaffuchino.han1meviewer.logic.network.ServiceCreator.hClient]：
- * 那条链路挂了 hanime 专用的 Cloudflare 挑战处理与 Getchu 相关拦截器，对 nJAV
+ * 那条链路挂了 hanime 专用的 Cloudflare 挑战处理等拦截器，对 nJAV
  * 只会帮倒忙。但用户配置的**代理 / DoH / 自定义 DNS / UA** 仍然要继承，
  * 所以照抄了同样的 `HProxySelector` + `HDns` + [UserAgentInterceptor] 组合。
  *

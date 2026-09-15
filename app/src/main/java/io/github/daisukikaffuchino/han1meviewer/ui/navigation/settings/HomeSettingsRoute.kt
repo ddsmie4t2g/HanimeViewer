@@ -76,6 +76,7 @@ import io.github.daisukikaffuchino.han1meviewer.worker.AppUpdateWorkState
 import io.github.daisukikaffuchino.han1meviewer.worker.AppUpdateWorker
 import io.github.daisukikaffuchino.han1meviewer.util.AppLanguageManager
 import io.github.daisukikaffuchino.utils.ActivityManager
+import coil3.SingletonImageLoader
 import io.github.daisukikaffuchino.utils.folderSize
 import io.github.daisukikaffuchino.utils.LogUtil
 import io.github.daisukikaffuchino.utils.SonnerToast
@@ -390,6 +391,9 @@ fun HomeSettingsRouteScreen(
                 CheckInWidget().updateAll(context)
             }
         },
+        onFollowUpdateAlertChange = {
+            coroutineScope.launch { SettingsRepository.setFollowUpdateAlert(it) }
+        },
         onDisableCommentsChange = {
             coroutineScope.launch { SettingsRepository.update { settings -> settings.copy(disableComments = it) } }
         },
@@ -635,6 +639,14 @@ fun HomeSettingsRouteScreen(
             showClearCacheConfirm = false
             coroutineScope.launch(Dispatchers.IO) {
                 val cacheDir = context.cacheDir
+                // ⭐ 9.0：**先让 Coil 自己清**，再删目录。
+                //
+                // 图片磁盘缓存（`cacheDir/image_cache`，512 MiB）是 Coil 持有句柄的
+                // SQLite 库 —— 直接把目录删掉，它下次写 journal 时会踩空，
+                // 表现出来就是「清除缓存之后封面反而开始加载失败」。
+                // 内存缓存也一起清：不然刚清完，屏幕上还是靠内存里的旧图在显示。
+                runCatching { SingletonImageLoader.get(context).diskCache?.clear() }
+                runCatching { SingletonImageLoader.get(context).memoryCache?.clear() }
                 val success = cacheDir?.deleteRecursively() == true
                 withContext(Dispatchers.Main) {
                     cacheKey++
@@ -833,6 +845,7 @@ private fun buildHomeSettingsUiState(
         horizontalCardCountSummary = "${horizontalCardCountConfig.narrowCount}~${horizontalCardCountConfig.expandedCount}",
         horizontalCardCountConfig = horizontalCardCountConfig,
         checkInEnabled = SettingsRepository.isCheckInEnabled,
+        followUpdateAlert = SettingsRepository.followUpdateAlert,
         homeCategoryItems = defaultHomeCategoryPreferenceItems,
         homeCategoryOrder = homeCategoryOrder,
         hiddenHomeCategoryKeys = hiddenHomeCategoryKeys,

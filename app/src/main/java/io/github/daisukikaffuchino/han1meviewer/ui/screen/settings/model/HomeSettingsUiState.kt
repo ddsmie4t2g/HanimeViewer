@@ -37,6 +37,8 @@ data class HomeSettingsUiState(
     val horizontalCardCountSummary: String,
     val horizontalCardCountConfig: HorizontalCardCountConfig,
     val checkInEnabled: Boolean,
+    /** 「关注作者新作提醒」方式（9.0）。0=关闭 / 1=仅软件内 / 2=软件内+通知。 */
+    val followUpdateAlert: Int,
     val homeCategoryItems: List<HomeCategoryPreferenceItem>,
     val homeCategoryOrder: List<String>,
     val hiddenHomeCategoryKeys: Set<String>,

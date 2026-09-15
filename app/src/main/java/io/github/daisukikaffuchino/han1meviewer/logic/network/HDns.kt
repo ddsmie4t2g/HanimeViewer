@@ -61,10 +61,6 @@ class HDns : Dns {
             "2606:4700:3037::ac43:a71e", "2606:4700:3032::6815:2add"
         )
 
-        private val getchuIps = listOf("210.155.150.166", "210.155.150.145")
-
-        private const val GETCHU_HOSTNAME = "www.getchu.com"
-
         /**
          * nJAV 系域名的**内置 IP 兜底**。
          *
@@ -157,12 +153,6 @@ class HDns : Dns {
     }
 
     override fun lookup(hostname: String): List<InetAddress> {
-        if (hostname == GETCHU_HOSTNAME) {
-            return getchuIps.map {
-                InetAddress.getByAddress(hostname, InetAddress.getByName(it).address)
-            }
-        }
-
         // nJAV 系 / 图片 CDN：DNS 已被投毒，无条件走内置 IP（理由见 builtInIpsByHost 的注释）。
         lookupBuiltInIps(hostname)?.let { return it }
 
@@ -292,10 +282,6 @@ class HDns : Dns {
     }
 
     fun getCDNList(host: String): List<String> {
-        if (host == GETCHU_HOSTNAME) {
-            return getchuIps.distinct()
-        }
-
         // nJAV 系直接给内置 IP，别去问系统 DNS（只会拿到污染结果）
         builtInIpsByHost[host.lowercase()]?.let { return it.distinct() }
 

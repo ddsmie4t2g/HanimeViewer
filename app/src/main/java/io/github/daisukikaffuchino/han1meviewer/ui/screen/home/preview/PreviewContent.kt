@@ -34,8 +34,6 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,12 +50,9 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.flow.distinctUntilChanged
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.exception.HanimeNotFoundException
-import io.github.daisukikaffuchino.han1meviewer.logic.model.GetchuPreview
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimePreview
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageLoadingState
-import io.github.daisukikaffuchino.han1meviewer.logic.state.PageState
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
-import io.github.daisukikaffuchino.han1meviewer.logic.state.dataOrNull
 import io.github.daisukikaffuchino.han1meviewer.pienization
 import io.github.daisukikaffuchino.han1meviewer.ui.component.CardContainerSurface
 import io.github.daisukikaffuchino.han1meviewer.ui.component.FilledTonalButton
@@ -70,10 +65,7 @@ import io.github.daisukikaffuchino.han1meviewer.ui.component.content.EmptyConten
 import io.github.daisukikaffuchino.han1meviewer.ui.component.content.ErrorContent
 import io.github.daisukikaffuchino.han1meviewer.ui.component.content.LoadingContent
 import io.github.daisukikaffuchino.han1meviewer.ui.component.lazy.LazyColumn
-import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.getchupreview.GetchuPreviewContent
-import io.github.daisukikaffuchino.han1meviewer.ui.screen.home.preview.getchupreview.rememberGetchuImageLoader
 import io.github.daisukikaffuchino.han1meviewer.ui.screen.rememberRandomLoadingHint
-import io.github.daisukikaffuchino.han1meviewer.ui.component.HapticButton as Button
 import io.github.daisukikaffuchino.han1meviewer.ui.component.HapticTextButton as TextButton
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -89,19 +81,15 @@ fun PreviewContent(
     // 【月度归档】非 null 表示当前月份站方已停更，页面展示的是"按上市月份检索"的结果
     val archiveState = uiState.archiveState
     val archiveListState = rememberLazyListState()
-    // Getchu 发售表的封面也在 www.getchu.com 上，同样必须走中转（见 rememberGetchuImageLoader）。
-    val getchuImageLoader = rememberGetchuImageLoader()
 
     // 【月度归档】滚到底部附近时自动加载下一页。
     // 直接用滚动位置判断（而不是放在列表末尾 item 里），避免列表短时一路连锁把整月都拉完。
     // ViewModel 的 loadMoreArchive() 内部已做去重与状态保护，这里多触发几次也无害。
-    // ⚠️ 只在「已上架」标签下才续页：发售表是整月一次性返回的，没有分页。
-    if (archiveState != null && uiState.selectedTab == PreviewTab.Hanime) {
+    if (archiveState != null) {
         LaunchedEffect(
             archiveListState,
             archiveState.loadedPages,
             archiveState.isLoadingMore,
-            uiState.selectedTab,
         ) {
             snapshotFlow {
                 val info = archiveListState.layoutInfo
@@ -187,14 +175,12 @@ fun PreviewContent(
                 contentPadding = PaddingValues(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                // 「站方预告已停更 / 去看 Getchu 预告」提示卡常驻。
-                // 站方自 2026-05 起停更新番预告，这张卡是进入 Getchu 预告页的唯一入口，
-                // 无论当前月走的是站方预告模式还是「按上市月份检索」的归档模式都必须能看到，
-                // 因此这里不再按 archiveState 做条件判断。
+                // 「站方预告已停更」提示卡常驻：站方自 2026-05 起停更新番预告页，
+                // 卡上留着「访问网页版」直达站方页面。无论当前月走的是站方预告模式
+                // 还是「按上市月份检索」的归档模式都必须能看到，因此这里不做条件判断。
                 item {
                     PreviewSourceNoticeCard(
                         onOpenWeb = { onEvent(PreviewEvent.OnOpenWebPreview) },
-                        onOpenGetchu = { onEvent(PreviewEvent.OnOpenGetchuPreview) },
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp),
                     )
                 }
@@ -241,124 +227,71 @@ fun PreviewContent(
 
                 if (archiveState != null) {
                     // ===== 【月度归档】 =====
-                    // 站方预告停更月份：不再请求 /previews/{yyyyMM}，改为顶上两个标签：
+                    // 站方预告停更月份：不再请求 /previews/{yyyyMM}，改用站内检索
+                    // `date=yyyy 年 m 月`（并带上「里番」分类）列出该月 1 日至月底上线的番剧。
                     //
-                    //   [发售表] 该月**预定发售**的里番（getchu.com）
-                    //   [已上架] 该月**已在 hanime 上线**的番剧（站内检索 date=yyyy 年 m 月）
-                    //
-                    // ⭐ 这两个列表的含义完全不同，而且经常一个有一个没有。实测 2026-09-14：
-                    // Getchu 的 9 月发售表有 29 部（9/4、9/11、9/18、9/25、9/30 五组），
-                    // 而 hanime 的 9 月里番**一部都没上架**（最新仍停在 8-28）。
-                    // 以前只有「已上架」一个列表，于是用户看到空列表就以为「明明上了几部却没显示」。
-                    item {
-                        PreviewTabRow(
-                            selectedTab = uiState.selectedTab,
-                            onSelectTab = { onEvent(PreviewEvent.OnSelectTab(it)) },
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                        )
-                    }
-
-                    if (uiState.selectedTab == PreviewTab.Getchu) {
-                        // 发售表：一份整月列表（Getchu 自己按发售日分成若干组），没有分页。
-                        // ⚠️ 这里刻意把分支**写平**而不是抽成 LazyListScope 扩展函数：
-                        // 抽出去以后 `state.items` 会遮蔽 `LazyListScope.items(...)`，
-                        // 编译器报一长串「receiver type mismatch」，牵连到调用点。
-                        when {
-                            uiState.getchuState.isGetchuLoading -> item {
-                                LoadingContent(
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                    message = loadingHint,
-                                )
-                            }
-
-                            uiState.getchuState.isGetchuError -> item {
-                                ErrorContent(
-                                    title = stringResource(R.string.preview_tab_getchu),
-                                    message = stringResource(R.string.preview_getchu_failed),
-                                    onRetry = { onEvent(PreviewEvent.OnRetryGetchu) },
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                )
-                            }
-
-                            uiState.getchuState.getchuData?.groups.isNullOrEmpty() -> item {
-                                EmptyContent(
-                                    hint = stringResource(R.string.preview_getchu_empty),
-                                    subHint = stringResource(R.string.preview_getchu_empty_hint),
-                                )
-                            }
-
-                            else -> item {
-                                GetchuPreviewContent(
-                                    preview = uiState.getchuState.getchuData!!,
-                                    onOpenDetail = { id ->
-                                        onEvent(PreviewEvent.OnOpenGetchuDetail(id))
-                                    },
-                                    imageLoader = getchuImageLoader,
-                                )
-                            }
+                    // ⚠️ 26.9.0 删掉了原来的「发售表 / 已上架」标签行：发售表取的是
+                    // getchu.com，已整体移除（理由见 PreviewUiState 的类注释）。
+                    // 这一页现在只有「该月在 hanime 上线的里番」一个含义。
+                    when {
+                        archiveState.isLoading && !archiveState.hasItems -> item {
+                            LoadingContent(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                message = loadingHint,
+                            )
                         }
-                    } else {
-                        // 已上架：该月 1 日至月底在 hanime 上线的番剧（两列网格，滚到底续页）。
-                        when {
-                            archiveState.isLoading && !archiveState.hasItems -> item {
-                                LoadingContent(
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                    message = loadingHint,
-                                )
-                            }
 
-                            archiveState.isFatalError -> item {
-                                ErrorContent(
-                                    title = stringResource(R.string.hanime_list),
-                                    message = stringResource(R.string.preview_archive_failed),
-                                    onRetry = { onEvent(PreviewEvent.OnRetryArchive) },
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                )
-                            }
+                        archiveState.isFatalError -> item {
+                            ErrorContent(
+                                title = stringResource(R.string.hanime_list),
+                                message = stringResource(R.string.preview_archive_failed),
+                                onRetry = { onEvent(PreviewEvent.OnRetryArchive) },
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+                        }
 
-                            !archiveState.hasItems -> item {
-                                EmptyContent(
-                                    hint = stringResource(R.string.preview_archive_empty),
-                                    subHint = stringResource(R.string.preview_archive_empty_hint),
-                                )
-                            }
+                        !archiveState.hasItems -> item {
+                            EmptyContent(
+                                hint = stringResource(R.string.preview_archive_empty),
+                                subHint = stringResource(R.string.preview_archive_empty_hint),
+                            )
+                        }
 
-                            else -> {
-                                items(
-                                    archiveState.items.chunked(2),
-                                    key = { row -> row.first().videoCode },
-                                ) { row ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    ) {
-                                        row.forEach { info ->
-                                            VideoCardItem(
-                                                modifier = Modifier.weight(1f),
-                                                videoItem = info,
-                                                isHorizontalCard = false,
-                                                onClickVideosItem = { code ->
-                                                    onEvent(PreviewEvent.OnOpenVideo(code))
-                                                },
-                                                onLongClickVideosItem = { _, _ -> },
-                                            )
-                                        }
-                                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                        else -> {
+                            items(
+                                archiveState.items.chunked(2),
+                                key = { row -> row.first().videoCode },
+                            ) { row ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    row.forEach { info ->
+                                        VideoCardItem(
+                                            modifier = Modifier.weight(1f),
+                                            videoItem = info,
+                                            isHorizontalCard = false,
+                                            onClickVideosItem = { code ->
+                                                onEvent(PreviewEvent.OnOpenVideo(code))
+                                            },
+                                            onLongClickVideosItem = { _, _ -> },
+                                        )
                                     }
+                                    if (row.size == 1) Spacer(Modifier.weight(1f))
                                 }
+                            }
 
-                                item {
-                                    LoadMoreFooter(
-                                        state = archiveState.toFooterState(),
-                                        // 只有真的翻过页才报页数；单页时显示「加载完毕！」就好，
-                                        // 免得每次都在底下一本正经地写「共1页」。
-                                        loadedPage = archiveState.loadedPages.takeIf { it > 1 },
-                                        isLoadingMore = archiveState.isLoadingMore,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                }
+                            item {
+                                LoadMoreFooter(
+                                    state = archiveState.toFooterState(),
+                                    // 只有真的翻过页才报页数；单页时显示「加载完毕！」就好，
+                                    // 免得每次都在底下一本正经地写「共1页」。
+                                    loadedPage = archiveState.loadedPages.takeIf { it > 1 },
+                                    isLoadingMore = archiveState.isLoadingMore,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                             }
                         }
                     }
@@ -432,50 +365,6 @@ fun PreviewContent(
 }
 
 /**
- * 日历页顶部的「已上架 / 发售表」标签行。
- *
- * ⚠️ 两个 `Tab` 的顺序必须与 [PreviewTab] 的**枚举顺序一致** ——
- * [PrimaryTabRow] 用的是 `selectedTab.ordinal`，顺序错了高亮会跳到另一个标签上。
- * 默认停在「已上架」：用户点日历想问的是「这个月已经出来的里番」。
- */
-@Composable
-private fun PreviewTabRow(
-    selectedTab: PreviewTab,
-    onSelectTab: (PreviewTab) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    PrimaryTabRow(selectedTabIndex = selectedTab.ordinal, modifier = modifier) {
-        Tab(
-            selected = selectedTab == PreviewTab.Hanime,
-            onClick = { onSelectTab(PreviewTab.Hanime) },
-            text = { Text(stringResource(R.string.preview_tab_hanime)) },
-        )
-        Tab(
-            selected = selectedTab == PreviewTab.Getchu,
-            onClick = { onSelectTab(PreviewTab.Getchu) },
-            text = { Text(stringResource(R.string.preview_tab_getchu)) },
-        )
-    }
-}
-
-/**
- * 「发售表」状态在 [PreviewUiState] 上的三个便捷判据。
- *
- * 把它们放在这里而不是在调用点写成一长串状态判断，
- * 是因为调用点在一个很深的 `LazyColumn` DSL 里，那里的可读性本来就差。
- *
- * ⚠️ 别在这里追加 `&& data == null`：`Loading` / `Error` 状态下那个判据恒为真，
- * 编译器会直接报 `Condition is always 'true'`（26.8.3 清掉了这条警告）。
- */
-private val PageState<GetchuPreview>.isGetchuLoading: Boolean
-    get() = this is PageState.Loading
-
-private val PageState<GetchuPreview>.isGetchuError: Boolean
-    get() = this is PageState.Error
-
-private val PageState<GetchuPreview>.getchuData: GetchuPreview?
-    get() = dataOrNull
-/**
  * 把【月度归档】的状态映射成 [LoadMoreFooter] 需要的分页状态。
  */
 private fun PreviewArchiveUiState.toFooterState(): PageLoadingState<*> = when {
@@ -488,7 +377,6 @@ private fun PreviewArchiveUiState.toFooterState(): PageLoadingState<*> = when {
 @Composable
 private fun PreviewSourceNoticeCard(
     onOpenWeb: () -> Unit,
-    onOpenGetchu: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     CardContainerSurface(
@@ -511,9 +399,6 @@ private fun PreviewSourceNoticeCard(
             ) {
                 TextButton(onClick = onOpenWeb) {
                     Text(stringResource(R.string.visit_web_version))
-                }
-                Button(onClick = onOpenGetchu) {
-                    Text(stringResource(R.string.view_getchu_preview))
                 }
             }
         }

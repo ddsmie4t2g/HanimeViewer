@@ -204,10 +204,12 @@ const val DOWNLOAD_NOTIFICATION_CHANNEL = "download_channel"
 
 const val UPDATE_NOTIFICATION_CHANNEL = "update_channel"
 
+/** 关注作者新作提醒（9.0）。importance 用默认档，别跟下载/更新抢眼球。 */
+const val FOLLOW_UPDATE_NOTIFICATION_CHANNEL = "follow_update_channel"
+
 // File
 
 const val FILE_PROVIDER_AUTHORITY = "${BuildConfig.APPLICATION_ID}.fileProvider"
-const val GETCHU_BASE_URL = "https://www.getchu.com/"
 
 // Search
 

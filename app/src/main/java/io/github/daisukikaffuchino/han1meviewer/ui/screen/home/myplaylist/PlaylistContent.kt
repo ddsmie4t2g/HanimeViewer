@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
@@ -37,6 +38,8 @@ import io.github.daisukikaffuchino.han1meviewer.ui.screen.getColumnCount
  * @param uiState 页面 UI 状态
  * @param onEvent 用户事件回调
  * @param rawState 原始网络状态（用于 Error 的重试和空状态判断）
+ * @param emptyHintRes 一条列表都没有时的文案。⭐ 9.0：收藏夹页要说「新建收藏夹」，
+ * 只丢一句「暂无内容」的话，刚打开的空白页看起来就像坏了。
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -44,6 +47,7 @@ fun PlaylistContent(
     uiState: PlaylistUiState,
     onEvent: (PlaylistEvent) -> Unit,
     rawState: WebsiteState<Playlists>,
+    @StringRes emptyHintRes: Int = R.string.empty_content,
 ) {
     val gridState = rememberLazyGridState()
     val noMore = uiState.noMorePlaylists
@@ -84,7 +88,7 @@ fun PlaylistContent(
                     onRetry = { onEvent(PlaylistEvent.OnRefresh) },
                 )
             },
-            empty = { EmptyContent(stringResource(R.string.empty_content)) },
+            empty = { EmptyContent(stringResource(emptyHintRes)) },
         ) {
             LazyVerticalGrid(
                 state = gridState,
