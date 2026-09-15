@@ -6,7 +6,8 @@ package io.github.daisukikaffuchino.han1meviewer.ui.viewmodel
  * ## 总页数从哪来（两条线，都拿不到就按已加载条数长）
  *
  * 1. **站点公布的作品数**：`87 Videos` / `5668 部影片` ⇒ [pagesFromCountText]。
- *    Pornhub（详情页主模特块）、nJAV（女优一览卡片）带这句文案。
+ *    Pornhub 详情页的主模特块带这句；nJAV 的女优卡片虽然也带，但它那个数是**站点全站**
+ *    口径（女优页根本翻不动，见 `ArtistViewModel.knownTotalPages`），所以 nJAV 不认。
  * 2. **站点自己的总页数**：hanime 的合成作者页只有这一条 —— 搜索页是 Laravel 分页，
  *    页码条里写着末页号 ⇒ [pagesFromSitePages]。
  *
@@ -30,7 +31,7 @@ package io.github.daisukikaffuchino.han1meviewer.ui.viewmodel
  *
  * ## 现在怎么算
  *
- * - [PagerVerdict.totalPages]：站点公布了作品数就用它（第一页进来就一次算准）；
+ * - [PagerVerdict.totalPages]：站点公布了作品数（或站点自己的页数）就用它（第一页进来就一次算准）；
  *   拿不到就按已加载条数算，翻页时自然往上长。站点那边**已经确认没有了**
  *   （`remoteHasMore == false`）时，按**实际拿到的**算 —— 不把用户送进一个空白页。
  * - [PagerVerdict.canNext]：只看两件事 —— **本地已经攒下了下一页**，或者**站点那边可能还有**。
