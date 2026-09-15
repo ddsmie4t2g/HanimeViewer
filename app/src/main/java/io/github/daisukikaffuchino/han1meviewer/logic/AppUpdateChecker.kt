@@ -13,6 +13,7 @@ import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.model.Announcement
 import io.github.daisukikaffuchino.utils.applicationContext
 import io.github.daisukikaffuchino.utils.decodeFromStringByBase64
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
@@ -24,6 +25,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.Call
 import okhttp3.Callback
@@ -101,6 +103,26 @@ internal const val UPDATE_SETTLE_MS = 1_200L
 internal const val UPDATE_NO_UPDATE_BUDGET_MS = 4_000L
 
 /**
+ * 一次源赛跑的结果。
+ *
+ * @param best 采用的那一份（null = 一条源都没答上来）
+ * @param answered 有多少条源**答了话**（成功或失败都算）
+ * @param dropped 到点时**还在路上、被主动放弃等待**的条数
+ *
+ *   ⚠️ 这**不是失败**，而是「已经拿到够用的答案，不等了」。
+ *   26.9.2 曾经把这种源也记成 `更新源失败：…`，于是日志里永远有两条「失败」，
+ *   看起来就像「那两个源又坏了」—— 这正是用户报「两个更新源又全都没用了」的来源。
+ *   日志必须把「失败」与「不等了」分开写。
+ * @param elapsedMillis 整个赛跑用了多久
+ */
+internal data class UpdateRaceOutcome(
+    val best: UpdateSourceAnswer?,
+    val answered: Int,
+    val dropped: Int,
+    val elapsedMillis: Long,
+)
+
+/**
  * **并发问所有更新源，但不等最慢的那一个。**
  *
  * ## 为什么不能 `awaitAll`
@@ -124,25 +146,29 @@ internal const val UPDATE_NO_UPDATE_BUDGET_MS = 4_000L
  * 于是总耗时 ≈ 第一个应答（通常 0.3–1 s）+ 一小段结算时间，与「最慢的源」无关；
  * 一个源都没答上来时也只等 [firstBudgetMillis]（6 s）就退回缓存，而不是 15 s 起。
  *
- * @param sources 各条源的取值函数（内部自己解析出 `versionCode`），抛异常=这条源失败
+ * @param sources 各条源的取值函数（内部自己解析出 `versionCode`），抛异常=这条源失败；
+ *   返回 null = 「这条源答话了，但没有可用内容」（例如 GitHub 上最新的是预发布）——
+ *   一样算应答，只是不参与比大小
  * @param isNewer 「这个版本号算不算比本机新」——用它决定还要不要继续等更高的版本
  */
 internal suspend fun raceUpdateSources(
-    sources: List<suspend () -> UpdateSourceAnswer>,
+    sources: List<suspend () -> UpdateSourceAnswer?>,
     isNewer: (Int) -> Boolean,
     firstBudgetMillis: Long = UPDATE_FIRST_ANSWER_BUDGET_MS,
     settleMillis: Long = UPDATE_SETTLE_MS,
     noUpdateBudgetMillis: Long = UPDATE_NO_UPDATE_BUDGET_MS,
-): UpdateSourceAnswer? = coroutineScope {
-    if (sources.isEmpty()) return@coroutineScope null
+): UpdateRaceOutcome = coroutineScope {
+    if (sources.isEmpty()) {
+        return@coroutineScope UpdateRaceOutcome(best = null, answered = 0, dropped = 0, elapsedMillis = 0)
+    }
 
     // 谁先回来谁先投递；容量无限，源不会因为没人收而卡住。
-    val arrivals = Channel<Result<UpdateSourceAnswer>>(Channel.UNLIMITED)
+    val arrivals = Channel<Result<UpdateSourceAnswer?>>(Channel.UNLIMITED)
     val jobs = sources.map { source ->
         launch(Dispatchers.IO) { arrivals.send(runCatching { source() }) }
     }
 
-    try {
+    val outcome = try {
         val start = TimeSource.Monotonic.markNow()
         fun elapsed() = start.elapsedNow().inWholeMilliseconds
 
@@ -155,6 +181,7 @@ internal suspend fun raceUpdateSources(
             if (remaining <= 0) break
             val arrival = withTimeoutOrNull(remaining) { arrivals.receive() } ?: break
             answered++
+            // null = 这条源答了话但没内容（见 sources 的说明）：算应答，不参与比大小。
             val answer = arrival.getOrNull() ?: continue
             val currentBest = best
             if (currentBest == null || answer.versionCode > currentBest.versionCode) best = answer
@@ -165,11 +192,17 @@ internal suspend fun raceUpdateSources(
                 if (isNewer(answer.versionCode)) elapsed() + settleMillis else noUpdateBudgetMillis,
             )
         }
-        best
+        UpdateRaceOutcome(
+            best = best,
+            answered = answered,
+            dropped = sources.size - answered,
+            elapsedMillis = elapsed(),
+        )
     } finally {
         // 决定之后立刻掐掉还在挂着的源（见函数注释第 3 条）。
         jobs.forEach { it.cancel() }
     }
+    outcome
 }
 
 /**
@@ -226,6 +259,14 @@ object AppUpdateChecker {
     private const val TAG = "AppUpdateChecker"
 
     /**
+     * 本 mod 线的仓库。
+     *
+     * 只有 [fetchUpdateJsonFromTagList] 与 [releaseApkUrl] 用它 —— 正常路径的仓库地址
+     * 藏在 [UPDATE_URLS] 的那些 base64 里（沿用原实现的写法）。
+     */
+    private const val MOD_GITHUB_REPO = "ddsmie4t2g/HanimeViewer"
+
+    /**
      * 上游版本查询的**总预算**。
      *
      * 上游信息只是「告知」（它的包本应用装不上，见 [UpstreamReleaseInfo]），
@@ -249,8 +290,27 @@ object AppUpdateChecker {
      * ⚠️ **只有这份 json 带着 `versionCode`**，所以它是唯一能做「是否更新」判断、
      * 也是唯一能应用内下载安装的源。上游那条（[requestUpstreamLatest]）只能给出 tag。
      *
-     * 存两份、按顺序回退：`raw.githubusercontent.com` 在部分网络下直连不通，
-     * 先走 jsDelivr 这个 GitHub 加速 CDN，失败再退回 raw。
+     * ## 为什么要这么多条（26.9.3 扩充）
+     *
+     * 这些源会**同时**被问（见 [raceUpdateSources]，不等最慢的那条），所以「多加一条
+     * 在你这儿不通的源」几乎不花时间；而每一条都是**不同基础设施**上的同一份内容：
+     * 任何一条能通，检查更新就成立。反过来，「只留 1–2 条」意味着那一条所处的
+     * CDN 段一被墙，功能就整体失效 —— 用户报的「更新源又全都没用了」。
+     *
+     * | 源 | 基础设施 | 实测（2026-09-15，中国移动） |
+     * |---|---|---|
+     * | `cdn.jsdelivr.net` | jsDelivr / Fastly | 200 / 0.27 s（**钉 Fastly IP 后**）|
+     * | `fastly.jsdelivr.net` | jsDelivr / Fastly | 200 / 0.27 s |
+     * | `gcore.jsdelivr.net` | jsDelivr / Fastly | 200 / 0.37 s（**钉 Fastly IP 后**）|
+     * | `testingcf.jsdelivr.net` | jsDelivr / Fastly | 200 / 0.33 s（**钉 Fastly IP 后**）|
+     * | `jsdelivr.b-cdn.net` | jsDelivr / **Bunny** | 200 / 0.59–4.8 s（另一张 CDN，独立于 Fastly）|
+     * | `ghproxy.net` | 第三方 GitHub 代理 | 200 / 0.95 s |
+     * | `github.com/…/raw/…` | GitHub 本体（302 到 raw） | 本机 000（域名被墙），别的网络可能通 |
+     * | `raw.githubusercontent.com` | GitHub / Fastly | 200 / 1.2–1.6 s（**钉 185.199.x 后**）|
+     *
+     * ⚠️ 第三方代理（`ghproxy.net`）只当**补充**：它拿到的是同一份 json，但内容由第三方
+     * 转发，所以 [AppUpdatePayload.toAvailableUpdateOrNull] 仍然只信「网址合法 + 版本更大」，
+     * 而安装包**始终**从 json 里给的那个地址下载 —— 签名不同会被系统拒装，装不上假包。
      */
     private val UPDATE_URLS = listOf(
         // jsDelivr（GitHub 内容加速，国内一般可直连）
@@ -262,6 +322,16 @@ object AppUpdateChecker {
         "aHR0cHM6Ly9mYXN0bHkuanNkZWxpdnIubmV0L2doL2Rkc21pZTR0MmcvSGFuaW1lVmlld2VyQG1vZC91cGRhdGUuanNvbg==",
         "aHR0cHM6Ly9nY29yZS5qc2RlbGl2ci5uZXQvZ2gvZGRzbWllNHQyZy9IYW5pbWVWaWV3ZXJAbW9kL3VwZGF0ZS5qc29u",
         "aHR0cHM6Ly90ZXN0aW5nY2YuanNkZWxpdnIubmV0L2doL2Rkc21pZTR0MmcvSGFuaW1lVmlld2VyQG1vZC91cGRhdGUuanNvbg==",
+        // ⭐ 26.9.3：jsDelivr 的 **Bunny CDN** 入口（官方文档里的备用域名）。
+        // 它与上面四个走的**不是同一张 CDN**（实测 IP 109.61.83.243），
+        // 所以在「Fastly 段整体不通」的网络里它是唯一还能用的 jsDelivr 入口。
+        "aHR0cHM6Ly9qc2RlbGl2ci5iLWNkbi5uZXQvZ2gvZGRzbWllNHQyZy9IYW5pbWVWaWV3ZXJAbW9kL3VwZGF0ZS5qc29u",
+        // ⭐ 26.9.3：GitHub 本体入口（github.com 会 302 到 raw）。
+        // 它和 raw 不是一个**域名**，被墙/被投毒的范围常常不一样，多一条不亏。
+        "aHR0cHM6Ly9naXRodWIuY29tL2Rkc21pZTR0MmcvSGFuaW1lVmlld2VyL3Jhdy9tb2QvdXBkYXRlLmpzb24=",
+        // ⭐ 26.9.3：第三方 GitHub 代理（实测国内可直连，0.95 s）。
+        // 只当补充源：它是**别人**的服务器，所以排在自建/官方之后，且不参与任何写操作。
+        "aHR0cHM6Ly9naHByb3h5Lm5ldC9odHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vZGRzbWllNHQyZy9IYW5pbWVWaWV3ZXIvbW9kL3VwZGF0ZS5qc29u",
     )
 
     /** 原实现用于腾讯云 COS 防盗链；对 raw.githubusercontent 无影响，保留以免动到请求结构。 */
@@ -452,47 +522,162 @@ object AppUpdateChecker {
      * 挂死的源等满 connectTimeout ⇒ 「检测更新很久」）。现在两者都避开了：
      * 谁先答上来先记下、有一小段结算时间取更高版本、到点就把还在挂的源掐掉。
      *
-     * 一个源都没答上来时返回 null，由调用方退回上次缓存的 json。
+     * 一个 json 源都没答上来时，先记一条**说得清楚**的日志（应答几条、几条是「不等了」），
+     * 再退到两条**元数据兜底**（[fetchReleaseFromTagList] / [fetchReleaseFromGitHubLatest]，
+     * 它们不依赖 raw 文件分发）；都拿不到才返回 null 走缓存。
      */
     private suspend fun requestUpdateJson(): String? {
         val referer = ENCODED_UPDATE_REFERER.decodeFromStringByBase64(Base64.NO_WRAP)
-        val answer = raceUpdateSources(
+        val outcome = raceUpdateSources(
             sources = UPDATE_URLS.map { encoded ->
                 val url = encoded.decodeFromStringByBase64(Base64.NO_WRAP)
-                // 失败**逐条记日志**（赛跑本身不碰日志：它是纯逻辑，要能被单测直接调）。
-                suspend {
-                    runCatching { fetchUpdateSource(url, referer) }
-                        .onFailure { LogUtil.e(TAG, "更新源失败：$url", it) }
-                        .getOrThrow()
-                }
+                suspend { fetchUpdateSource(url, referer) }
             },
             isNewer = { it > currentVersionCode },
         )
-        answer?.let {
-            LogUtil.d(TAG, "更新源赛跑：采用 versionCode=${it.versionCode}（共 ${UPDATE_URLS.size} 条源）")
-        }
-        return answer?.json
+        LogUtil.d(
+            TAG,
+            "更新源赛跑：应答 ${outcome.answered}/${UPDATE_URLS.size} 条、" +
+                "${outcome.dropped} 条**不等了**（已拿到答案后主动放弃，不是失败）、" +
+                "用时 ${outcome.elapsedMillis} ms" +
+                (outcome.best?.let { "，采用 versionCode=${it.versionCode}" } ?: "，无可用应答"),
+        )
+        outcome.best?.let { return it.json }
+
+        // 8 条源拿的都是**同一个 json 文件**（只是不同 CDN 转发），所以要有一条
+        // 「不依赖 raw 文件分发」的路。两条元数据源同样**用赛跑**（不等最慢的）：
+        // jsDelivr 的包信息接口（tag 列表）与 GitHub 的 `releases/latest`。
+        val fallback = raceUpdateSources(
+            sources = listOf(
+                suspend { fetchReleaseFromTagList() },
+                suspend { fetchReleaseFromGitHubLatest() },
+            ),
+            isNewer = { it > currentVersionCode },
+        )
+        LogUtil.w(
+            TAG,
+            "所有 json 源都没答上来 ⇒ 元数据兜底：" +
+                (fallback.best?.let { "取到 versionCode=${it.versionCode}" } ?: "也没答上来"),
+        )
+        return fallback.best?.json
     }
 
-    /** 问一条更新源：拿到 json 并解析出 `versionCode`（解析不出来 = 这条源失败）。 */
+    /**
+     * 问一条更新源：拿到 json 并解析出 `versionCode`（解析不出来 = 这条源失败）。
+     *
+     * ⚠️ **取消（[CancellationException]）不算失败**：那是赛跑到点后主动把我们掐了
+     * （「已经拿到答案，不等了」）。26.9.2 把这种也算成失败记了日志，于是每一次检查
+     * 日志里都固定有两条「更新源失败：…」，看起来就像那两个源坏了 —— 用户报的
+     * 「两个更新源又全都没用了」就是被这条日志误导的。
+     */
     private suspend fun fetchUpdateSource(url: String, referer: String): UpdateSourceAnswer {
         val startedAt = TimeSource.Monotonic.markNow()
-        val request = Request.Builder()
-            .url(url)
-            .header("Referer", referer)
-            .get()
-            .build()
-        return client.newCall(request).await().use { response ->
-            check(response.isSuccessful) { "Update check failed with HTTP ${response.code}" }
-            val json = response.body.string()
-            val code = jsonParser.decodeFromString<AppUpdatePayload>(json).versionCode
-            LogUtil.d(
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("Referer", referer)
+                .get()
+                .build()
+            return client.newCall(request).await().use { response ->
+                check(response.isSuccessful) { "Update check failed with HTTP ${response.code}" }
+                val json = response.body.string()
+                val code = jsonParser.decodeFromString<AppUpdatePayload>(json).versionCode
+                LogUtil.d(
+                    TAG,
+                    "更新源 $url → versionCode=$code（${startedAt.elapsedNow().inWholeMilliseconds} ms）",
+                )
+                UpdateSourceAnswer(code, json)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            LogUtil.e(
                 TAG,
-                "更新源 $url → versionCode=$code（${startedAt.elapsedNow().inWholeMilliseconds} ms）",
+                "更新源失败：$url（${startedAt.elapsedNow().inWholeMilliseconds} ms）",
+                e,
             )
-            UpdateSourceAnswer(code, json)
+            throw e
         }
     }
+
+    /**
+     * 兜底 A：jsDelivr 的**包信息接口**（tag 列表）。它给得出 tag（`26.9.3`），
+     * 但**不给** update.json 的内容，所以下载地址按仓库既定命名拼、说明留空。
+     *
+     * ⚠️ 实测该接口的元数据**会滞后**（2026-09-15 查时最多只到 26.9.0，而 26.9.2 已发布），
+     * 所以它只是兜底：滞后只会「暂时看不到最新版」，不会报出比实际更新的版本
+     * （版本号仍然要**大于本机**才会提示）。
+     */
+    private suspend fun fetchReleaseFromTagList(): UpdateSourceAnswer? {
+        val url = "https://data.jsdelivr.com/v1/packages/gh/$MOD_GITHUB_REPO"
+        val body = client.newCall(Request.Builder().url(url).get().build())
+            .await().use { response ->
+                check(response.isSuccessful) { "jsDelivr HTTP ${response.code}" }
+                response.body.string()
+            }
+        val pkg = jsonParser.decodeFromString<JsDelivrPackage>(body)
+        val newest = pkg.versions
+            .map { it.version.trim().removePrefix("v") }
+            .mapNotNull { name -> versionCodeOf(name)?.let { code -> code to name } }
+            .maxByOrNull { it.first }
+            ?: return null
+        val (code, versionName) = newest
+        LogUtil.d(TAG, "tag 列表兜底：最新 tag=$versionName（$code）")
+        return UpdateSourceAnswer(code, synthesizedUpdateJson(versionName, code))
+    }
+
+    /**
+     * 兜底 B：GitHub 的 `releases/latest` —— **权威、不滞后**，但需要 api.github.com 能通
+     * （本机直连不通，配了代理/DNS 兜底的网络可以）。
+     *
+     * 刻意**不带** Release 正文当更新说明：那是 `release.yml` 自动拼的（含安装提示、
+     * 签名指纹、commit 列表），拿来当「更新内容」是噪音。说明缺失就让它缺着。
+     */
+    private suspend fun fetchReleaseFromGitHubLatest(): UpdateSourceAnswer? {
+        val url = "https://api.github.com/repos/$MOD_GITHUB_REPO/releases/latest"
+        val body = client.newCall(Request.Builder().url(url).get().build())
+            .await().use { response ->
+                check(response.isSuccessful) { "GitHub API HTTP ${response.code}" }
+                response.body.string()
+            }
+        val release = jsonParser.decodeFromString<GitHubRelease>(body)
+        // 预发布不当正式更新（客户端走 releases/latest 本来也拿不到预发布）
+        if (release.prerelease) return null
+        val versionName = release.tagName.trim().removePrefix("v")
+        val code = versionCodeOf(versionName) ?: return null
+        LogUtil.d(TAG, "GitHub releases/latest 兜底：tag=$versionName（$code）")
+        return UpdateSourceAnswer(code, synthesizedUpdateJson(versionName, code))
+    }
+
+    /**
+     * 由「版本名」合成一份最小 `update.json`。
+     *
+     * 只填 versionName / versionCode / downloadUrl 三项：更新说明、公告、是否强制更新
+     * 在兜底路径上**确实不知道**，那就留空 —— 界面少显示一行，比编一段内容好。
+     *
+     * 做成 internal 只是为了能被单测盯一眼「合成出来的 json 至少字段是对的」
+     * （这条兜底路平时跑不到，真跑起来时不能再出错）。
+     */
+    internal fun synthesizedUpdateJson(versionName: String, versionCode: Int): String =
+        jsonParser.encodeToString(
+            AppUpdatePayload(
+                versionName = versionName,
+                versionCode = versionCode,
+                downloadUrl = releaseApkUrl(versionName),
+            )
+        )
+
+    /**
+     * 按仓库**既定命名**拼 release 里 APK 的地址（供两条兜底路径用）：
+     *
+     *     releases/download/v<版本>/Han1meViewer-v<版本>.apk
+     *
+     * 这个命名不是猜的：`release.yml` 就是**从 APK 文件名反推 tag** 的，两边必须一致
+     * 才发得出去；2026-09-15 也用 API 核对过 v26.9.2 的资产地址与此完全一致。
+     */
+    private fun releaseApkUrl(versionName: String): String =
+        "https://github.com/$MOD_GITHUB_REPO/releases/download/v$versionName/" +
+            "Han1meViewer-v$versionName.apk"
 
     private fun String?.toUpdateCheckResult(): AppUpdateCheckResult {
         if (this.isNullOrBlank()) return AppUpdateCheckResult()
@@ -645,7 +830,7 @@ object AppUpdateChecker {
     //<editor-fold desc="版本号工具">
 
     /**
-     * 从 `26.3.2-mod.7.0` / `26.3.2` 里抠出前三段数字 `[26, 3, 2]`。
+     * 从 `26.3.2-mod.7.0` / `26.3.2` / `v26.9.3` 里抠出前三段数字 `[26, 3, 2]`。
      *
      * 只认「三段数字」这一种形式：上游的预览 tag（`26.3.0p`）也有 `26.3.0`，
      * 会被当成 26.3.0 参与比较 —— 即使如此也只会算出「不比 26.3.2 新」，不会误报。
@@ -654,6 +839,20 @@ object AppUpdateChecker {
         val match = VERSION_TRIPLE.find(raw) ?: return null
         val parts = match.groupValues.drop(1).mapNotNull { it.toIntOrNull() }
         return parts.takeIf { it.size == 3 }
+    }
+
+    /**
+     * `26.9.3` → `26009003`，与 `app/build.gradle.kts` 的口径一致：
+     *
+     *     versionCode = major * 1_000_000 + minor * 1_000 + patch
+     *
+     * ⚠️ **只有 tag 列表兜底这条路需要它**（[fetchUpdateJsonFromTagList] 只能拿到 tag）。
+     * 正常路径的 `versionCode` 是 `update.json` 里写好的，永远以 json 为准 ——
+     * 别反过来从 `versionName` 推算，那样两边一旦不同步就会变成「永远检测不到更新」。
+     */
+    internal fun versionCodeOf(versionName: String): Int? {
+        val parts = baseVersionParts(versionName) ?: return null
+        return parts[0] * 1_000_000 + parts[1] * 1_000 + parts[2]
     }
 
     /** 三段数字的字典序比较。 */
