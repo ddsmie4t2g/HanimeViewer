@@ -34,9 +34,12 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # 见 release.yml 里的详细说明：新版 cmdline-tools(16.0) 的 `sdkmanager --licenses`
-          # 变成两级提示，action 自带的自动应答失效 ⇒ 这一步直接 exit 1。
+          # 两个坑的完整说明在 release.yml 里，这里只记结论：
+          #   1) 新版 cmdline-tools(16.0) 的 `sdkmanager --licenses` 是两级提示，
+          #      action 只喂 10 个 `y` 不够 → 关掉，改由下面用 `yes` 自己喂。
+          #   2) `packages` 默认含 `tools`，而该包已从 Google 仓库下架 → 传空串跳过安装。
           accept-android-sdk-licenses: false
+          packages: ''
 
       - name: Install required SDK packages
         run: |
