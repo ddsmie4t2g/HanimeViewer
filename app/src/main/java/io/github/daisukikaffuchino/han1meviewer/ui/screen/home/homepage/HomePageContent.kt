@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.AppUpdateInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.Announcement
+import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhParser
 import io.github.daisukikaffuchino.han1meviewer.ui.component.lazy.LazyColumn
 import io.github.daisukikaffuchino.han1meviewer.ui.preview.ComponentPreview
 import io.github.daisukikaffuchino.han1meviewer.ui.preview.fakeAnnouncements
@@ -62,8 +63,22 @@ fun HomePageContent(
      * 「换一批」会在**两个数据源**之间轮换（推荐 ↔ 主页热门），标题必须跟着走，
      * 否则换出主页热门的片子、标题还写着「推荐」。
      * ⚠️ 只影响 `HOME_CATEGORY_RECOMMENDED` 那一行；其它行照旧用 `category.titleRes`。
+     *
+     * 默认值给「热门」是为了与 26.9.8 的初始状态（第 0 批 = 主页热门）一致 ——
+     * 真机上这个值一律由 `HomePageScreen` 从 ViewModel 传进来，默认值只服务 Preview。
      */
-    phCarouselTitleRes: Int = R.string.ph_recommended,
+    phCarouselTitleRes: Int = R.string.ph_hot,
+    /**
+     * 大轮播「更多」要带去的**检索标记**（26.9.8）。
+     *
+     * 「更多」必须跟着当前批次的数据源走：轮播上正在放主页热门，点「更多」就该进
+     * 主页热门那一页（全部 61 条），而不是把「推荐」列表丢给用户 ——
+     * 26.9.7 那个「点进去更多还是上一批」就是这么来的（那时这里写死用 `category` 自己的标记）。
+     *
+     * 取值来自 [io.github.daisukikaffuchino.han1meviewer.ui.screen.home.homepage.HomePageViewModel.phCarouselMarker]，
+     * 只对 `HOME_CATEGORY_RECOMMENDED` 那一行生效；其它行照旧用 `category` 自己的标记。
+     */
+    phCarouselMarker: String = PhParser.HOMEPAGE_HOT_MARKER,
     listState: LazyListState = rememberLazyListState()
 ) {
     val banners = remember(data.page.banner) {
@@ -146,7 +161,14 @@ fun HomePageContent(
                         ),
                         videos = category.videos,
                         onMoreClick = {
-                            val params = category.toAdvancedSearchParams()
+                            // ⚠️ 大轮播那一行**不能**用 `category` 自己的标记：它的内容会在
+                            //    「推荐」与「主页热门」之间轮换，而标记是建分类时就定死的（= 推荐）。
+                            //    用它就会出现「轮播放着热门、更多进推荐」—— 用户报的 bug。
+                            val params = if (category.key == HOME_CATEGORY_RECOMMENDED) {
+                                mapOf("genre" to phCarouselMarker)
+                            } else {
+                                category.toAdvancedSearchParams()
+                            }
                             if (params.isNotEmpty()) {
                                 onEvent(HomeUiEvent.NavigateToSearchAdvanced(params))
                             }

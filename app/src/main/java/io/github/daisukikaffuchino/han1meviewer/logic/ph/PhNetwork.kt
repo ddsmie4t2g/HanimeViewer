@@ -91,6 +91,23 @@ object PhNetwork {
     }
 
     /**
+     * 这个地址是不是**站点主页** —— 与 [isRecommendedUrl] 同一个用途：
+     * 决定列表页该用哪个解析器（主页要用 [PhParser.homepageHotList]）。
+     *
+     * ⭐ 26.9.8 新增这条判据，是为了让「热门色情视频」那一行也能有列表页：
+     * 首页大轮播的「更多」必须**跟着当前批次的数据源**走（原来是写死的「推荐」，
+     * 所以轮播上放着主页热门、点「更多」却进推荐列表 —— 用户报的「点进去更多还是上一批」）。
+     *
+     * ⚠️ 用 `encodedPath.trim('/').isEmpty()` 而不是拿字符串比 BASE_URL：
+     * 站点会发 `https://www.pornhub.com`（无尾斜杠）与 `.../`（有）两种形态，
+     * 字符串相等会漏掉一种。
+     */
+    fun isHomepageUrl(url: String): Boolean {
+        val path = url.toHttpUrlOrNull()?.encodedPath ?: return false
+        return path.trim('/').isEmpty()
+    }
+
+    /**
      * 站点**主页** —— 「热门色情视频」那一节的正文（`ul#singleFeedSection`）只在它上面。
      *
      * ## 为什么必须单独一趟（26.9.7）

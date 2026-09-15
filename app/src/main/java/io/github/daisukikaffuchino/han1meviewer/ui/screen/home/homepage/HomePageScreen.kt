@@ -81,6 +81,9 @@ fun HomePageScreen(
     val isPhCarouselShuffling by viewModel.phCarouselShuffling.collectAsStateWithLifecycle()
     // 大轮播的标题跟着当前数据源走（推荐 / 主页热门），所以从 ViewModel 取而不是写死。
     val phCarouselTitleRes by viewModel.phCarouselTitleRes.collectAsStateWithLifecycle()
+    // ⭐ 「更多」也要跟着当前批次的数据源走（26.9.8 修的 bug）：轮播上放着主页热门、
+    //    点「更多」却进推荐列表 = 给用户看上一批。标记同样从 ViewModel 取。
+    val phCarouselMarker by viewModel.phCarouselMarker.collectAsStateWithLifecycle()
     val settings by SettingsRepository.settings.collectAsStateWithLifecycle()
     val refreshState = rememberPullToRefreshState()
     val homeListState = rememberLazyListState()
@@ -258,6 +261,7 @@ fun HomePageScreen(
                                     isNjavSite = isNjavSite,
                                     isPhCarouselShuffling = isPhCarouselShuffling,
                                     phCarouselTitleRes = phCarouselTitleRes,
+                                    phCarouselMarker = phCarouselMarker,
                                     onEvent = onEvent,
                                     onCloseAnnouncement = viewModel::dismissAnnouncements,
                                     contentTopPadding = contentTopPadding,

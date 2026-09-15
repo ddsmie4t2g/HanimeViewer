@@ -25,6 +25,7 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.OnlineWatchHistorySo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoCommentArgs
 import io.github.daisukikaffuchino.han1meviewer.logic.model.VideoComments
+import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhCarouselBatches
 import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhNetwork
 import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhParser
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavActressCache
@@ -852,25 +853,37 @@ object NetworkRepo {
      *
      * ⚠️ 这些栏目是**独立请求**（每个约 140 KB 的 JSON，且都要过自建中转），
      * 所以别再加栏目了 —— 每多一个栏目就是首页首屏多等一次境外往返。
-     * 26.9.5 的「推荐」没有加进这个表，原因见下。
+     * 大轮播那一行没有加进这个表，原因见下。
      *
-     * ## 「推荐」为什么单独一趟、而且发两次
+     * ## 大轮播那一行为什么单独一趟、而且发两次
      *
-     * `/recommended` 不是检索接口，是一整页 HTML（**约 1 MB**，见 [PhNetwork.recommendedUrl]），
+     * 它的两个来源**都不是检索接口**，都是整页 HTML：主页「热门色情视频」约 **1.25 MB**、
+     * 「推荐」约 **1 MB**（见 [PhNetwork.homeUrl] / [PhNetwork.recommendedUrl]），
      * 比这里的每一个都重。所以它和这 10 个 JSON **并行**去取（`async` 就在这个流的
      * 作用域里），但**不挡首屏**：
      *
-     * 1. 10 个 JSON 到齐 → 立刻发一版（此时「推荐」那一行是空的，界面按
+     * 1. 10 个 JSON 到齐 → 立刻发一版（此时大轮播那一行是空的，界面按
      *    「没内容的行不画」处理，不会有空行闪烁）；
-     * 2. 那 1 MB 回来 → 再发一版把它补上。
+     * 2. 那 1.25 MB 回来 → 再发一版把它补上。
      *
      * 这正是 26.9.2 定下的规矩：首页**不等**慢东西（那时等的是更新检查）。
      * 用 `channelFlow` 而不是 `flow` 就是为了能在子协程里 `send` 两次。
-     * 推荐拉失败/解析不出（站点改版、被限流）时**只发第一版**，
-     * 一行不出现，而不是让整个首页报错。
+     * 拉失败/解析不出（站点改版、被限流）时**只发第一版**，一行不出现，而不是让整个首页报错。
+     *
+     * ## ⭐ 26.9.8：这一趟改成抓**主页热门**，不再是「推荐」
+     *
+     * 用户要求「视频应该优先显示热门色情视频」⇒ 大轮播首批 = 主页热门第 0 批。
+     * 两个来源的量级几乎一样（1.25 MB vs 1 MB），所以这一改**没有多花流量**：
+     * 原来是「首页抓推荐、换一批时才抓主页」，现在只是把两者对调 ——
+     * 「推荐」第 1 页改由「换一批」第一次轮到它时按需去要
+     * （见 [io.github.daisukikaffuchino.han1meviewer.logic.ph.PhCarouselBatches]）。
+     *
+     * ⚠️ **拿不到热门时不回退到推荐**。回退会让「标题/『更多』跟着数据源走」这件事变成假话
+     * —— 标题写着「热门」、内容却是推荐，正是 26.9.8 要修的那类毛病。
+     * 代价是这一行整个不出现（与 26.9.5/26.9.6 里推荐拿不到时的表现一致，不是新的失败模式）。
      */
     private fun phHomePageFlow(): Flow<WebsiteState<HomePage>> = channelFlow {
-        val recommended = async(Dispatchers.IO) { runCatching { fetchPhRecommended() }
+        val carousel = async(Dispatchers.IO) { runCatching { fetchPhHomepageHot() }
             .getOrDefault(mutableListOf()) }
 
         val sections = PhNetwork.HOME_SECTIONS.map { (key, query) ->
@@ -888,20 +901,60 @@ object NetworkRepo {
 
         send(PhParser.homePage(sections))
 
-        val reco = recommended.await()
-        if (reco.isNotEmpty()) send(PhParser.homePage(sections, reco))
+        // ⚠️ 只发**第 0 批**（21 条），不是整份 61 条：大轮播是「一批一批换」的，
+        //    首次加载显示的必须和 batchAt(0) 是同一批，否则换一批会看到重叠内容。
+        val first = carousel.await().take(PhCarouselBatches.BATCH_SIZE)
+        if (first.isNotEmpty()) send(PhParser.homePage(sections, first))
     }.catch { e ->
         emit(WebsiteState.Error(handlePhException(e)))
     }.flowOn(Dispatchers.IO)
 
     /**
-     * 取站点自己的「推荐」第 1 页（约 1 MB HTML，见 [PhNetwork.recommendedUrl]）。
+     * 主页「热门色情视频」那 61 条的**进程内缓存**（26.9.8）。
      *
-     * 只用来填首页那一行；「更多」进去的分页走 [phListFlow]。
+     * ## 为什么必须缓存
+     *
+     * 那一趟是 **1.25 MB 整页 HTML**，而热门那 3 批**来自同一份响应**
+     * （主页没有分页，见 [PhParser.homepageHotList]）。而「换一批」是**两个来源交替**
+     * ⇒ 每次绕回热门都会再要一次整页。不缓存的话，来回换十下就是十几 MB。
+     *
+     * 首页那次加载（[phHomePageFlow]）本来就已经把它取回来了，所以这里顺手留一份，
+     * 「换一批」第一次轮到热门就直接命中。**下拉刷新**会重新走 [phHomePageFlow]，
+     * 届时覆盖成新的一份（主页内容按出口 IP 固定，但刷新时拿到新的也没理由不用）。
+     *
+     * ⚠️ 只在进程内、不落库：主页那批是按出口 IP 定的，跨版本/跨网络都没意义。
      */
-    private suspend fun fetchPhRecommended(): MutableList<HanimeInfo> {
-        return getPhRecommendedPage(page = 1)
+    @Volatile
+    private var phHomepageHotCache: MutableList<HanimeInfo>? = null
+
+    /**
+     * 取站点**主页**「热门色情视频」那一节的全部卡片（26.9.8）。
+     *
+     * ⚠️ 代价与「推荐」同量级：**约 1.25 MB 整页 HTML**，且**没有 JSON 等价接口**
+     * （7 种 `ordering` 全部 0 重合 —— 见 [PhNetwork.homeUrl]）。
+     * 拿到的结果会写进 [phHomepageHotCache]（非空才写，免得一次失败把好缓存冲掉）。
+     *
+     * ⚠️ 拿不到内容时**抛异常**（HTTP 非 2xx）或返回**空列表**（解析不出卡片）——
+     * 调用方一律按「这一批没有」处理，别让首页炸掉。
+     */
+    private suspend fun fetchPhHomepageHot(): MutableList<HanimeInfo> = withContext(Dispatchers.IO) {
+        val response = PhNetwork.service.get(PhNetwork.homeUrl())
+        if (!response.isSuccessful) {
+            throw ParseException("Pornhub: HTTP ${response.code()} - homepage")
+        }
+        PhParser.homepageHotList(response.body()?.string().orEmpty()).also { list ->
+            if (list.isNotEmpty()) phHomepageHotCache = list
+        }
     }
+
+    /**
+     * 取主页「热门色情视频」的全部卡片 —— 命中缓存就不发请求（26.9.8）。
+     *
+     * 「换一批」轮回到热门那几批时走这里：3 批切的是**同一份**响应，
+     * 所以第 2、3 次轮到热门必须是内存命中，不能再下那 1.25 MB。
+     */
+    suspend fun getPhHomepageHot(): MutableList<HanimeInfo> =
+        phHomepageHotCache ?: fetchPhHomepageHot()
 
     /**
      * 取站点「推荐」的第 [page] 页 —— 首页那块大轮播**「换一批」**用（26.9.7）。
@@ -912,6 +965,11 @@ object NetworkRepo {
      *
      * 这里不用 [phListFlow]：那条路产出的是 `PageLoadingState` 且带着「列表页分页」的
      * 语义，而这里只要一批数据换掉轮播内容。两者共用 [PhParser.recommendedList] 即可。
+     *
+     * ⚠️ **这个不做缓存**（对比 [getPhHomepageHot] 的缓存）：轮播只在推荐那一侧**单向加页**
+     * （1→2→3…，越界才回卷第 1 页），不会来回重取同一页，缓存拿不到收益。
+     * 而 26.9.8 之后首页那次加载**不再**顺带取推荐第 1 页（改成取主页热门了），
+     * 所以「换一批」第一次轮到推荐时会真的发一趟约 1 MB 的请求 —— 这是预期的。
      */
     suspend fun getPhRecommendedPage(page: Int): MutableList<HanimeInfo> = withContext(Dispatchers.IO) {
         val response = PhNetwork.service.get(PhNetwork.recommendedUrl(page))
@@ -923,31 +981,16 @@ object NetworkRepo {
     }
 
     /**
-     * 取站点**主页**「热门色情视频」那一节的全部卡片（26.9.7）。
-     *
-     * ⚠️ 代价与「推荐」同量级：**约 1.25 MB 整页 HTML**，且**没有 JSON 等价接口**
-     * （7 种 `ordering` 全部 0 重合 —— 见 [PhNetwork.homeUrl]）。
-     * 所以这条路**只在用户第一次按到「换一批」轮到这个来源时才走**，
-     * 结果由调用方缓存，不参与首屏（首屏仍然只发那 10 个 JSON + 推荐那一趟）。
-     *
-     * ⚠️ 拿不到内容时返回空列表：轮播那边会退化成「这一批是空的」，
-     * 比让首页炸掉好。
-     */
-    suspend fun getPhHomepageHot(): MutableList<HanimeInfo> = withContext(Dispatchers.IO) {
-        val response = PhNetwork.service.get(PhNetwork.homeUrl())
-        if (!response.isSuccessful) {
-            throw ParseException("Pornhub: HTTP ${response.code()} - homepage")
-        }
-        PhParser.homepageHotList(response.body()?.string().orEmpty())
-    }
-
-    /**
      * Pornhub 列表页通用管线。
      *
      * ⭐ 26.9.5：同一个函数要伺候**两种页面** —— 检索接口给的 JSON，
      * 与「推荐」页给的 HTML（见 [PhNetwork.isRecommendedUrl]）。用哪一个解析器
      * **只由 url 决定**，别在别处再判一次，否则两边判据一漂移就会拿 JSON 解析器
      * 去啃 HTML（表现为「点进去一直空」）。
+     *
+     * ⭐ 26.9.8：第三种页面 —— 站点**主页**（`更多` 从大轮播的「热门色情视频」那一批进来时，
+     * 见 [PhNetwork.isHomepageUrl]）。它也用 HTML 解析器，但用 [PhParser.homepageHotState]
+     * （只取 `#singleFeedSection` 那 61 条，别把页头下拉里那 4 张混进来）。
      *
      * ⚠️ 推荐页**越界的页码是 404**（实测 `?page=999`），不是空页 ——
      * 必须把「第 2 页起的 404」翻译成 [PageLoadingState.NoMoreData]。
@@ -959,9 +1002,21 @@ object NetworkRepo {
         url: String,
     ): Flow<PageLoadingState<MutableList<HanimeInfo>>> = flow {
         val recommended = PhNetwork.isRecommendedUrl(url)
+        val homepage = PhNetwork.isHomepageUrl(url)
+
+        // ⚠️ 主页**只有一页**（没有分页参数、也没有「加载更多」接口）。列表页滚到底会来问
+        //    第 2 页 —— 直接答「没有了」，而且**在发请求之前就答**：那一趟是 1.25 MB 整页 HTML，
+        //    为了回一句「到底了」去下整页主页不值得。
+        //    （不这么做的话，用户每滚到底就白发一次 1.25 MB —— 正是 `recommendedState` 那份
+        //    KDoc 里说的「有效页码却渲染出空容器」那类白请求。）
+        if (homepage && page > 1) {
+            emit(PageLoadingState.NoMoreData)
+            return@flow
+        }
+
         val response = PhNetwork.service.get(url)
         if (!response.isSuccessful) {
-            if (recommended && page > 1 && response.code() == 404) {
+            if ((recommended || homepage) && page > 1 && response.code() == 404) {
                 emit(PageLoadingState.NoMoreData)
                 return@flow
             }
@@ -969,8 +1024,11 @@ object NetworkRepo {
         }
         val body = response.body()?.string().orEmpty()
         emit(
-            if (recommended) PhParser.recommendedState(body)
-            else PhParser.pageState(body, page)
+            when {
+                homepage -> PhParser.homepageHotState(body)
+                recommended -> PhParser.recommendedState(body)
+                else -> PhParser.pageState(body, page)
+            }
         )
     }.catch { e ->
         emit(PageLoadingState.Error(handlePhException(e)))
@@ -1030,10 +1088,18 @@ object NetworkRepo {
      * 有关键词就搜索；否则把 [genre] / [tags] / [sort] 里的标记交给
      * [PhParser.queryForMarker] 映射成排序或标签条件，都映射不上就兜底到「最新」。
      *
-     * ⭐ 26.9.5：「推荐」那一行是**唯一一个不走检索接口**的标记 ——
+     * ⭐ 26.9.5：「推荐」那一行是**第一个**不走检索接口的标记 ——
      * 它映射到 `/recommended` 整页（HTML），所以必须先问
      * [PhParser.isRecommendedMarker]，再问 [PhParser.queryForMarker]。
      * 顺序反了不会报错，只会静默退回「最新」（看着像「点了推荐却在看最新」）。
+     *
+     * ⭐ 26.9.8：**主页「热门色情视频」**同理（[PhParser.HOMEPAGE_HOT_MARKER]），
+     * 它映射到站点主页。加它是因为首页大轮播的「更多」以前写死用「推荐」标记 ⇒
+     * 轮播上放着主页热门、点「更多」却进推荐列表（用户报的「点进去更多还是上一批」）。
+     * 现在「更多」带的是**当前批次**的标记，所以这两种标记都可能从这条路进来。
+     *
+     * ⚠️ 三个判据的顺序有讲究：两个「页面型」标记都必须在 [PhParser.queryForMarker] **之前**，
+     * 因为它们不在那张检索映射表里 —— 顺序反了不会有编译错误，只会静默退化成「最新」。
      */
     private fun resolvePhListUrl(
         page: Int,
@@ -1049,6 +1115,11 @@ object NetworkRepo {
 
         val markers = sequenceOf(genre).plus(tags.asSequence()).plus(sequenceOf(sort))
             .mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }
+
+        // 主页热门：只有一个地址，page 参数无意义（那一页就是全部 61 条）。
+        if (markers.any { PhParser.isHomepageHotMarker(it) }) {
+            return PhNetwork.homeUrl()
+        }
 
         if (markers.any { PhParser.isRecommendedMarker(it) }) {
             return PhNetwork.recommendedUrl(page)

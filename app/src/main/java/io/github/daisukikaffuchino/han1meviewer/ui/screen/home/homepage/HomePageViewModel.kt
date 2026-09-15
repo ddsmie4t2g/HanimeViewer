@@ -19,6 +19,7 @@ import io.github.daisukikaffuchino.han1meviewer.logic.exception.LoginStateExpire
 import io.github.daisukikaffuchino.han1meviewer.logic.model.Announcement
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhCarouselBatches
+import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhParser
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageState
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
 import io.github.daisukikaffuchino.han1meviewer.logout
@@ -102,7 +103,7 @@ class HomePageViewModel: ViewModel() {
      */
     val phCarouselShuffling = _phCarouselShuffling.asStateFlow()
 
-    private val _phCarouselTitleRes = MutableStateFlow(R.string.ph_recommended)
+    private val _phCarouselTitleRes = MutableStateFlow(R.string.ph_hot)
 
     /**
      * 大轮播那一行现在该显示什么标题。
@@ -110,24 +111,35 @@ class HomePageViewModel: ViewModel() {
      * 两个来源的内容不是一回事（「推荐」是站点推荐引擎给的，「热门」是主页那个大网格），
      * 换到热门那几批时标题还写「推荐」就是**在骗用户**。所以标题跟着来源走。
      *
-     * 初值 = 「推荐」：首页首次加载填的正是推荐第 1 页。
+     * ⚠️ 初值 = 「热门」：26.9.8 起首页首次加载填的是**主页热门的第 0 批**
+     * （用户要求「视频应该优先显示热门色情视频」），不再是推荐第 1 页。
+     * 这个初值必须与 [PhCarouselBatches.batchAt]`(0)` 和
+     * [NetworkRepo.phHomePageFlow] 真正填进去的那一批**三者一致**，否则一进首页
+     * 标题就与内容对不上。
      */
     val phCarouselTitleRes = _phCarouselTitleRes.asStateFlow()
 
-    /**
-     * 当前展示的是**第几批**（见 [PhCarouselBatches]）。首页首次加载填的是第 0 批
-     * （推荐第 1 页），所以「换一批」从 1 起算。
-     */
-    private var phCarouselBatch = 0
+    private val _phCarouselMarker = MutableStateFlow(PhParser.HOMEPAGE_HOT_MARKER)
 
     /**
-     * 主页「热门色情视频」那 61 条的缓存。
+     * 大轮播当前那一批的**检索标记**，给「更多」用（26.9.8 修的 bug）。
      *
-     * ⚠️ 必须缓存：那一趟是 **1.25 MB 整页 HTML**，而热门那 3 批**来自同一份响应**
-     * （主页没有分页，见 `PhParser.homepageHotList`）。不缓存的话，用户在热门那几批之间
-     * 来回切一次就重下一遍整页。
+     * 「更多」以前写死用分类自己的标记（= 推荐），于是轮播上放着主页热门、
+     * 点「更多」进的却是推荐列表 —— 用户原话「点进去更多还是上一批，没换」。
+     * 现在「更多」带的是**这一批真正所属来源**的标记：
+     * 主页热门 → [PhParser.HOMEPAGE_HOT_MARKER]（落到站点主页，那一页就是全部 61 条），
+     * 推荐 → [PhParser.RECOMMENDED_MARKER]（落到 `/recommended` 列表，可继续翻页）。
+     *
+     * ⚠️ 必须与 [phCarouselTitleRes] **同生共死**：两个都是从「当前批次」推出来的，
+     * 谁漏改一处，就会出现「标题说热门、更多进推荐」这种半对半错的状态。
      */
-    private var phHomepageHotCache: MutableList<HanimeInfo>? = null
+    val phCarouselMarker = _phCarouselMarker.asStateFlow()
+
+    /**
+     * 当前展示的是**第几批**（见 [PhCarouselBatches]）。首页首次加载填的是第 0 批
+     * （26.9.8 起 = 主页热门第 0 批），所以「换一批」从 1 起算。
+     */
+    private var phCarouselBatch = 0
 
     private var homePageJob: Job? = null
     private var initializationJob: Job? = null
@@ -264,10 +276,11 @@ class HomePageViewModel: ViewModel() {
 
     private fun loadHomePage(isRefresh: Boolean) {
         homePageJob?.cancel()
-        // 首页重来一次，轮播也回到「第 0 批」（推荐第 1 页）—— 与页面上真正显示的内容对齐。
-        // ⚠️ 只重置**批次号**，不清 `phHomepageHotCache`：那一趟是 1.25 MB 整页 HTML，
-        //    而主页内容按出口 IP 固定，下拉刷新没理由让它白下一次。
+        // 首页重来一次，轮播也回到「第 0 批」—— 与页面上真正显示的内容对齐。
+        // 26.9.8 起第 0 批 = **主页热门第 0 批**（热门优先），所以标题与「更多」的标记
+        // 也必须跟着回到「热门」：不重置的话，下拉刷新会把内容换成热门、标题还留在「推荐」。
         phCarouselBatch = 0
+        setPhCarouselSource(PhCarouselBatches.batchAt(0))
         homePageJob = viewModelScope.launch {
             val current = _homePageFlow.value
             if (isRefresh && current is PageState.Success) {
@@ -339,16 +352,21 @@ class HomePageViewModel: ViewModel() {
             try {
                 val next = phCarouselBatch + 1
                 val batch = PhCarouselBatches.batchAt(next)
-                var items = loadPhCarouselBatch(batch)
+                val items = loadPhCarouselBatch(batch)
 
                 if (items.isEmpty() && batch is PhCarouselBatches.Batch.Recommended) {
                     // 「推荐」翻过头了 —— 站点对越界页回 404（不是空页）。
                     // 回卷第 1 页重来，**别把按钮点死**：这是正常的循环，不是错误。
-                    val restart = loadPhCarouselBatch(PhCarouselBatches.Batch.Recommended(1))
-                    if (restart.isNotEmpty()) {
-                        phCarouselBatch = 0
-                        _phCarouselTitleRes.value = R.string.ph_recommended
-                        applyPhCarouselItems(restart)
+                    val restart = PhCarouselBatches.Batch.Recommended(1)
+                    val restartItems = loadPhCarouselBatch(restart)
+                    if (restartItems.isNotEmpty()) {
+                        // ⚠️ 批次号必须跟着**真正显示出来的那一批**走。
+                        //    26.9.8 起 batchAt(0) 是主页热门，而这里显示的是推荐第 1 页
+                        //    ⇒ 它的序号是 **1**（`batchAt(1) == Recommended(1)`）。
+                        //    照旧写 0 的话，下一次「换一批」算出来还是推荐第 1 页 —— 按了没反应。
+                        phCarouselBatch = 1
+                        setPhCarouselSource(restart)
+                        applyPhCarouselItems(restartItems)
                         return@launch
                     }
                 }
@@ -361,11 +379,7 @@ class HomePageViewModel: ViewModel() {
                 }
 
                 phCarouselBatch = next
-                // 标题跟着来源走（推荐 / 主页热门），别让内容与标题对不上。
-                _phCarouselTitleRes.value = when (batch) {
-                    is PhCarouselBatches.Batch.Recommended -> R.string.ph_recommended
-                    is PhCarouselBatches.Batch.HomepageHot -> R.string.ph_hot
-                }
+                setPhCarouselSource(batch)
                 applyPhCarouselItems(items)
             } catch (e: CancellationException) {
                 // 主动取消不是失败，原样抛（见 26.9.3 那条日志教训）。
@@ -380,8 +394,32 @@ class HomePageViewModel: ViewModel() {
     }
 
     /**
-     * 取一批轮播内容。[PhCarouselBatches.Batch.HomepageHot] 的几批来自**同一份缓存**，
-     * 所以第二次轮到热门时不会再下那 1.25 MB。
+     * 把「标题」与「『更多』用哪个标记」一起按 [batch] 定下来。
+     *
+     * ⚠️ **两件事必须放同一处**：它们都是从「当前是哪一批」推出来的，分开写迟早会漏改一处，
+     * 结果就是「标题说热门、『更多』却进推荐」这种半对半错 —— 26.9.8 修的正是这个毛病。
+     */
+    private fun setPhCarouselSource(batch: PhCarouselBatches.Batch) {
+        when (batch) {
+            is PhCarouselBatches.Batch.HomepageHot -> {
+                _phCarouselTitleRes.value = R.string.ph_hot
+                _phCarouselMarker.value = PhParser.HOMEPAGE_HOT_MARKER
+            }
+
+            is PhCarouselBatches.Batch.Recommended -> {
+                _phCarouselTitleRes.value = R.string.ph_recommended
+                _phCarouselMarker.value = PhParser.RECOMMENDED_MARKER
+            }
+        }
+    }
+
+    /**
+     * 取一批轮播内容。
+     *
+     * ⚠️ 路径全都自带缓存/去重，别在这里再存一份：
+     * - 热门那 3 批切的是**同一份**主页响应 ⇒ 缓存在仓库层
+     *   （[NetworkRepo.getPhHomepageHot]），而首页那次加载本来就已经把它取回来了；
+     * - 推荐是单向加页，不需要缓存（见 [NetworkRepo.getPhRecommendedPage]）。
      */
     private suspend fun loadPhCarouselBatch(
         batch: PhCarouselBatches.Batch,
@@ -389,10 +427,7 @@ class HomePageViewModel: ViewModel() {
         is PhCarouselBatches.Batch.Recommended -> NetworkRepo.getPhRecommendedPage(batch.page)
 
         is PhCarouselBatches.Batch.HomepageHot -> {
-            val all = phHomepageHotCache ?: NetworkRepo.getPhHomepageHot()
-                .takeIf { it.isNotEmpty() }
-                ?.also { phHomepageHotCache = it }
-                .orEmpty()
+            val all = NetworkRepo.getPhHomepageHot()
             val from = batch.index * PhCarouselBatches.BATCH_SIZE
             all.drop(from).take(PhCarouselBatches.BATCH_SIZE)
         }

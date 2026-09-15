@@ -155,15 +155,20 @@ object PhParser {
     /**
      * 首页栏目 → 往 [HomePage] 哪个槽位填；由 [homePage] 使用。
      *
-     * @param recommended 站点自己的「推荐」（`/recommended` 页的第 1 页）。
-     *   单独传进来是因为它**不是**一个 JSON 检索栏目：它要抓一整页 HTML（约 1 MB），
-     *   比那 10 个 JSON 栏目都慢，所以仓库层是先发一版没有它的首页、等它回来再补发一版
+     * @param carousel 首页那块**大轮播的首批内容**，单独传进来是因为它**不是一个 JSON 检索栏目**：
+     *   它要抓一整页 HTML（约 1.25 MB），比那 10 个 JSON 栏目都慢，所以仓库层是先发一版
+     *   没有它的首页、等它回来再补发一版
      *   （见 [io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo.phHomePageFlow]）。
      *   为空时它占的槽位就是空列表，界面按「没内容的行不画」处理。
+     *
+     *   ⚠️ 26.9.8 起这里装的是**主页「热门色情视频」的第 0 批**（用户要求
+     *   「视频应该优先显示热门色情视频」），不再是「推荐」第 1 页 ——「推荐」改由
+     *   「换一批」按需去要（见 [io.github.daisukikaffuchino.han1meviewer.logic.ph.PhCarouselBatches]）。
+     *   参数名从 `recommended` 改成 `carousel` 就是为了不再暗示某一个具体来源。
      */
     fun homePage(
         sections: Map<String, List<HanimeInfo>>,
-        recommended: List<HanimeInfo> = emptyList(),
+        carousel: List<HanimeInfo> = emptyList(),
     ): WebsiteState<HomePage> {
         fun list(key: String) = sections[key].orEmpty().toMutableList()
         // 槽位名是 hanime 那边的叫法，内容与它毫无关系 —— 这里只是借用
@@ -171,7 +176,7 @@ object PhParser {
         // 里 isPornhubSite 的那几个分支，两边必须一一对应。
         //
         // Pornhub 用掉 10 个槽、留空 3 个（aiGenerated / newAnimeTrailer / cosplay），
-        // 「推荐」占 newAnimeTrailer —— 那是这三个里语义最不相干的一个（hanime 的
+        // 那一行大轮播占 newAnimeTrailer —— 那是这三个里语义最不相干的一个（hanime 的
         // 「本月新番预告」页在 Pornhub 根本没有对应物，见 [emptyPreview]）。
         return WebsiteState.Success(
             HomePage(
@@ -191,7 +196,7 @@ object PhParser {
                 mmd = list(PhNetwork.SEC_EXCLUSIVE),
                 cosplay = mutableListOf(),
                 watchingNow = list(PhNetwork.SEC_TOP_RATED),
-                newAnimeTrailer = recommended.toMutableList(),
+                newAnimeTrailer = carousel.toMutableList(),
                 userId = "",
             )
         )
@@ -231,6 +236,36 @@ object PhParser {
     /** [marker] 是不是「推荐」那一行的标记。 */
     fun isRecommendedMarker(marker: String?): Boolean =
         marker?.trim()?.let { it in RECOMMENDED_MARKERS } == true
+
+    /**
+     * ⭐ 主页「热门色情视频」那一行的标记（26.9.8）。
+     *
+     * 与 [RECOMMENDED_MARKER] 完全同理：**故意不走 [queryForMarker]** —— 那套映射的产物是
+     * 「同一个检索接口换参数」，而「热门色情视频」是主页上的一个区块（`ul#singleFeedSection`，
+     * 见 [homepageHotList]），没有 JSON 等价接口。由
+     * [io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo.resolvePhListUrl] 先问这一个、
+     * 再问 [isRecommendedMarker]、最后才问 [queryForMarker]。
+     *
+     * ## 为什么会有这个标记（它解决的是什么）
+     *
+     * 26.9.7 把主页热门接进了首页大轮播，但「更多」还是写死的「推荐」标记 ⇒
+     * 轮播上放着主页热门、点「更多」进的却是推荐列表。用户原话是
+     * 「点进去更多还是上一批，没换」。所以现在**「更多」跟着当前批次的数据源走**，
+     * 主页热门那一批带的就是这个标记，而它落到主页地址上（那一页就是全部 61 条）。
+     *
+     * ⚠️ **不要**收「熱門 / 热门」这种简写：那两个字已经属于「本週熱門」
+     * （见 [MARKER_TO_QUERY]，映射到 `ordering=mostviewed&period=weekly`），
+     * 收进来会让本週熱門那一栏的「更多」错进主页。
+     */
+    const val HOMEPAGE_HOT_MARKER = "熱門色情視頻"
+
+    private val HOMEPAGE_HOT_MARKERS = setOf(
+        HOMEPAGE_HOT_MARKER, "热门色情视频", "Hot Porn Videos", "homepage_hot"
+    )
+
+    /** [marker] 是不是主页「热门色情视频」那一行的标记。 */
+    fun isHomepageHotMarker(marker: String?): Boolean =
+        marker?.trim()?.let { it in HOMEPAGE_HOT_MARKERS } == true
 
     private val MARKER_TO_QUERY: Map<String, PhNetwork.PhQuery> = buildMap {
         PhNetwork.PhQuery(ordering = "newest").let { q ->
@@ -751,6 +786,23 @@ object PhParser {
         } else {
             mutableListOf()
         }
+    }
+
+    /**
+     * 主页「热门色情视频」的**列表页**结果（26.9.8）。
+     *
+     * 「更多」进到主页那一页时用它。判据与 [recommendedState] 一致：
+     * 这一页有卡片就 `Success`，没有就 `NoMoreData`（说明站点改版了或者被限流了）。
+     *
+     * ⚠️ **它只有一页**（主页没有分页参数、也没有加载更多接口，见 [homepageHotList]）。
+     * 「第二页」那件事由
+     * [io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo.phListFlow] 直接答
+     * `NoMoreData`，**根本不会走到这里** —— 所以这里不需要再看 page。
+     */
+    fun homepageHotState(body: String): PageLoadingState<MutableList<HanimeInfo>> {
+        val list = homepageHotList(body)
+        return if (list.isNotEmpty()) PageLoadingState.Success(list)
+        else PageLoadingState.NoMoreData
     }
 
     /**
