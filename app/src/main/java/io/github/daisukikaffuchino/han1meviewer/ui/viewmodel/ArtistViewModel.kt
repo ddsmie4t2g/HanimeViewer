@@ -156,9 +156,12 @@ class ArtistViewModel : ViewModel() {
             return
         }
 
-        // 3) 未命中才联网
+        // 3) 未命中才联网：先抓当月排行（一页 100 位）再翻索引页。
         viewModelScope.launch {
             val found = runCatching { NetworkRepo.findNjavActress(artist.name) }.getOrNull() ?: return@launch
+            // 详情页给的名字与卡片上的写法可能不同（繁简）—— 把这次查到的头像
+            // 也记到这个写法下，下次进作者页就是命中缓存、同帧出图。
+            runCatching { NjavActressCache.rememberAlias(artist.name, found) }
             applyResolvedAvatar(found.avatarUrl, found.videoCount)
         }
     }

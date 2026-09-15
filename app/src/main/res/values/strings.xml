@@ -43,7 +43,7 @@
     <string name="preview_month_not_updated">The site has not updated the preview for this month.</string>
     <string name="preview_archive_failed">Failed to load this month\'s releases</string>
     <string name="preview_archive_empty">Not on the site yet this month</string>
-    <string name="preview_archive_empty_hint">The site stopped posting previews, so this page lists what is actually online on hanime for the selected month (no longer limited to the Hentai genre tag — that filter made whole months come back empty). Uploads are up to the site and often land mid-month; check the Release schedule tab for what is scheduled.</string>
+    <string name="preview_archive_empty_hint">The site stopped posting previews, so this page lists the Hentai titles actually online on hanime for the selected month. Uploads are up to the site and often land mid-month; if this list is empty, the site genuinely has not uploaded any Hentai for that month yet. Check the Release schedule tab for what is scheduled.</string>
     <string name="preview_tab_getchu">Release schedule</string>
     <string name="preview_tab_hanime">Already online</string>
     <string name="preview_getchu_failed">Failed to load this month\'s release schedule</string>

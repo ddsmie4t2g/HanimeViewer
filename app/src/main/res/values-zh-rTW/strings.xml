@@ -43,7 +43,7 @@
     <string name="preview_month_not_updated">站方沒有更新該月度的新番預告</string>
     <string name="preview_archive_failed">該月上線的番劇載入失敗</string>
     <string name="preview_archive_empty">該月站方還沒有上架番劇</string>
-    <string name="preview_archive_empty_hint">站方預告停更後，這裡改為依上市月份列出該月已經在 hanime 上線的番劇（不再只限「裏番」標籤，否則整個月會落空）。上架由站方決定、常在月中之後；想知道這個月預定發售什麼請看「發售表」標籤。</string>
+    <string name="preview_archive_empty_hint">站方預告停更後，這裡改為依上市月份列出該月已經在 hanime 上線的裏番。上架由站方決定、常在月中之後；如果這裡是空的，代表站方這個月確實還沒傳裏番。想知道這個月預定發售什麼請看「發售表」標籤。</string>
     <string name="preview_tab_getchu">發售表</string>
     <string name="preview_tab_hanime">已上架</string>
     <string name="preview_getchu_failed">該月發售表載入失敗</string>

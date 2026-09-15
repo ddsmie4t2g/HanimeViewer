@@ -2,6 +2,7 @@ package io.github.daisukikaffuchino.han1meviewer.logic
 
 import io.github.daisukikaffuchino.utils.LogUtil
 import io.github.daisukikaffuchino.han1meviewer.EMPTY_STRING
+import io.github.daisukikaffuchino.han1meviewer.HANIME_GENRE_ANIME
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository.isAlreadyLogin
 import io.github.daisukikaffuchino.han1meviewer.R
@@ -136,16 +137,13 @@ object NetworkRepo {
      * 它返回的是**该月已经上市**的番剧，正好用来顶替停更月份的预告 ——
      * 打开 2026/8 列出的就是 8 月 1 日至 8 月底上线的那一批。
      *
-     * ⚠️ **不要再加 `genre=裏番`**（26.8.3 移除，见下）。
+     * ⚠️ **必须带 `genre=裏番`**（26.8.3 恢复）。
      *
-     * 26.8.4 曾经在这里钉死 `genre = "裏番"`，理由是「这一页叫里番新番列表」。
-     * 但 `date=` 问的是「这部片子在本站的上市日在不在这个月」，而月度归档要回答的是
-     * 「用户以为已经出来的那批在不在」。实测（2026-09-14）：`2026 年 9 月 + 裏番`
-     * **0 条**，同月**不限类型 59 条**；而 Getchu 的 9 月发售表（用户真正在看的「9 月里番」）
-     * 有 29 部。也就是说「按上市月 + 只认里番标签」这个组合在站点侧会整月落空，
-     * 用户看到的就是「明明已经上了几部，这里说该月还没有已上线的番剧」。
-     * 去掉 genre 之后该月列出的就是站点自己给出的那一批，和其它月份行为一致，
-     * 也不会再出现「整整一个月空白」。
+     * 中途一度把 genre 去掉，理由是「按上市月 + 只认里番标签会整月落空」
+     * （实测 2026-09-14：带标签 0 条、不带 59 条）。但**去掉标签的代价更大**：
+     * 这一页的标题是「某月 里番新番列表」，列表里混进 3D动画 / MMD / Cosplay / AI生成
+     * 之后，用户看到的就是「日历里怎么全给放上去了」。宁可某个月如实为空
+     * （空态文案已写明「站方还没有上架」），也不要拿别的类型冒充里番。
      *
      * @param year 年份，如 2026
      * @param month 月份 (1-12)
@@ -164,7 +162,8 @@ object NetworkRepo {
                 request = {
                     HanimeNetwork.hanimeService.getHanimeSearchResult(
                         page = page,
-                        // genre 刻意留空：理由见上面的 KDoc（钉死「裏番」会让整个月落空）。
+                        // 只认里番：加上它，该月列出的才是这一页该有的东西。
+                        genre = HANIME_GENRE_ANIME,
                         sort = "最新上市",
                         date = "$year 年 $month 月",
                     )
@@ -1023,7 +1022,23 @@ object NetworkRepo {
         // 1) 本地缓存：这是绝大多数调用的终点（浏览过一览/排行之后必中）。
         NjavActressCache.find(target)?.let { return it }
 
-        // 2) 并行翻页。`runCatching` 保证「某一页挂了」不会把拼页整个炸掉 ——
+        // 2) 先抓**当月排行**（一页 100 位，一次请求）：它覆盖的是「有名的那些人」，
+        //    而按影片数排序的一览页前三页只覆盖 72 位 —— 对不那么出名的女优，
+        //    多这一条路命中率明显更高。失败不影响后续步骤。
+        val ranking = runCatching {
+            val response = NjavNetwork.service.get(NjavNetwork.actressRankingUrl())
+            if (response.isSuccessful) {
+                NjavParser.actressList(response.body()?.string().orEmpty())
+            } else {
+                emptyList()
+            }
+        }.getOrDefault(emptyList())
+        if (ranking.isNotEmpty()) {
+            NjavActressCache.rememberAll(ranking)
+            ranking.firstOrNull { NjavActressCache.matches(it.name, target) }?.let { return it }
+        }
+
+        // 3) 并行翻索引页。`runCatching` 保证「某一页挂了」不会把拼页整个炸掉 ——
         //    一页失败时仍然可以用其它页的结果。
         val pages = coroutineScope {
             (1..maxPages).map { page ->
@@ -1037,7 +1052,7 @@ object NetworkRepo {
             }.awaitAll()
         }
 
-        // 3) 回填缓存（整页都留），再按页码顺序找目标。
+        // 4) 回填缓存（整页都留），再按页码顺序找目标。
         NjavActressCache.rememberAll(pages.flatten())
         return pages.firstNotNullOfOrNull { list ->
             list.firstOrNull { NjavActressCache.matches(it.name, target) }

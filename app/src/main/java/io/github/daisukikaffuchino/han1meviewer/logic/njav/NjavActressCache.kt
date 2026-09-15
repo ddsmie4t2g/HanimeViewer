@@ -188,6 +188,42 @@ object NjavActressCache {
     val size: Int get() = load().size
 
     /**
+     * 给同一个人**再存一个名字别名**（26.8.3）。
+     *
+     * 为什么需要：视频详情页与女优卡片**可能用繁简两种写法**给出同一个人的名字
+     * （`h4` 简体、`href` 繁体）。按名字查缓存时正好撞上这种差异就会 miss，
+     * 于是作者页补不到头像。别名把「同一个人的另一种写法」也指向同一张头像，
+     * 下一次查询就是命中缓存、同帧出图。
+     *
+     * @param name 别名（通常是详情页给的那个写法）
+     * @param source 已经从缓存里查到的条目
+     */
+    suspend fun rememberAlias(name: String, source: NjavActress) {
+        val alias = name.trim()
+        if (alias.isEmpty() || source.avatarUrl.isBlank()) return
+        val k = key(alias)
+        if (load().containsKey(k)) return
+        mutex.withLock {
+            val current = load().toMutableMap()
+            if (current.containsKey(k)) return@withLock
+            current[k] = Entry(
+                avatar = source.avatarUrl,
+                videoCount = source.videoCount,
+                debutYear = source.debutYear,
+                name = alias,
+                path = source.path,
+                rank = source.rank,
+                updatedAt = System.currentTimeMillis(),
+            )
+            snapshot = current
+            cachedPathIndex = null
+            runCatching {
+                SettingsRepository.setNjavActressCacheJson(json.encodeToString(current))
+            }
+        }
+    }
+
+    /**
      * 把一批刚从索引 / 排行页解析出来的女优记下来。
      *
      * @return 真正新增或更新的条数（0 表示没有任何变化，调用方可以据此跳过落盘）。
