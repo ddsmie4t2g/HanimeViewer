@@ -41,6 +41,20 @@ object GitHubDns : Dns {
         "185.199.111.133",
     )
 
+    /**
+     * jsDelivr 在中国大陆**能连的那一段**（Fastly）。
+     *
+     * 四个 jsDelivr 域名（`cdn` / `fastly` / `gcore` / `testingcf`）实测都吃这一段的 200 ——
+     * 它们只是同一后端的不同入口，而 104.17.x（Cloudflare）那一段是黑洞。
+     * 见 [ipsByHost] 里 26.9.2 的实测表。
+     */
+    private val jsDelivrFastlyIps = listOf(
+        "151.101.1.229",
+        "151.101.65.229",
+        "151.101.129.229",
+        "151.101.193.229",
+    )
+
     private val ipsByHost: Map<String, List<String>> = mapOf(
         "github.com" to listOf(
             // 26.8 复核（doh.pub）：GitHub 已经部分迁到 Azure 段，旧表里全是 Fastly/自建段。
@@ -79,26 +93,23 @@ object GitHubDns : Dns {
         // ⭐ 26.8 起：**主域名 + 三个 jsDelivr 镜像域名都进表**，并在
         // [UPDATE_URLS][io.github.daisukikaffuchino.han1meviewer.logic.AppUpdateChecker]
         // 里逐条回退 —— 一条 CDN 段被墙不再等于「检查更新不能用」。
-        "cdn.jsdelivr.net" to listOf(
-            "151.101.1.229",
-            "151.101.65.229",
-            "151.101.129.229",
-            "151.101.193.229",
-        ),
-        "fastly.jsdelivr.net" to listOf(
-            "151.101.1.229",
-            "151.101.65.229",
-            "151.101.129.229",
-            "151.101.193.229",
-        ),
-        "gcore.jsdelivr.net" to listOf(
-            "104.17.207.5",
-            "104.17.208.5",
-        ),
-        "testingcf.jsdelivr.net" to listOf(
-            "104.17.207.5",
-            "104.17.208.5",
-        ),
+        //
+        // ⭐ 26.9.2：**三个镜像域名统一钉 Fastly 段**。2026-09-15 实测（中国移动，本机直连）：
+        //
+        // | 域名 | @151.101.x（Fastly） | @104.17.x（Cloudflare） |
+        // |---|---|---|
+        // | `cdn.jsdelivr.net` | **200 / 0.27–0.57 s** | 000（connect 不返回） |
+        // | `gcore.jsdelivr.net` | **200 / 0.37–0.64 s** | 000 |
+        // | `testingcf.jsdelivr.net` | **200 / 0.33–1.48 s** | 000 |
+        //
+        // 而后两个域名当时钉的正是**已经黑洞的 Cloudflare 段**（系统 DNS 也返回这两个），
+        // 于是「检查更新」每次都要陪它们把 connectTimeout 走满 —— 用户感受到的就是
+        // 「检测更新很慢」。钉 Fastly 之后这三条都能用，慢的那条也就不存在了。
+        // （真正兜底的仍是「不拿最慢的源当结果」，见 `AppUpdateChecker` 的源赛跑。）
+        "cdn.jsdelivr.net" to jsDelivrFastlyIps,
+        "fastly.jsdelivr.net" to jsDelivrFastlyIps,
+        "gcore.jsdelivr.net" to jsDelivrFastlyIps,
+        "testingcf.jsdelivr.net" to jsDelivrFastlyIps,
         // 上游版本查询走 `data.jsdelivr.com`（与 cdn 不是一个 CDN 段）。
         "data.jsdelivr.com" to listOf(
             "167.82.49.91",

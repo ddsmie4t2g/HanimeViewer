@@ -15,17 +15,27 @@ import io.github.daisukikaffuchino.utils.applicationContext
 import io.github.daisukikaffuchino.utils.decodeFromStringByBase64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.time.TimeSource
 
 @Serializable
 data class AppUpdateInfo(
@@ -78,6 +88,110 @@ sealed interface AppUpdateState {
     data class Available(val info: AppUpdateInfo) : AppUpdateState
 }
 
+/** 一个更新源的应答：`versionCode` 用来比大小，`json` 是原样内容。 */
+internal data class UpdateSourceAnswer(val versionCode: Int, val json: String)
+
+/** 「等到第一个成功应答」的上限；一个都没答上来就退回缓存。 */
+internal const val UPDATE_FIRST_ANSWER_BUDGET_MS = 6_000L
+
+/** 已经确认「有更新」之后再多等这么久，看有没有源报出更高的版本。 */
+internal const val UPDATE_SETTLE_MS = 1_200L
+
+/** 判定「本构建已是最新」之前愿意等多久（防 jsDelivr 边缘的旧内容）。 */
+internal const val UPDATE_NO_UPDATE_BUDGET_MS = 4_000L
+
+/**
+ * **并发问所有更新源，但不等最慢的那一个。**
+ *
+ * ## 为什么不能 `awaitAll`
+ *
+ * 「取 versionCode 最大的那一份」这个规则要求**收到所有源的应答**，于是老实现是
+ * `UPDATE_URLS.map { async { … } }.awaitAll()` —— 只要有一条源是**黑洞**
+ * （TCP connect 不返回，只在 connectTimeout 时失败），整次检查就被它按在地上：
+ * 实测（2026-09-15，中国移动）5 条源里有 **3 条**是这种，每次「检查更新」都要
+ * 陪它们把 15 s 的连接超时走满。用户看到的就是「检测更新很久」。
+ *
+ * ## 现在的规则（三步）
+ *
+ * 1. **谁先答上来就用谁**：所有源同时开跑，谁先回谁的结果先记下（不再等所有源）；
+ * 2. **已经知道「有更新」就再等 [settleMillis] 收一收**：可能还有源报更高的版本，
+ *    等一小会儿取最大；再久就不值得了 —— 用户此刻要的就是「有新版本，能装」。
+ *    没有更新时反而愿意等满 [noUpdateBudgetMillis]（这是唯一会被「旧缓存」坑到的方向：
+ *    jsDelivr 边缘可能还缓存着旧内容，只信它的「已是最新」会漏掉刚发的版本）；
+ * 3. **到点就掐**：决定之后立刻 `cancel()` 掉还在挂着的源 —— 挂死的那几条不再占着
+ *    socket 和线程（这也要求用非阻塞的 [await] 而不是 `execute()`，否则取消掐不断）。
+ *
+ * 于是总耗时 ≈ 第一个应答（通常 0.3–1 s）+ 一小段结算时间，与「最慢的源」无关；
+ * 一个源都没答上来时也只等 [firstBudgetMillis]（6 s）就退回缓存，而不是 15 s 起。
+ *
+ * @param sources 各条源的取值函数（内部自己解析出 `versionCode`），抛异常=这条源失败
+ * @param isNewer 「这个版本号算不算比本机新」——用它决定还要不要继续等更高的版本
+ */
+internal suspend fun raceUpdateSources(
+    sources: List<suspend () -> UpdateSourceAnswer>,
+    isNewer: (Int) -> Boolean,
+    firstBudgetMillis: Long = UPDATE_FIRST_ANSWER_BUDGET_MS,
+    settleMillis: Long = UPDATE_SETTLE_MS,
+    noUpdateBudgetMillis: Long = UPDATE_NO_UPDATE_BUDGET_MS,
+): UpdateSourceAnswer? = coroutineScope {
+    if (sources.isEmpty()) return@coroutineScope null
+
+    // 谁先回来谁先投递；容量无限，源不会因为没人收而卡住。
+    val arrivals = Channel<Result<UpdateSourceAnswer>>(Channel.UNLIMITED)
+    val jobs = sources.map { source ->
+        launch(Dispatchers.IO) { arrivals.send(runCatching { source() }) }
+    }
+
+    try {
+        val start = TimeSource.Monotonic.markNow()
+        fun elapsed() = start.elapsedNow().inWholeMilliseconds
+
+        var best: UpdateSourceAnswer? = null
+        var answered = 0
+        var deadline = firstBudgetMillis
+
+        while (answered < sources.size) {
+            val remaining = deadline - elapsed()
+            if (remaining <= 0) break
+            val arrival = withTimeoutOrNull(remaining) { arrivals.receive() } ?: break
+            answered++
+            val answer = arrival.getOrNull() ?: continue
+            val currentBest = best
+            if (currentBest == null || answer.versionCode > currentBest.versionCode) best = answer
+            // ⭐ 已知「有更新」→ 只再等一小会儿取更高的；否则等满「没有更新」的预算，
+            //    免得被 jsDelivr 边缘的旧内容骗成「已是最新」。
+            deadline = minOf(
+                deadline,
+                if (isNewer(answer.versionCode)) elapsed() + settleMillis else noUpdateBudgetMillis,
+            )
+        }
+        best
+    } finally {
+        // 决定之后立刻掐掉还在挂着的源（见函数注释第 3 条）。
+        jobs.forEach { it.cancel() }
+    }
+}
+
+/**
+ * 非阻塞地等这次 call 的响应，并且**取消时真的把请求掐掉**。
+ *
+ * ⚠️ 别改回 `execute()`：它是阻塞调用，协程取消**掐不断**它 —— 源赛跑里「到点就掐」
+ * 就变成一句空话，挂死的源照样把线程和 socket 占满整个 connectTimeout。
+ */
+private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
+    continuation.invokeOnCancellation { cancel() }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            if (!continuation.isCancelled) continuation.resumeWithException(e)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            // 取消与响应同时发生时，response 必须自己关掉，否则连接不会归还连接池。
+            if (continuation.isCancelled) response.close() else continuation.resume(response)
+        }
+    })
+}
+
 @Serializable
 private data class AppUpdatePayload(
     val versionName: String? = null,
@@ -110,6 +224,15 @@ private data class GitHubRelease(
 @OptIn(ExperimentalSerializationApi::class)
 object AppUpdateChecker {
     private const val TAG = "AppUpdateChecker"
+
+    /**
+     * 上游版本查询的**总预算**。
+     *
+     * 上游信息只是「告知」（它的包本应用装不上，见 [UpstreamReleaseInfo]），
+     * 没有理由让手动检查弹窗陪着它等 —— 两条源都慢/都不通时到点就放弃，
+     * 把原因写进 `upstreamError` 如实显示。
+     */
+    private const val UPSTREAM_BUDGET_MS = 4_000L
 
     /**
      * **本仓库**（mod 线）的更新信息源，沿用原实现的 base64 写法，指向仓库根目录的
@@ -204,10 +327,14 @@ object AppUpdateChecker {
      *
      * `readTimeout` 从 15 s 放宽到 20 s：这个值约束的是「两次数据到达之间的最大间隔」，
      * 弱网下 15 s 太紧，会把「只是慢」误判成「失败」而白白切到更差的源。
+     *
+     * ⭐ `connectTimeout` 反过来收到 **5 s**：这几条源都是「连得上就很快（实测 0.07–0.32 s）、
+     * 连不上就是黑洞（connect 永远不返回）」的 CDN，15 s 只是让黑洞源多耗 10 s。
+     * 真正的兜底不是超时长短，而是 [raceUpdateSources]「到点就掐、不等最慢的源」。
      */
     private val client by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .dns(GitHubDns)
             .proxySelector(HProxySelector())
@@ -243,50 +370,59 @@ object AppUpdateChecker {
      *   [UpstreamReleaseInfo] 的说明）。
      *
      * 两边互相独立：一个挂了不影响另一个。
+     *
+     * @param includeUpstream 要不要顺带查上游版本。
+     *   ⭐ **首页那条路请传 false**：首页只消费 `updateInfo` 与 `announcement`
+     *   （见 `HomePageViewModel.initializeHomePage`），上游那条支线它根本不看 ——
+     *   带着它就等于每次开首页都白等一个额外请求（弱网下还是那句「检查更新很慢」）。
+     *   只有「关于」页那个手动检查弹窗需要上游信息。
      */
-    suspend fun checkForUpdate(): AppUpdateCheckResult = withContext(Dispatchers.IO) {
-        coroutineScope {
-            // 两条源**并发**跑，而不是串行。
-            //
-            // 上游那条纯粹是「告知」（它的包本应用装不上，见 [UpstreamReleaseInfo]），
-            // 串行的话，只要上游那条源慢（connect 10 s + read 15 s），
-            // 首页那张可安装的更新卡片就要跟着一起等 —— 用户看到的是「检查更新很慢」，
-            // 而慢的是那条根本不重要的支线。并发之后整体耗时 = max(两条源)，而不是相加。
-            val modDeferred = async { fetchModResult() }
-            val upstreamDeferred = async { runCatching { requestUpstreamLatest() } }
+    suspend fun checkForUpdate(includeUpstream: Boolean = true): AppUpdateCheckResult =
+        withContext(Dispatchers.IO) {
+            coroutineScope {
+                // 两条源**并发**跑，而不是串行：慢的那条不该拖住快的那条。
+                val modDeferred = async { fetchModResult() }
+                val upstreamDeferred = if (includeUpstream) {
+                    async { runCatching { requestUpstreamLatest() } }
+                } else {
+                    null
+                }
 
-            val modResult = modDeferred.await()
-            val upstreamOutcome = upstreamDeferred.await()
+                val modResult = modDeferred.await()
+                val upstreamOutcome = upstreamDeferred?.await()
 
-            var upstream: UpstreamReleaseInfo? = null
-            var upstreamError: String? = null
-            upstreamOutcome
-                .onSuccess { fetched ->
-                    if (fetched != null) {
-                        upstream = fetched
-                        LogUtil.d(
-                            TAG,
-                            "上游最新版本 ${fetched.version}（比当前基准新=${fetched.isNewerThanInstalled}）"
-                        )
+                var upstream: UpstreamReleaseInfo? = null
+                var upstreamError: String? = null
+                upstreamOutcome
+                    ?.onSuccess { fetched ->
+                        if (fetched != null) {
+                            upstream = fetched
+                            LogUtil.d(
+                                TAG,
+                                "上游最新版本 ${fetched.version}（比当前基准新=${fetched.isNewerThanInstalled}）"
+                            )
+                        }
                     }
-                }
-                .onFailure {
-                    upstreamError = it.message ?: it.javaClass.simpleName
-                    LogUtil.e(TAG, "查上游版本失败", it)
-                }
+                    ?.onFailure {
+                        upstreamError = it.message ?: it.javaClass.simpleName
+                        LogUtil.e(TAG, "查上游版本失败", it)
+                    }
 
-            AppUpdateCheckResult(
-                updateInfo = modResult.updateInfo,
-                announcement = modResult.announcement,
-                upstream = upstream,
-                upstreamError = upstreamError,
-            )
+                AppUpdateCheckResult(
+                    updateInfo = modResult.updateInfo,
+                    announcement = modResult.announcement,
+                    upstream = upstream,
+                    upstreamError = upstreamError,
+                )
+            }
         }
-    }
 
     /**
      * 读本仓库的 `update.json`（读不到就退回上次缓存），只负责回答
      * 「本构建有没有可安装的新版本」。
+     *
+     * 网络这边**不再抛异常**：一个源都没答上来时 [requestUpdateJson] 返回 null，
+     * 直接走缓存；缓存也没有就返回空结果（界面显示「已是最新」—— 这是原有的兜底语义）。
      */
     private suspend fun fetchModResult(): AppUpdateCheckResult {
         val cachedJson = SettingsRepository.current.cachedUpdateJson
@@ -294,12 +430,13 @@ object AppUpdateChecker {
             .onFailure { LogUtil.e(TAG, "检查本仓库更新失败", it) }
             .getOrNull()
 
-        if (responseJson != null) SettingsRepository.setCachedUpdateJson(responseJson)
-
-        val jsonToUse = responseJson ?: cachedJson
-        if (responseJson == null) {
-            jsonToUse?.let { LogUtil.d(TAG, "复用上次缓存的 update.json") }
+        if (responseJson != null) {
+            SettingsRepository.setCachedUpdateJson(responseJson)
+        } else {
+            if (cachedJson == null) LogUtil.w(TAG, "所有更新源都没答上来，且没有缓存可用")
+            else LogUtil.d(TAG, "复用上次缓存的 update.json")
         }
+        val jsonToUse = responseJson ?: cachedJson
         return jsonToUse.toUpdateCheckResult()
     }
 
@@ -308,47 +445,53 @@ object AppUpdateChecker {
     //<editor-fold desc="本仓库 update.json">
 
     /**
-     * 取 `update.json`：**并发问所有源，取 `versionCode` 最大的那一份**。
+     * 取 `update.json`：**并发问所有源，取 `versionCode` 最大的那一份**，
+     * 但**不等最慢的那一个**（赛跑的规则与理由见 [raceUpdateSources]）。
      *
-     * ⚠️ 这里以前是「第一个成功就返回」，有两个后果，都是用户能感知到的：
+     * ⚠️ 这里以前是「第一个成功就返回」（漏掉更新），后来改成 `awaitAll`（每次都要陪
+     * 挂死的源等满 connectTimeout ⇒ 「检测更新很久」）。现在两者都避开了：
+     * 谁先答上来先记下、有一小段结算时间取更高版本、到点就把还在挂的源掐掉。
      *
-     * 1. **jsDelivr 边缘节点会缓存旧内容**（发版后几分钟到十几小时不等）——
-     *    而它是列表里的第一条，于是「刚发的新版检测不到」。26.6.2 就踩过这个；
-     *    当时记下的修法是「两个源都请求、取较大的 versionCode」，但**代码一直没改**。
-     * 2. 单条源不通时只能串行重试，弱网下「检查更新」会一次比一次慢。
-     *
-     * 现在：并发（总耗时 = 最慢那条，而不是相加）→ 逐条解析 → 取版本号最大的；
-     * 全都失败才抛错（由上层退回缓存）。列表里放了主 CDN + 三个镜像域名 + raw
-     * 共 5 条，**任一条能通就够**。
+     * 一个源都没答上来时返回 null，由调用方退回上次缓存的 json。
      */
-    private suspend fun requestUpdateJson(): String = coroutineScope {
+    private suspend fun requestUpdateJson(): String? {
         val referer = ENCODED_UPDATE_REFERER.decodeFromStringByBase64(Base64.NO_WRAP)
-        val results = UPDATE_URLS.map { encoded ->
-            async(Dispatchers.IO) {
+        val answer = raceUpdateSources(
+            sources = UPDATE_URLS.map { encoded ->
                 val url = encoded.decodeFromStringByBase64(Base64.NO_WRAP)
-                runCatching {
-                    val request = Request.Builder()
-                        .url(url)
-                        .header("Referer", referer)
-                        .get()
-                        .build()
-                    client.newCall(request).execute().use { response ->
-                        check(response.isSuccessful) {
-                            "Update check failed with HTTP ${response.code}"
-                        }
-                        val json = response.body.string()
-                        val code = jsonParser
-                            .decodeFromString<AppUpdatePayload>(json)
-                            .versionCode
-                        LogUtil.d(TAG, "更新源 $url → versionCode=$code")
-                        code to json
-                    }
-                }.onFailure { LogUtil.e(TAG, "更新源失败：$url", it) }
-            }
-        }.awaitAll().mapNotNull { it.getOrNull() }
+                // 失败**逐条记日志**（赛跑本身不碰日志：它是纯逻辑，要能被单测直接调）。
+                suspend {
+                    runCatching { fetchUpdateSource(url, referer) }
+                        .onFailure { LogUtil.e(TAG, "更新源失败：$url", it) }
+                        .getOrThrow()
+                }
+            },
+            isNewer = { it > currentVersionCode },
+        )
+        answer?.let {
+            LogUtil.d(TAG, "更新源赛跑：采用 versionCode=${it.versionCode}（共 ${UPDATE_URLS.size} 条源）")
+        }
+        return answer?.json
+    }
 
-        results.maxByOrNull { it.first }?.second
-            ?: throw IllegalStateException("所有更新源都失败了（共 ${UPDATE_URLS.size} 条）")
+    /** 问一条更新源：拿到 json 并解析出 `versionCode`（解析不出来 = 这条源失败）。 */
+    private suspend fun fetchUpdateSource(url: String, referer: String): UpdateSourceAnswer {
+        val startedAt = TimeSource.Monotonic.markNow()
+        val request = Request.Builder()
+            .url(url)
+            .header("Referer", referer)
+            .get()
+            .build()
+        return client.newCall(request).await().use { response ->
+            check(response.isSuccessful) { "Update check failed with HTTP ${response.code}" }
+            val json = response.body.string()
+            val code = jsonParser.decodeFromString<AppUpdatePayload>(json).versionCode
+            LogUtil.d(
+                TAG,
+                "更新源 $url → versionCode=$code（${startedAt.elapsedNow().inWholeMilliseconds} ms）",
+            )
+            UpdateSourceAnswer(code, json)
+        }
     }
 
     private fun String?.toUpdateCheckResult(): AppUpdateCheckResult {
@@ -417,8 +560,22 @@ object AppUpdateChecker {
      * 拿到 tag 就能拼出发布页；`tag → 26.4.0` 这种直接可读，也不需要额外维护一份 json。
      *
      * 顺序：jsDelivr（可直连）→ GitHub API（需要代理/DNS 兜底，但能多拿到更新说明）。
+     *
+     * ⚠️ 整条链有**总预算** [UPSTREAM_BUDGET_MS]：上游信息只是「告知」（装不上），
+     * 不值得让手动检查弹窗陪着它等 —— 超时就把原因放进 `upstreamError`，弹窗里如实显示。
      */
     private suspend fun requestUpstreamLatest(): UpstreamReleaseInfo? {
+        // runCatching 包一层，好把「超时」与「源报错」分开：超时时 withTimeoutOrNull 返回 null，
+        // 而包成 Result 之后内部无论如何都不会返回 null。
+        val outcome = withTimeoutOrNull(UPSTREAM_BUDGET_MS) {
+            runCatching { fetchUpstreamLatest() }
+        }
+        // 超时：内层两条请求都已取消（它们走的是可取消的 await），这里给出明确的失败原因。
+        return outcome?.getOrThrow()
+            ?: throw IllegalStateException("上游版本查询超时（${UPSTREAM_BUDGET_MS / 1000} 秒）")
+    }
+
+    private suspend fun fetchUpstreamLatest(): UpstreamReleaseInfo? {
         var lastError: Throwable? = null
 
         runCatching { requestUpstreamFromJsDelivr() }
@@ -440,10 +597,10 @@ object AppUpdateChecker {
         return null
     }
 
-    private fun requestUpstreamFromJsDelivr(): UpstreamReleaseInfo? {
+    private suspend fun requestUpstreamFromJsDelivr(): UpstreamReleaseInfo? {
         val url = "https://data.jsdelivr.com/v1/packages/gh/$UPSTREAM_GITHUB_REPO"
         val body = upstreamClient.newCall(Request.Builder().url(url).get().build())
-            .execute().use { response ->
+            .await().use { response ->
                 check(response.isSuccessful) { "jsDelivr HTTP ${response.code}" }
                 response.body.string()
             }
@@ -457,10 +614,10 @@ object AppUpdateChecker {
         return tag.toUpstreamReleaseInfo(changelog = "")
     }
 
-    private fun requestUpstreamFromGitHubApi(): UpstreamReleaseInfo? {
+    private suspend fun requestUpstreamFromGitHubApi(): UpstreamReleaseInfo? {
         val url = "https://api.github.com/repos/$UPSTREAM_GITHUB_REPO/releases/latest"
         val body = client.newCall(Request.Builder().url(url).get().build())
-            .execute().use { response ->
+            .await().use { response ->
                 check(response.isSuccessful) { "GitHub API HTTP ${response.code}" }
                 response.body.string()
             }

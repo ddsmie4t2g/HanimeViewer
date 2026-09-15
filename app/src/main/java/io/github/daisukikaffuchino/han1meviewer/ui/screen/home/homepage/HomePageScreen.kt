@@ -134,6 +134,17 @@ fun HomePageScreen(
     }
     val forcedUpdate = availableUpdate?.takeIf { it.forceUpdate }
 
+    /**
+     * 「正在检查更新」该不该占屏。
+     *
+     * ⭐ 只在**首页内容还没到手**时占。更新检查要并发问 5 条更新源，部分网络下其中几条是
+     * 黑洞（见 `AppUpdateChecker.raceUpdateSources`），老逻辑是「检查没回来就一直转圈」——
+     * 内容其实早就到了，用户却盯着「正在检查更新」等。现在内容一到就照常显示，
+     * 更新卡片/公告回来时再插进去；强制更新仍然整页接管（见下面的 forcedUpdate 分支）。
+     */
+    val blockingUpdateCheck =
+        !showSimulatedUpdate && updateState is AppUpdateState.Checking && pageState.dataOrNull == null
+
     // ViewModel 的状态 → 纯 UI 状态。卡片只认 AppUpdateActionState，不依赖 ViewModel。
     val updateActionState = when (val s = updateDownloadState) {
         is HomePageViewModel.UpdateDownloadState.Idle -> AppUpdateActionState.Idle
@@ -199,15 +210,17 @@ fun HomePageScreen(
                         .pullToRefresh(
                             state = refreshState,
                             isRefreshing = isCurrentlyRefreshing,
-                            enabled = showSimulatedUpdate || updateState !is AppUpdateState.Checking,
+                            // 内容到手就允许下拉刷新 —— 更新检查还在跑不该让手势失效。
+                            enabled = showSimulatedUpdate ||
+                                updateState !is AppUpdateState.Checking ||
+                                pageState.dataOrNull != null,
                             onRefresh = {
                                 viewModel.getHomePage(isRefresh = true)
                             }
                         )
                 ) {
                     PageContent(
-                        isLoading = (!showSimulatedUpdate && updateState is AppUpdateState.Checking) ||
-                            pageState.isFirstPageLoading,
+                        isLoading = blockingUpdateCheck || pageState.isFirstPageLoading,
                         isError = pageState.isFirstPageError,
                         isEmpty = pageState.isFirstPageError || pageState.isFirstPageEmpty,
                         errorMessage = (pageState as? PageState.Error)?.throwable
@@ -215,7 +228,7 @@ fun HomePageScreen(
                             ?.let { stringResource(it) }
                             ?: "",
                         onRetry = { viewModel.getHomePage(isRefresh = false) },
-                        loadingMessage = if (!showSimulatedUpdate && updateState is AppUpdateState.Checking) {
+                        loadingMessage = if (blockingUpdateCheck) {
                             stringResource(R.string.checking_for_updates)
                         } else {
                             loadingHint

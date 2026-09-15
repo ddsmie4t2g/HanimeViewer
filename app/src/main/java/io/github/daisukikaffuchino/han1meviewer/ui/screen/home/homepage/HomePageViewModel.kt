@@ -152,21 +152,40 @@ class HomePageViewModel: ViewModel() {
         _updateDownloadState.value = UpdateDownloadState.Idle
     }
 
+    /**
+     * 首屏初始化：**首页内容与更新检查同时开始**。
+     *
+     * ## 为什么不再「先检查更新、再加载首页」
+     *
+     * 老顺序是 `checkForUpdate()` 回来之后才 `getHomePage()`，而更新检查要并发问 5 条更新源
+     * （部分网络下其中几条是黑洞，只能靠 connectTimeout 兜底）。于是「打开 App」实际是
+     * **先等更新检查**——界面上那段时间就是一句「正在检查更新」的转圈（见 `HomePageScreen`
+     * 的 `updateState is Checking` 分支）。用户报的「检测更新时间有点长」正是这一段。
+     *
+     * 现在两件事互不依赖，各跑各的：
+     * - 首页内容立刻开始加载（数据一到就画出来）；
+     * - 更新检查在后台跑，回来时把「更新卡片 / 公告」插进去。
+     *
+     * ⚠️ **强制更新**的语义没变：它照样整页接管（`HomePageScreen` 的 `forcedUpdate` 分支），
+     * 只是首页那点数据已经在后台加载好了 —— 先加载没有副作用。
+     *
+     * ⚠️ 首页这条路**不查上游版本**（`includeUpstream = false`）：它只消费 `updateInfo`
+     * 与 `announcement`，上游那条支线（`AppUpdateCheckResult.upstream`）只有「关于」页的
+     * 手动检查弹窗才用得上，带着它只是白等一个请求。
+     */
     fun initializeHomePage() {
         // 【自用构建】原来这里要求「使用须知已接受 + 应用来源已验证」才放行，
         // 那是给公开分发用的门禁。本构建已去掉这两个对话框，门禁一并移除，
         // 免得旧版本残留的 false 把首页数据挡在门外。
         if (initializationJob != null || _appUpdateState.value !is AppUpdateState.Checking) return
+        loadHomePage(isRefresh = false)
         initializationJob = viewModelScope.launch {
-            val updateResult = AppUpdateChecker.checkForUpdate()
+            val updateResult = AppUpdateChecker.checkForUpdate(includeUpstream = false)
             _updateAnnouncement.value = updateResult.announcement
             val updateInfo = updateResult.updateInfo
             _appUpdateState.value = updateInfo
                 ?.let { AppUpdateState.Available(it) }
                 ?: AppUpdateState.NoUpdate
-            if (updateInfo?.forceUpdate != true) {
-                getHomePage()
-            }
         }
     }
 
@@ -179,16 +198,27 @@ class HomePageViewModel: ViewModel() {
         }
     }
 
-    fun getHomePage(isRefresh: Boolean = false){
-        // 【自用构建】同上，不再校验使用须知 / 来源标志
+    /**
+     * 首页内容入口（下拉刷新 / 重试 / 首屏都走它）。
+     *
+     * 更新检查还在跑时**不再把整个首页挡回去**：首屏交给 [initializeHomePage]
+     * （它已经会把内容加载起来），已经初始化过就直接加载 —— 否则「检查更新还在跑」
+     * 会让下拉刷新、错误重试全部变成点了没反应。
+     */
+    fun getHomePage(isRefresh: Boolean = false) {
         when (val updateState = _appUpdateState.value) {
-            AppUpdateState.Checking -> {
+            AppUpdateState.Checking -> if (initializationJob == null) {
                 initializeHomePage()
                 return
             }
+
             is AppUpdateState.Available -> if (updateState.info.forceUpdate) return
             AppUpdateState.NoUpdate -> Unit
         }
+        loadHomePage(isRefresh)
+    }
+
+    private fun loadHomePage(isRefresh: Boolean) {
         homePageJob?.cancel()
         homePageJob = viewModelScope.launch {
             val current = _homePageFlow.value

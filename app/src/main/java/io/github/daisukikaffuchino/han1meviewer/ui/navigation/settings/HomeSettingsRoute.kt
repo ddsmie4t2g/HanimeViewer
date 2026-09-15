@@ -510,7 +510,12 @@ fun HomeSettingsRouteScreen(
             if (updateCheckState is AboutUpdateCheckState.Checking) return@HomeSettingsScreen
             updateCheckState = AboutUpdateCheckState.Checking
             coroutineScope.launch {
-                val outcome = runCatching { AppUpdateChecker.checkForUpdate() }
+                // 弹窗要显示「上游最新版本」那一行，所以这里是**唯一**需要顺带查上游的地方
+                // （首页那条路传 false：它不消费上游信息，带着只是白等一个请求）。
+                // 上游那条链在 AppUpdateChecker 里有总预算，不会把弹窗拖住。
+                val outcome = runCatching {
+                    AppUpdateChecker.checkForUpdate(includeUpstream = true)
+                }
                 updateCheckState = outcome.fold(
                     onSuccess = { AboutUpdateCheckState.Done(it) },
                     onFailure = { error ->
