@@ -72,12 +72,31 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # ⚠️ 2026-09-15：这一步曾经把发布整体卡死，原因和修法记在这里，别再退回去。
+          #
+          # runner 镜像把 SDK 的 cmdline-tools 升到了 **16.0**（预装的 `cmdline-tools/latest`
+          # 还是 12.0，action 判定 "Wrong version" 于是改用 `cmdline-tools/16.0/bin/sdkmanager`）。
+          # 新版 `sdkmanager --licenses` 改成了**两级提示**：
+          #     1) `Review licenses that have not been accepted (y/N)?`
+          #     2) 每条 license 再问一次 `Accept? (y/N):`
+          # 而 action 自带的自动应答只认老的一级提示 ⇒ 拿不到合法的 `y` ⇒
+          # 这一步以 `exit code 1` 失败，表现是「tag 推上去了，Release 一直不出来」。
+          #
+          # 所以这里**关掉 action 的 license 步骤**，改由下面的步骤自己用 `yes` 喂输入
+          # （`yes` 会一直输出 `y`，两级提示都能应付）。
+          accept-android-sdk-licenses: false
 
       - name: Install required SDK packages
         run: |
+          # 先接受 license：`--licenses` 与 `--install` 都接上 `yes`，
+          # 万一某个包还要单独确认也不会卡住。失败不致命（下一步会报真错）。
+          yes 2>/dev/null | sdkmanager --licenses > /dev/null 2>&1 || true
+          echo "licenses 目录："; ls -1 "$ANDROID_SDK_ROOT/licenses" 2>/dev/null || echo "(空)"
+
           # compileSdk = 37  → platforms;android-37.0
           # 原生库 libchino.so 走 CMake 3.22.1 + NDK 28.2.13676358
-          sdkmanager --install \
+          yes 2>/dev/null | sdkmanager --install \
             "platforms;android-37.0" \
             "build-tools;37.0.0" \
             "ndk;28.2.13676358" \

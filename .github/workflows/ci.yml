@@ -40,12 +40,19 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # 见 release.yml 里的详细说明：新版 cmdline-tools(16.0) 的 `sdkmanager --licenses`
+          # 变成两级提示，action 自带的自动应答失效 ⇒ 这一步直接 exit 1。
+          # 关掉它，改由下面自己用 `yes` 喂输入。
+          accept-android-sdk-licenses: false
 
       - name: Install required SDK packages
         run: |
+          yes 2>/dev/null | sdkmanager --licenses > /dev/null 2>&1 || true
+
           # compileSdk = 37  → platforms;android-37.0
           # 原生库 libchino.so 走 CMake 3.22.1 + NDK 28.2.13676358
-          sdkmanager --install \
+          yes 2>/dev/null | sdkmanager --install \
             "platforms;android-37.0" \
             "build-tools;37.0.0" \
             "ndk;28.2.13676358" \
