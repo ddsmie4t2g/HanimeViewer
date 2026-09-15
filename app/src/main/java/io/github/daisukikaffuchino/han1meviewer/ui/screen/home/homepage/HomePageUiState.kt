@@ -21,6 +21,17 @@ sealed interface HomeUiEvent {
     data class NavigateToSearchAdvanced(val params: Map<String, String>) : HomeUiEvent
     data class OpenVideo(val videoCode: String) : HomeUiEvent
     data class LongPressVideoCopy(val videoCode: String, val videoTitle: String) : HomeUiEvent
+
+    /**
+     * 用户点了首页那块大轮播的「换一批」（26.9.7）。
+     *
+     * 站点自己给的那批内容**不是随机也不是缓存**：实测同一出口 IP 反复抓到的
+     * **21/21 完全一致**（见 `reference/pornhub.md`），所以「换一批」必须真的去要
+     * **另一批**，不能在本地的 21 条里打乱充数。批次表见
+     * [io.github.daisukikaffuchino.han1meviewer.logic.ph.PhCarouselBatches]。
+     */
+    data object ShufflePhCarousel : HomeUiEvent
+
     data object ShowExitDialog : HomeUiEvent
     data class ShowAnnouncementDialog(val announcement: Announcement) : HomeUiEvent
     /**

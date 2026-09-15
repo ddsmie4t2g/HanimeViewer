@@ -77,6 +77,10 @@ fun HomePageScreen(
     val updateState by viewModel.appUpdateState.collectAsStateWithLifecycle()
     val updateAnnouncement by viewModel.updateAnnouncement.collectAsStateWithLifecycle()
     val updateDownloadState by viewModel.updateDownloadState.collectAsStateWithLifecycle()
+    // 大轮播「换一批」期间禁用按钮（26.9.7）—— 每次换一批都是一趟 1 MB+ 的请求。
+    val isPhCarouselShuffling by viewModel.phCarouselShuffling.collectAsStateWithLifecycle()
+    // 大轮播的标题跟着当前数据源走（推荐 / 主页热门），所以从 ViewModel 取而不是写死。
+    val phCarouselTitleRes by viewModel.phCarouselTitleRes.collectAsStateWithLifecycle()
     val settings by SettingsRepository.settings.collectAsStateWithLifecycle()
     val refreshState = rememberPullToRefreshState()
     val homeListState = rememberLazyListState()
@@ -252,6 +256,8 @@ fun HomePageScreen(
                                     isAVSite = isAVSite,
                                     isPornhubSite = isPornhubSite,
                                     isNjavSite = isNjavSite,
+                                    isPhCarouselShuffling = isPhCarouselShuffling,
+                                    phCarouselTitleRes = phCarouselTitleRes,
                                     onEvent = onEvent,
                                     onCloseAnnouncement = viewModel::dismissAnnouncements,
                                     contentTopPadding = contentTopPadding,

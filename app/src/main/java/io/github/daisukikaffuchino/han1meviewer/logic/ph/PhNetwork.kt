@@ -91,6 +91,31 @@ object PhNetwork {
     }
 
     /**
+     * 站点**主页** —— 「热门色情视频」那一节的正文（`ul#singleFeedSection`）只在它上面。
+     *
+     * ## 为什么必须单独一趟（26.9.7）
+     *
+     * 用户截图里那个带红点的「热门色情视频」（英文站叫 `Hot Porn Videos`），
+     * 正文是主页里的 `ul#singleFeedSection`：实测 **61 条**卡片（另有 1 张广告卡）。
+     *
+     * ⚠️⚠️ **它只存在于主页 HTML**（~1.25 MB）：
+     * - `/video`、`/video?o=ht`、`/video?o=tr`、`/video?o=mv` 上**都没有**这个容器，
+     *   它们的 h1 分别是「最新精选色情片」/「Hottest … Seychelles」/「本月评价最好的」…
+     *   ⇒ 不是「同一个列表换个门」。
+     * - `/webmasters/search` 试了 7 种 `ordering`（`hot` / `hottest` / `trending` /
+     *   `featured` / `mostviewed` / `rating` / `newest`），与主页那批 **全部 0 重合**
+     *   ⇒ **没有 JSON 等价接口**。（`ordering` 只有 newest/mostviewed/rating 真生效，
+     *   其余会静默退回默认排序 —— 见 [HOME_SECTIONS] 的注释。）
+     * - 主页也**没有**「加载更多 / 无限滚动」接口（`/front/` 下面只有登录那几个）。
+     *   ⇒ 这 61 条是**固定的一批，不能翻页**；这与「推荐」能翻 18+ 页不同。
+     *
+     * ⚠️ 别把域名换成 `cn.pornhub.com`：内容一样，但那样要在中转白名单里多挂一个
+     * 域名（见 [CdnRelay.mustRelay]）。应用里所有请求都走 [BASE_URL]，
+     * 界面上的栏目名是我们自己的字符串，与站点用哪种语言无关。
+     */
+    fun homeUrl(): String = BASE_URL
+
+    /**
      * embed 页。**播放地址的保底来源** —— 只有 48 KB、且签名形态稳定可取，
      * 但只有 480P 一档。详见 [embedUrl]。
      */

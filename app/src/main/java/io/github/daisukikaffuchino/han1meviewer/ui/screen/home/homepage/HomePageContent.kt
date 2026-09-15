@@ -14,6 +14,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.AppUpdateInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.Announcement
 import io.github.daisukikaffuchino.han1meviewer.ui.component.lazy.LazyColumn
@@ -49,6 +50,20 @@ fun HomePageContent(
     isPornhubSite: Boolean = false,
     /** 是否走 nJAV：它的首页栏目要按**站点真实导航**命名（26.8）。 */
     isNjavSite: Boolean = false,
+    /**
+     * 大轮播是否正在「换一批」（26.9.7）。
+     *
+     * 只有 Pornhub 的「推荐」那一行有这个概念，其它行/其它数据源传默认值即可。
+     */
+    isPhCarouselShuffling: Boolean = false,
+    /**
+     * 大轮播此刻的标题资源 id（26.9.7）。
+     *
+     * 「换一批」会在**两个数据源**之间轮换（推荐 ↔ 主页热门），标题必须跟着走，
+     * 否则换出主页热门的片子、标题还写着「推荐」。
+     * ⚠️ 只影响 `HOME_CATEGORY_RECOMMENDED` 那一行；其它行照旧用 `category.titleRes`。
+     */
+    phCarouselTitleRes: Int = R.string.ph_recommended,
     listState: LazyListState = rememberLazyListState()
 ) {
     val banners = remember(data.page.banner) {
@@ -123,7 +138,12 @@ fun HomePageContent(
                 //    遮蔽 `items(...)`，报一长串 receiver type mismatch。
                 when (category.style) {
                     HomeCategoryStyle.CAROUSEL -> FeaturedCarousel(
-                        title = stringResource(category.titleRes),
+                        // 标题**跟着数据源走**：这一行的内容会在「推荐」和「主页热门」之间
+                        // 轮换，换过去之后标题还写着「推荐」就成了假标签。
+                        title = stringResource(
+                            if (category.key == HOME_CATEGORY_RECOMMENDED) phCarouselTitleRes
+                            else category.titleRes
+                        ),
                         videos = category.videos,
                         onMoreClick = {
                             val params = category.toAdvancedSearchParams()
@@ -134,6 +154,15 @@ fun HomePageContent(
                         onVideoClick = { code ->
                             onEvent(HomeUiEvent.OpenVideo(code))
                         },
+                        // 「换一批」只有 Pornhub 那一行有（它的取数是站点的另一个页面，
+                        // 能真的换出另一批）。别的行是检索接口的固定排序，换不出来，
+                        // 所以用 key 判断，而不是「有轮播就给按钮」。
+                        onShuffle = if (category.key == HOME_CATEGORY_RECOMMENDED) {
+                            { onEvent(HomeUiEvent.ShufflePhCarousel) }
+                        } else {
+                            null
+                        },
+                        isShuffling = isPhCarouselShuffling,
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
 

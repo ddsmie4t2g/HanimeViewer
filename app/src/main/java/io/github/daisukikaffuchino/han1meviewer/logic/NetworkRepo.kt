@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.last
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -899,11 +900,45 @@ object NetworkRepo {
      * 只用来填首页那一行；「更多」进去的分页走 [phListFlow]。
      */
     private suspend fun fetchPhRecommended(): MutableList<HanimeInfo> {
-        val response = PhNetwork.service.get(PhNetwork.recommendedUrl(page = 1))
+        return getPhRecommendedPage(page = 1)
+    }
+
+    /**
+     * 取站点「推荐」的第 [page] 页 —— 首页那块大轮播**「换一批」**用（26.9.7）。
+     *
+     * ⚠️ **越界页码站点回 404**（实测 `?page=999`），不是空页 ⇒ 这里把它翻成
+     * **空列表**，让调用方回卷到第 1 页，而不是把 404 抛成一个错误弹给用户
+     * （与 [phListFlow] 里那条「第 2 页起的 404 当到底了」是同一个判据）。
+     *
+     * 这里不用 [phListFlow]：那条路产出的是 `PageLoadingState` 且带着「列表页分页」的
+     * 语义，而这里只要一批数据换掉轮播内容。两者共用 [PhParser.recommendedList] 即可。
+     */
+    suspend fun getPhRecommendedPage(page: Int): MutableList<HanimeInfo> = withContext(Dispatchers.IO) {
+        val response = PhNetwork.service.get(PhNetwork.recommendedUrl(page))
         if (!response.isSuccessful) {
-            throw ParseException("Pornhub: HTTP ${response.code()} - recommended")
+            if (response.code() == 404) return@withContext mutableListOf()
+            throw ParseException("Pornhub: HTTP ${response.code()} - recommended p$page")
         }
-        return PhParser.recommendedList(response.body()?.string().orEmpty())
+        PhParser.recommendedList(response.body()?.string().orEmpty())
+    }
+
+    /**
+     * 取站点**主页**「热门色情视频」那一节的全部卡片（26.9.7）。
+     *
+     * ⚠️ 代价与「推荐」同量级：**约 1.25 MB 整页 HTML**，且**没有 JSON 等价接口**
+     * （7 种 `ordering` 全部 0 重合 —— 见 [PhNetwork.homeUrl]）。
+     * 所以这条路**只在用户第一次按到「换一批」轮到这个来源时才走**，
+     * 结果由调用方缓存，不参与首屏（首屏仍然只发那 10 个 JSON + 推荐那一趟）。
+     *
+     * ⚠️ 拿不到内容时返回空列表：轮播那边会退化成「这一批是空的」，
+     * 比让首页炸掉好。
+     */
+    suspend fun getPhHomepageHot(): MutableList<HanimeInfo> = withContext(Dispatchers.IO) {
+        val response = PhNetwork.service.get(PhNetwork.homeUrl())
+        if (!response.isSuccessful) {
+            throw ParseException("Pornhub: HTTP ${response.code()} - homepage")
+        }
+        PhParser.homepageHotList(response.body()?.string().orEmpty())
     }
 
     /**

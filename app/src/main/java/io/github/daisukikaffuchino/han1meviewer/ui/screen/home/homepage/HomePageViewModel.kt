@@ -17,15 +17,19 @@ import io.github.daisukikaffuchino.han1meviewer.logic.entity.HKeyframeEntity
 import io.github.daisukikaffuchino.han1meviewer.logic.entity.WatchHistoryEntity
 import io.github.daisukikaffuchino.han1meviewer.logic.exception.LoginStateExpiredException
 import io.github.daisukikaffuchino.han1meviewer.logic.model.Announcement
+import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
+import io.github.daisukikaffuchino.han1meviewer.logic.ph.PhCarouselBatches
 import io.github.daisukikaffuchino.han1meviewer.logic.state.PageState
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
 import io.github.daisukikaffuchino.han1meviewer.logout
 import io.github.daisukikaffuchino.han1meviewer.ui.viewmodel.AppViewModel
+import io.github.daisukikaffuchino.utils.SonnerToast
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.HanimeScreen
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.HomeRoute
 import io.github.daisukikaffuchino.han1meviewer.ui.navigation.main.TopLevelBackStack
 import io.github.daisukikaffuchino.han1meviewer.worker.AppUpdateWorker
 import io.github.daisukikaffuchino.han1meviewer.worker.AppUpdateWorkState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -86,9 +90,49 @@ class HomePageViewModel: ViewModel() {
     private val _updateAnnouncement = MutableStateFlow<Announcement?>(null)
     val updateAnnouncement = _updateAnnouncement.asStateFlow()
 
+    private val _phCarouselShuffling = MutableStateFlow(false)
+
+    /**
+     * 首页那块大轮播是否正在「换一批」。
+     *
+     * 必须显式暴露：换一批要真的去站点要下一批（推荐是 ~1 MB HTML、
+     * 主页热门是 ~1.25 MB HTML，见 `PhNetwork.homeUrl`），**没有反馈的按钮
+     * 会被当成没反应**，然后用户会连着点几下 —— 那几下都会变成重复请求。
+     * UI 拿它禁用按钮 + 换文案。
+     */
+    val phCarouselShuffling = _phCarouselShuffling.asStateFlow()
+
+    private val _phCarouselTitleRes = MutableStateFlow(R.string.ph_recommended)
+
+    /**
+     * 大轮播那一行现在该显示什么标题。
+     *
+     * 两个来源的内容不是一回事（「推荐」是站点推荐引擎给的，「热门」是主页那个大网格），
+     * 换到热门那几批时标题还写「推荐」就是**在骗用户**。所以标题跟着来源走。
+     *
+     * 初值 = 「推荐」：首页首次加载填的正是推荐第 1 页。
+     */
+    val phCarouselTitleRes = _phCarouselTitleRes.asStateFlow()
+
+    /**
+     * 当前展示的是**第几批**（见 [PhCarouselBatches]）。首页首次加载填的是第 0 批
+     * （推荐第 1 页），所以「换一批」从 1 起算。
+     */
+    private var phCarouselBatch = 0
+
+    /**
+     * 主页「热门色情视频」那 61 条的缓存。
+     *
+     * ⚠️ 必须缓存：那一趟是 **1.25 MB 整页 HTML**，而热门那 3 批**来自同一份响应**
+     * （主页没有分页，见 `PhParser.homepageHotList`）。不缓存的话，用户在热门那几批之间
+     * 来回切一次就重下一遍整页。
+     */
+    private var phHomepageHotCache: MutableList<HanimeInfo>? = null
+
     private var homePageJob: Job? = null
     private var initializationJob: Job? = null
     private var updateDownloadJob: Job? = null
+    private var phCarouselJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -220,6 +264,10 @@ class HomePageViewModel: ViewModel() {
 
     private fun loadHomePage(isRefresh: Boolean) {
         homePageJob?.cancel()
+        // 首页重来一次，轮播也回到「第 0 批」（推荐第 1 页）—— 与页面上真正显示的内容对齐。
+        // ⚠️ 只重置**批次号**，不清 `phHomepageHotCache`：那一趟是 1.25 MB 整页 HTML，
+        //    而主页内容按出口 IP 固定，下拉刷新没理由让它白下一次。
+        phCarouselBatch = 0
         homePageJob = viewModelScope.launch {
             val current = _homePageFlow.value
             if (isRefresh && current is PageState.Success) {
@@ -263,6 +311,111 @@ class HomePageViewModel: ViewModel() {
         if (current is PageState.Success) {
             _homePageFlow.value = current.copy(info = current.info.copy(announcements = emptyList()))
         }
+    }
+
+    /**
+     * 首页那块大轮播的**「换一批」**（26.9.7）。
+     *
+     * ## 为什么必须真去问站点
+     *
+     * 「推荐」那一批**不是随机的、也不是每次新算的**：实测同一出口 IP 连抓 13 次
+     * （含换 cookie / Referer / 加随机串）**21/21 完全一致**；换一台中转机才拿到
+     * 0/21 重合的另一批 —— 即**内容按出口 IP 固定**。所以「在本地 21 条里打乱」
+     * 是假的，必须去要**另一批**。批次表见 [PhCarouselBatches]。
+     *
+     * ## 两个来源的能力不一样
+     *
+     * - 「推荐」：21 条/页，**能翻 18+ 页**（越界回 404 ⇒ 这里回卷到第 1 页）；
+     * - 主页「热门色情视频」：**61 条一次性**，主页没有分页也没有加载更多接口 ⇒
+     *   本地按 21 条切成 3 批轮换，且**结果缓存**（那一趟是 1.25 MB 整页 HTML）。
+     *
+     * ⚠️ 全程互斥（`phCarouselJob`）：连点几下不能变成几个并发的大请求。
+     * 同时把 [phCarouselShuffling] 抛给 UI 去禁用按钮。
+     */
+    fun shufflePhCarousel() {
+        if (phCarouselJob?.isActive == true) return
+        phCarouselJob = viewModelScope.launch {
+            _phCarouselShuffling.value = true
+            try {
+                val next = phCarouselBatch + 1
+                val batch = PhCarouselBatches.batchAt(next)
+                var items = loadPhCarouselBatch(batch)
+
+                if (items.isEmpty() && batch is PhCarouselBatches.Batch.Recommended) {
+                    // 「推荐」翻过头了 —— 站点对越界页回 404（不是空页）。
+                    // 回卷第 1 页重来，**别把按钮点死**：这是正常的循环，不是错误。
+                    val restart = loadPhCarouselBatch(PhCarouselBatches.Batch.Recommended(1))
+                    if (restart.isNotEmpty()) {
+                        phCarouselBatch = 0
+                        _phCarouselTitleRes.value = R.string.ph_recommended
+                        applyPhCarouselItems(restart)
+                        return@launch
+                    }
+                }
+
+                if (items.isEmpty()) {
+                    // 真拿不到（站点改版 / 被限流）。保持原样并如实提示，
+                    // 不要静默什么都不发生 —— 那会让用户以为按钮坏了。
+                    SonnerToast.error(R.string.ph_shuffle_failed)
+                    return@launch
+                }
+
+                phCarouselBatch = next
+                // 标题跟着来源走（推荐 / 主页热门），别让内容与标题对不上。
+                _phCarouselTitleRes.value = when (batch) {
+                    is PhCarouselBatches.Batch.Recommended -> R.string.ph_recommended
+                    is PhCarouselBatches.Batch.HomepageHot -> R.string.ph_hot
+                }
+                applyPhCarouselItems(items)
+            } catch (e: CancellationException) {
+                // 主动取消不是失败，原样抛（见 26.9.3 那条日志教训）。
+                throw e
+            } catch (e: Exception) {
+                LogUtil.e(TAG, "换一批失败", e)
+                SonnerToast.error(R.string.ph_shuffle_failed)
+            } finally {
+                _phCarouselShuffling.value = false
+            }
+        }
+    }
+
+    /**
+     * 取一批轮播内容。[PhCarouselBatches.Batch.HomepageHot] 的几批来自**同一份缓存**，
+     * 所以第二次轮到热门时不会再下那 1.25 MB。
+     */
+    private suspend fun loadPhCarouselBatch(
+        batch: PhCarouselBatches.Batch,
+    ): List<HanimeInfo> = when (batch) {
+        is PhCarouselBatches.Batch.Recommended -> NetworkRepo.getPhRecommendedPage(batch.page)
+
+        is PhCarouselBatches.Batch.HomepageHot -> {
+            val all = phHomepageHotCache ?: NetworkRepo.getPhHomepageHot()
+                .takeIf { it.isNotEmpty() }
+                ?.also { phHomepageHotCache = it }
+                .orEmpty()
+            val from = batch.index * PhCarouselBatches.BATCH_SIZE
+            all.drop(from).take(PhCarouselBatches.BATCH_SIZE)
+        }
+    }
+
+    /**
+     * 把新的一批塞进已经显示出来的首页数据里。
+     *
+     * ⚠️ **只动 `newAnimeTrailer` 这一个槽位**（Pornhub 用它装那一行大轮播，
+     * 见 `HomePageMappers`），**不重新加载整个首页** —— 重新加载会让别的 10 行
+     * 一起闪一下、还会把用户滚动位置顶掉。
+     *
+     * ⚠️ 首页还没加载出来时直接放弃：那时轮播上根本没有按钮可点，
+     * 能走到这里说明是竞态，丢掉这一批比拼出一个半成品首页好。
+     */
+    private fun applyPhCarouselItems(items: List<HanimeInfo>) {
+        val current = _homePageFlow.value
+        if (current !is PageState.Success) return
+        _homePageFlow.value = current.copy(
+            info = current.info.copy(
+                page = current.info.page.copy(newAnimeTrailer = items.toMutableList())
+            )
+        )
     }
 
     fun deleteWatchHistory(history: WatchHistoryEntity) {

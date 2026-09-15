@@ -121,6 +121,7 @@ fun HomeRouteScreen(
                         copyTextToClipboard(getHanimeShareText(event.videoTitle, event.videoCode))
                         SonnerToast.success(R.string.copy_to_clipboard)
                     }
+                    is HomeUiEvent.ShufflePhCarousel -> viewModel.shufflePhCarousel()
                     is HomeUiEvent.ShowAnnouncementDialog -> { announcement = event.announcement }
                     is HomeUiEvent.ShowExitDialog -> { showExitDialog = true }
                     is HomeUiEvent.UpdateAction -> {

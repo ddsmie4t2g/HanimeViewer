@@ -76,6 +76,8 @@ import kotlinx.coroutines.delay
  * @param onVideoClick 点某一页时调用，参数为视频编号。
  * @param modifier 应用于轮播根布局的修饰符。
  * @param autoAdvanceMillis 自动前进间隔；`<= 0` 表示不自动轮播。
+ * @param onShuffle 点「换一批」时调用；传 `null` 就不画这个按钮（默认）。
+ * @param isShuffling 是否正在换一批 —— 会禁用按钮并换成「换一批中…」。
  */
 @Composable
 fun FeaturedCarousel(
@@ -85,6 +87,8 @@ fun FeaturedCarousel(
     onVideoClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     autoAdvanceMillis: Long = 7_000L,
+    onShuffle: (() -> Unit)? = null,
+    isShuffling: Boolean = false,
 ) {
     // ⚠️ 去重要在**建 pager 之前**：`page` 是直接当索引用的，
     //    外面传进来的列表如果有重复 vkey，索引与内容就会错位。
@@ -93,6 +97,13 @@ fun FeaturedCarousel(
 
     val pagerState = rememberPagerState(pageCount = { items.size })
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    // 换了一批内容 ⇒ 回到第 1 张。不写这段的话，用户在第 15 张按「换一批」，
+    // 新的一批（21 条）会从第 15 张开始显示，看起来像「没换」。
+    // ⚠️ 用 scrollToPage（瞬移）：animateScrollToPage 会白滚一段动画。
+    LaunchedEffect(items) {
+        if (items.isNotEmpty() && pagerState.currentPage != 0) pagerState.scrollToPage(0)
+    }
 
     LaunchedEffect(pagerState, items.size, autoAdvanceMillis) {
         if (items.size <= 1 || autoAdvanceMillis <= 0L) return@LaunchedEffect
@@ -127,6 +138,24 @@ fun FeaturedCarousel(
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f)
             )
+            if (onShuffle != null) {
+                // 「换一批」：真去站点要下一批（见 HomePageViewModel.shufflePhCarousel）。
+                // ⚠️ 正在换的时候**连点击一起禁掉** —— 那一下会真的发起一趟 1 MB+ 的请求，
+                //    没有反馈的按钮会被连点好几下（虽然 ViewModel 里也有互斥兜底）。
+                Text(
+                    text = stringResource(
+                        if (isShuffling) R.string.ph_shuffling else R.string.ph_shuffle
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary.copy(
+                        alpha = if (isShuffling) 0.45f else 1f
+                    ),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(enabled = !isShuffling) { onShuffle() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
             Text(
                 text = stringResource(R.string.more),
                 style = MaterialTheme.typography.labelMedium,

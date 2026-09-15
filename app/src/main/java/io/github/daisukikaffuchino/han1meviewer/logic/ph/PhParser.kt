@@ -706,6 +706,54 @@ object PhParser {
     }
 
     /**
+     * 站点**主页**「热门色情视频」那一节的正文（26.9.7）。
+     *
+     * ## 它是什么
+     *
+     * 主页上那个带红点的标题「热门色情视频」（英文站 `Hot Porn Videos`）底下的大网格。
+     * 红点实测是标题里的 `<i class="roundFlagIcon round-flag-int">`，纯装饰。
+     *
+     * ## 为什么必须限定容器
+     *
+     * ⚠️⚠️ 主页整页有 **65** 个 `li.pcVideoListItem`，而 `#singleFeedSection` 里只有 **61** 个。
+     * 多出来的在**页头导航的下拉推荐位**（`ul#hottestMenuSection` 等）——
+     * 这正是 26.9.5 在 `/recommended` 上踩过的同一个坑（那次是 25 vs 21）。
+     * **全局取会把页头预载的另一批混进来。**
+     *
+     * ## 卡片标记与推荐页/作者页同源
+     *
+     * `li.pcVideoListItem` + `data-video-vkey` + `span.title a[title]` +
+     * `img[src]`/`img[data-mediumthumb]` + `var.duration` + `div.videoDetailBlock span.views var`
+     * ⇒ 直接复用 [videoItemsFrom]（三处共用一份，站点改标记不会只修好一边）。
+     *
+     * ⚠️ 两处**看似不同但与选择器无关**的写法，别被误导去改选择器：
+     * - 时长是 `<var class="bgShadeEffect duration tooltipTrig" data-title="视频时长">3:26</var>`
+     *   —— class 有多个，但 CSS `var.duration` 是「含该 class 即可」，照样命中；
+     * - 观看数是 `<span class="views"><i …></i><var>3M</var></span>`
+     *   —— `<i>` 夹在中间，但 `div.videoDetailBlock span.views var` 是**后代**选择器，也命中。
+     *
+     * ⚠️ 拿不到 `viewkey` 的卡片（**广告卡 `li.sniperModeEngaged`** 就没有）会被
+     * [videoItemsFrom] 直接丢掉，不需要另外滤。
+     *
+     * ## 它**不能翻页**
+     *
+     * 主页没有分页参数、也没有加载更多接口，所以这里的返回值就是全部（实测 61 条）。
+     * 调用方按批切片轮换即可，别去找「第 2 页」。
+     */
+    fun homepageHotList(body: String): MutableList<HanimeInfo> {
+        val doc = Jsoup.parse(body)
+        val scoped = doc.select("#singleFeedSection li.pcVideoListItem")
+        if (scoped.isNotEmpty()) return videoItemsFrom(scoped)
+        // 站点改版兜底：容器没了才退回整页取（把「有没有容器」和「容器里有没有卡片」
+        // 分开判，否则容器在但空的时候会误退到全局，把页头那批混进来）。
+        return if (doc.selectFirst("#singleFeedSection") == null) {
+            videoItemsFrom(doc.select("ul.full-row-thumbs li.pcVideoListItem"))
+        } else {
+            mutableListOf()
+        }
+    }
+
+    /**
      * 把一批 `li.pcVideoListItem` 卡片解析成 [HanimeInfo]。
      *
      * 作者页与推荐页用的是**同一套卡片标记**，所以两处共用这一个函数 ——

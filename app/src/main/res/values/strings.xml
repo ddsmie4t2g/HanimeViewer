@@ -219,6 +219,12 @@
     <!-- Pornhub 首页栏目名。注意：下面的 ph_* 只做**显示**，
          真正的「检索标记」是中文字面量（见 PhParser.MARKER_TO_QUERY），两者别混。 -->
     <string name="ph_recommended">Recommended</string>
+    <!-- 数据源切到「主页热门色情视频」时分批展示（每批 21 条）。 -->
+    <string name="ph_hot">Hot</string>
+    <!-- 首页大轮播的「换一批」：真的去站点要下一批（推荐翻页 / 主页热门换一批）。 -->
+    <string name="ph_shuffle">Shuffle</string>
+    <string name="ph_shuffling">Shuffling…</string>
+    <string name="ph_shuffle_failed">Couldn\'t load another batch. Please try again later.</string>
     <string name="ph_latest">Latest</string>
     <string name="ph_popular">Most viewed</string>
     <string name="ph_top_rated">Top rated</string>
