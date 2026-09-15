@@ -322,8 +322,25 @@ data class ArtistProfile(
  *
  * [profile] 只在第一页有值（Pornhub 的作者页把资料头和作品列表放在同一个 HTML 里，
  * 一次请求就能拿到两样）；后续页为 null，界面保留第一页那份。
+ *
+ * @param siteTotalPages **站点那边这份列表一共有几页**（站点自己的分页口径）。
+ *
+ *   为什么需要它：作者页头部那句「共 N 部影片」只有 Pornhub / nJAV 的卡片才带，
+ *   **hanime 的合成作者页（= 按名字搜索）两者都没有** —— 没有它，分页条就只能
+ *   「翻一页长一页」，用户看不到「一共多少页」。hanime 的搜索页是 Laravel 分页，
+ *   页码条里直接写着末页号（实测 `search?query=…` 20 页、带分类的简化模板 13 页），
+ *   所以这一条能拿到。
+ *
+ *   ⚠️ 这是**站点页数**，不是应用内页数（应用内一页 12 条，站点一页 30–59 条），
+ *   换算见 `ArtistPaging.pagesFromSitePages`。换算要用「实测的站点页条数」，
+ *   所以它只是个**上界估计**（末页通常不满），界面上最多多出末页那一格。
+ *
+ *   拿不到就留 null（nJAV 女优页**没有分页**：`?page=` 只回反爬挑战页；
+ *   Pornhub 作者页的 `div.pagination3` 同页混着别的列表的页码，
+ *   实测 p2 里能出现 18 / 25 —— 取 max 会串页，宁可不给）。
  */
 data class ArtistVideosPage(
     val profile: ArtistProfile? = null,
     val videos: List<HanimeInfo> = emptyList(),
+    val siteTotalPages: Int? = null,
 )

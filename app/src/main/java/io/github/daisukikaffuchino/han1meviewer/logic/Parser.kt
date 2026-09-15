@@ -257,6 +257,43 @@ object Parser {
         return PageLoadingState.Success(mutableListOf())
     }
 
+    /**
+     * hanime 搜索页的**站点总页数**（作者页分页条要用的「一共多少页」）。
+     *
+     * ## 为什么 hanime 要单独解析它
+     *
+     * 作者页头部那句「共 N 部影片」只有 Pornhub / nJAV 的卡片带，hanime 的合成作者页
+     * （= 按名字搜索）两个来源都没有 —— 没有总页数，分页条就只能「翻一页长一页」。
+     * 而站点自己在页码条里写着末页号，白拿。
+     *
+     * ## 选择器与两个坑（实测 2026-09-15，`build/tmp/s1..s20.html` / `g1..g13.html`）
+     *
+     * 站点是 Laravel 分页（手机/桌面各一套 `ul.pagination`）：
+     *
+     * ```html
+     * <li class="page-item"><a class="page-link" href="?query=%E5%A6%B9&amp;page=20">20</a></li>
+     * <li class="page-item disabled"><span class="page-link">...</span></li>
+     * <li class="page-item active"><span class="page-link">20</span></li>   ← 当前页是 span
+     * ```
+     *
+     * 1. **必须同时认 `span.page-link`**：当前页不是 `<a>`，只读锚点会在**最后一页**上
+     *    小看一页（实测 s20 → 19、g13 → 12，而真值是 20 / 13）。
+     * 2. **省略号 `...` 与 `‹ ›` 箭头要丢掉**：按文本 `toIntOrNull()` 一遍，非数字自然出局，
+     *    比按下标取「最后一个 li」稳（末页控件的位置在末页会变）。
+     *
+     * 拿不到返回 null（没有页码条 / 整页一条数字都没有），调用方退回「已加载条数」口径。
+     */
+    fun hanimeSearchTotalPages(body: String): Int? {
+        val items = Jsoup.parse(body).select("ul.pagination li.page-item")
+        if (items.isEmpty()) return null
+        return items
+            .mapNotNull { li ->
+                li.selectFirst("a.page-link, span.page-link")?.text()?.trim()?.toIntOrNull()
+            }
+            .maxOrNull()
+            ?.takeIf { it > 0 }
+    }
+
     private fun hanimeNormalItemVer2(hanimeSearchItem: Element): HanimeInfo? {
         val title =
             hanimeSearchItem.selectFirst("div.title, h4.video-title")?.text()?.trim()

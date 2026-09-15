@@ -1130,11 +1130,21 @@ object NetworkRepo {
         if (!response.isSuccessful) {
             throw ParseException("hanime: HTTP ${response.code()} - ${artist.name}")
         }
-        val state = Parser.hanimeSearch(response.body()?.string().orEmpty())
+        val body = response.body()?.string().orEmpty()
+        // ⭐ 站点总页数：hanime 的作者页是**合成**的（按名字搜），头部没有「共 N 部影片」，
+        // 所以「一共多少页」只能从搜索页自己的页码条里读（见 Parser.hanimeSearchTotalPages）。
+        // 没有它，分页条就只能翻一页长一页，用户永远看不到「到底有多少」。
+        val siteTotalPages = Parser.hanimeSearchTotalPages(body)
+        val state = Parser.hanimeSearch(body)
         emit(
             when (state) {
-                is PageLoadingState.Success ->
-                    PageLoadingState.Success(ArtistVideosPage(profile = null, videos = state.info))
+                is PageLoadingState.Success -> PageLoadingState.Success(
+                    ArtistVideosPage(
+                        profile = null,
+                        videos = state.info,
+                        siteTotalPages = siteTotalPages,
+                    )
+                )
 
                 is PageLoadingState.Error -> state
                 PageLoadingState.Loading -> PageLoadingState.Loading
