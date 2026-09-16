@@ -81,7 +81,7 @@
     <string name="account_no_site_accounts">nJAV 與 Pornhub 本身沒有帳號（站點不提供，也登不了），所以這個帳號就是給它們用的 —— 它一個號同時管三個站點。</string>
     <string name="account_register">註冊</string>
     <string name="account_server">伺服器</string>
-    <string name="account_password_rule">使用者名稱 2–32 個字元（中文也行，也可用字母、數字、_ . -）；密碼至少 6 位。伺服器只保存加鹽的 PBKDF2 雜湊，不存明文。</string>
+    <string name="account_password_rule">使用者名稱 2–32 個字元（中文也行，也可用字母、數字、_ . -）；密碼至少 6 位。伺服器只儲存加鹽的 PBKDF2 雜湊，不存明文。</string>
     <string name="account_cloud_revision">雲端版本</string>
     <string name="account_last_sync">上次同步</string>
     <string name="account_never_synced">從未同步</string>
@@ -429,6 +429,8 @@
     <string name="artist_follow">關注</string>
     <string name="artist_followed">已關注</string>
     <string name="artist_unfollow">已取消關注</string>
+    <!-- 已關注時**按鈕上**的文案：說「下一步能做什麼」。見 values/strings.xml 的註解。 -->
+    <string name="artist_unfollow_action">取消關注</string>
     <!-- 作者頁（26.6.3）：點作者不再一律跳搜尋，Pornhub / nJAV 有真正的作者頁 -->
     <string name="artist_page_title">作者</string>
     <string name="artist_page_works">作品</string>
@@ -474,9 +476,9 @@
     <string name="check_video_exists_in_download">我注意到你似乎下載過解析度為 %s 的這部影片</string>
     <string name="retry">重試</string>
     <string name="open_source_license">開源授權</string>
-    <string name="confirm_to_exit">退出確認</string>
-    <string name="confirm_exit_message">確定要退出嗎？</string>
-    <string name="exit">退出</string>
+    <string name="confirm_to_exit">離開確認</string>
+    <string name="confirm_exit_message">確定要離開嗎？</string>
+    <string name="exit">離開</string>
     <string name="use_lock_screen">使用鎖定畫面</string>
     <string name="use_lock_screen_sum">開啟後，進入應用程式時需要驗證螢幕鎖，以防止他人開啟</string>
     <string name="not_set_sys_lock">請先在系統設定中啟用指紋、圖案或 PIN 鎖</string>
@@ -484,7 +486,7 @@
     <string name="usage_notice_content">🧩 本應用程式為獨立第三方工具，與 https://hanime1.me/ 及其關聯方不存在隸屬、合作、授權或代言關係。\n\n📢 請勿在任何公開平台宣傳、搬運或引流本應用程式。若因此帶來風險，維護者可能隨時封存或隱藏儲存庫，並移除已編譯發布版本。\n\n🔍 本應用程式僅透過一般網路請求與 HTML DOM 解析取得目標網站公開顯示的資訊，不存取後端資料庫，不進行注入攻擊、授權繞過或取得非公開及隱私資料。\n\n⚖️ 本應用程式僅供技術研究、行動裝置體驗最佳化與學習交流使用，不提供商業化服務。使用者應自行遵守所在地區法律法規與目標網站規則，並承擔使用本應用程式所產生的一切後果。\n\n©️ 原始影片、圖文及相關內容版權歸 https://hanime1.me/ 或原始製作、發行方所有。本應用程式不儲存版權內容，不修改原始內容，也不宣稱擁有任何內容所有權。\n\n🛡️ 如對相關內容存在版權、DMCA、人身攻擊或其他投訴，請直接聯絡來源網站管理方處理。本應用程式開發者無法處理或協助處理相關內容糾紛。\n\nℹ️ 建議透過官方管道支持原站內容與網站營運者。\n\n🔞 R18 警告：未滿 18 歲禁止下載與使用本應用程式。\n\n2026 年 6 月 1 日</string>
     <string name="usage_notice_accept">我已閱讀並同意</string>
     <string name="usage_notice_accept_countdown">請閱讀 %1$d 秒</string>
-    <string name="usage_notice_decline">不同意並退出</string>
+    <string name="usage_notice_decline">不同意並離開</string>
     <string name="app_source_title">你是從哪裡下載的app？請慎重選擇！</string>
     <string name="app_source_forum">論壇</string>
     <string name="app_source_telegram">Telegram</string>
@@ -627,9 +629,9 @@
     <string name="directory_saved">目錄已儲存：%s</string>
     <string name="no_directory_selected">未選擇目錄，未進行變更</string>
     <string name="select_download_folder">選擇你的下載資料夾</string>
-    <string name="select_folder_message">使用系統檔案選擇器指定一個資料夾：\n\n✓ 自行選擇儲存位置\n✓ 下載檔案永久保存\n✓ 方便與其他應用程式分享\n✓ 卸載應用程式不影響檔案\n✓ 支援續傳下載\n\n請勿移動、重新命名或撤銷該資料夾權限，否則需要重新選擇目錄。建議選擇 Downloads 下的新建目錄或自訂資料夾。</string>
+    <string name="select_folder_message">使用系統檔案選擇器指定一個資料夾：\n\n✓ 自行選擇儲存位置\n✓ 下載檔案永久儲存\n✓ 方便與其他應用程式分享\n✓ 解除安裝應用程式不影響檔案\n✓ 支援續傳下載\n\n請勿移動、重新命名或撤銷該資料夾權限，否則需要重新選擇目錄。建議選擇 Downloads 下的新建目錄或自訂資料夾。</string>
     <string name="restore_default_path">恢復預設儲存路徑</string>
-    <string name="restore_default_message">確定要恢復為應用程式內部儲存嗎？\n\n● 目前下載的檔案不會被移動\n● 後續下載將儲存至應用程式內部\n● 應用程式卸載後檔案將被清除\n● 選擇外部路徑後，可以使用檔案遷移功能移出</string>
+    <string name="restore_default_message">確定要恢復為應用程式內部儲存嗎？\n\n● 目前下載的檔案不會被移動\n● 後續下載將儲存至應用程式內部\n● 應用程式解除安裝後檔案將被清除\n● 選擇外部路徑後，可以使用檔案遷移功能移出</string>
     <string name="default_path_restored">已恢復預設儲存路徑</string>
     <string name="understood">了解</string>
     <string name="confirm_import">是否進行匯出？</string>
@@ -669,7 +671,7 @@
     <string name="new_anime_trailers">新番預告片</string>
     <string name="permission_error">權限錯誤，請嘗試重新指定資料夾！</string>
     <string name="resume_playback_title">續播功能</string>
-    <string name="resume_playback_summary">如有播放紀錄，將自動跳轉至上次退出時的位置</string>
+    <string name="resume_playback_summary">如有播放紀錄，將自動跳轉至上次離開時的位置</string>
     <string name="saved">已儲存</string>
     <string name="i_understand">我明白了</string>
     <string name="close">關閉</string>
@@ -884,7 +886,7 @@
     <string name="watch_history_group_earlier">更早</string>
     <string name="watch_history_selected_count">已選 %1$d 項</string>
     <string name="watch_history_select_all">全選</string>
-    <string name="watch_history_exit_selection">退出多選</string>
+    <string name="watch_history_exit_selection">結束多選</string>
     <string name="watch_history_long_press_hint">長按任一項可多選</string>
     <string name="watch_history_delete_selected">刪除所選</string>
     <string name="sure_to_delete_selected">確定刪除所選的 %1$d 筆紀錄嗎？</string>
@@ -940,7 +942,7 @@
     <string name="crash_copy_log_summary">將裝置與例外資訊複製到剪貼簿</string>
     <string name="crash_restart_app">重新啟動應用程式</string>
     <string name="crash_restart_app_summary">關閉異常程序並重新開啟 Han1meViewer</string>
-    <string name="crash_exit_app">退出應用程式</string>
+    <string name="crash_exit_app">離開應用程式</string>
     <string name="crash_exit_app_summary">關閉崩潰報告且不重新啟動</string>
     <string name="crash_log_title">崩潰記錄</string>
     <string name="crash_no_logs">沒有可用的崩潰記錄。</string>
@@ -1032,4 +1034,13 @@
     <string name="actress_sort_videos">影片</string>
     <string name="actress_sort_debut">出道</string>
     <!-- 一鍵網路自癒：測鏡像與中轉、自動落到最快、複測確認 -->
+    <!-- 26.9.9 i18n：原本寫死在 .kt 裡，切英文介面會冒出中文。 -->
+    <string name="copy_video_info">複製影片資訊</string>
+    <string name="search_artist_works">搜尋此作者的所有作品</string>
+    <string name="sync_consistent_suffix">%1$s（本機與雲端已一致）</string>
+    <string name="sync_result_summary_format">%1$s：新增關注 %2$d、觀看紀錄 %3$d、清單項目 %4$d</string>
+    <string name="date_format_month_day">MM月dd日</string>
+    <string name="date_format_month_day_weekday">MM月dd日 EEEE</string>
+    <string name="decrease">減少</string>
+    <string name="increase">增加</string>
 </resources>

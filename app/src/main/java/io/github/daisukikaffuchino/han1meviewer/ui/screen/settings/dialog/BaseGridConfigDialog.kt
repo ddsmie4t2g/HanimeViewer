@@ -220,7 +220,7 @@ private fun GridConfigInputRow(option: GridRangeOption, isDecimal: Boolean) {
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_remove),
-                            contentDescription = "减少",
+                            contentDescription = stringResource(R.string.decrease),
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -275,7 +275,7 @@ private fun GridConfigInputRow(option: GridRangeOption, isDecimal: Boolean) {
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_add),
-                            contentDescription = "增加",
+                            contentDescription = stringResource(R.string.increase),
                             modifier = Modifier.size(16.dp)
                         )
                     }

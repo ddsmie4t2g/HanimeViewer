@@ -1,5 +1,6 @@
 package io.github.daisukikaffuchino.han1meviewer.ui.screen.artist
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -847,14 +848,17 @@ private fun ArtistHeader(
                     }
                 }
                 if (isFollowed) {
+                    // 已关注：**灰色描边的次级按钮**，文案说「取消关注」（下一步动作）。
+                    // 实心主色按钮留给「关注」—— 两者一眼可分，不用猜自己关注上没有。
                     OutlinedButton(
                         onClick = onToggleFollow,
                         colors = ButtonDefaults.outlinedButtonColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     ) {
-                        Text(text = stringResource(R.string.artist_followed))
+                        Text(text = stringResource(R.string.artist_unfollow_action))
                     }
                 } else {
                     Button(onClick = onToggleFollow) {

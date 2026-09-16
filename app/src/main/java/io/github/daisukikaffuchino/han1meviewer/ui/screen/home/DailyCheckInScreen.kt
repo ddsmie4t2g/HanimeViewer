@@ -205,7 +205,7 @@ fun DailyCheckInScreen(
         message = forgotDialogDate?.let {
             stringResource(
                 R.string.forgot_message,
-                it.format(DateTimeFormatter.ofPattern("MM月dd日"))
+                it.format(monthDayFormatter())
             )
         } ?: "",
         confirmText = stringResource(R.string.forgot_confirm),
@@ -223,7 +223,7 @@ fun DailyCheckInScreen(
         message = calendarDialogDate?.let {
             stringResource(
                 R.string.calendar_dialog_message,
-                it.format(DateTimeFormatter.ofPattern("MM月dd日"))
+                it.format(monthDayFormatter())
             )
         } ?: "",
         confirmText = stringResource(R.string.calendar_dialog_confirm),
@@ -241,7 +241,7 @@ fun DailyCheckInScreen(
         message = suckBackDialogDate?.let {
             stringResource(
                 R.string.suck_back_message,
-                it.format(DateTimeFormatter.ofPattern("MM月dd日")),
+                it.format(monthDayFormatter()),
                 uiState.records[it] ?: 0
             )
         } ?: "",
@@ -291,3 +291,14 @@ fun DailyCheckInScreen(
         )
     }
 }
+
+/**
+ * 「月日」的日期格式（如 `6月1日` / `Jun 1`）。
+ *
+ * 26.9.9 之前是写死的 `DateTimeFormatter.ofPattern("MM月dd日")` —— 「月」「日」两个字
+ * 是**格式串的一部分**，切到英文界面照样印中文。改成从资源取 pattern：
+ * `values/` 给 `MMM d`，`values-zh-rCN` / `values-zh-rTW` 给 `MM月dd日`。
+ */
+@Composable
+private fun monthDayFormatter(): DateTimeFormatter =
+    DateTimeFormatter.ofPattern(stringResource(R.string.date_format_month_day))

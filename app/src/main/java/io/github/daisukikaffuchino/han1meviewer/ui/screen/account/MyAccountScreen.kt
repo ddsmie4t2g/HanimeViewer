@@ -1,5 +1,6 @@
 package io.github.daisukikaffuchino.han1meviewer.ui.screen.account
 
+import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,6 +67,9 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
         initialValue = AccountRepository.AccountState(),
     )
     val scope = rememberCoroutineScope()
+    // `describe()` 在 `scope.launch { }` 里调用 —— 不是 composable 上下文，
+    // 不能在里面用 `stringResource`，所以在这里把 context 取好传进去。
+    val context = LocalContext.current
 
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -214,7 +219,7 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                                             // ⭐ 登录成功后**自动同步一次**：用户装完新机、登录，
                                             // 期望的就是「数据自己回来」，而不是再去点一个按钮。
                                             val outcome = AccountRepository.sync()
-                                            setStatus(outcome.describe(), isError = !outcome.success)
+                                            setStatus(outcome.describe(context), isError = !outcome.success)
                                             SonnerToast.success(R.string.account_logged_in)
                                         }.onFailure { e ->
                                             val reason = explain(e)
@@ -239,7 +244,7 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                                             password = ""
                                             // 新账号云端是空的 → 这次同步会把**本机数据带上去**。
                                             val outcome = AccountRepository.sync()
-                                            setStatus(outcome.describe(), isError = !outcome.success)
+                                            setStatus(outcome.describe(context), isError = !outcome.success)
                                             SonnerToast.success(R.string.account_registered)
                                         }.onFailure { e ->
                                             val reason = explain(e)
@@ -275,7 +280,7 @@ fun MyAccountScreen(navigateBack: () -> Unit) {
                                 scope.launch {
                                     val outcome = AccountRepository.sync()
                                     busy = false
-                                    setStatus(outcome.describe(), isError = !outcome.success)
+                                    setStatus(outcome.describe(context), isError = !outcome.success)
                                     if (outcome.success) {
                                         SonnerToast.success(R.string.account_sync_done)
                                     } else {
@@ -462,9 +467,20 @@ private fun ChangePasswordDialog(
 private fun formatTime(millis: Long): String =
     SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(millis))
 
-/** 同步结果的一句话描述：说清「这次带来了什么」，而不是只说「成功」。 */
-private fun AccountRepository.SyncOutcome.describe(): String {
+/** 同步结果的一句话描述：说清「这次带来了什么」，而不是只说「成功」。
+ *
+ * ⚠️ 这里是**非 composable** 的扩展函数（在 `scope.launch { }` 里调用），
+ * 所以文案走 `context.getString` 而不是 `stringResource`。26.9.9 之前这几句
+ * 是写死的中文，切英文 / 繁中界面不会跟着变。
+ */
+private fun AccountRepository.SyncOutcome.describe(context: Context): String {
     val d = diff ?: return message
-    if (d.isEmpty) return "$message（本机与云端已一致）"
-    return "$message：新增关注 ${d.newFollows}、观看记录 ${d.newHistory}、清单条目 ${d.newListItems}"
+    if (d.isEmpty) return context.getString(R.string.sync_consistent_suffix, message)
+    return context.getString(
+        R.string.sync_result_summary_format,
+        message,
+        d.newFollows,
+        d.newHistory,
+        d.newListItems,
+    )
 }

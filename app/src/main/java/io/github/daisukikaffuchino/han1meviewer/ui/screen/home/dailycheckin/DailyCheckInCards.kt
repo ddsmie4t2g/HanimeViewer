@@ -100,9 +100,7 @@ fun TodayCheckInCard(
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(
-                        text = today.format(
-                            DateTimeFormatter.ofPattern("MM月dd日 EEEE")
-                        ),
+                        text = today.format(monthDayWeekdayFormatter()),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
@@ -301,3 +299,13 @@ private fun PreviewStatsCard() {
         ),
     )
 }
+
+/**
+ * 「月日 + 星期」的日期格式（如 `6月1日 星期一` / `Mon, Jun 1`）。
+ *
+ * 同 `DailyCheckInScreen.monthDayFormatter()`：pattern 走资源，
+ * 避免英文界面里印出 `MM月dd日 EEEE` 这种中文。
+ */
+@Composable
+private fun monthDayWeekdayFormatter(): DateTimeFormatter =
+    DateTimeFormatter.ofPattern(stringResource(R.string.date_format_month_day_weekday))

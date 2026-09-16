@@ -437,6 +437,11 @@ Recommendations are as follows:\n
     <string name="artist_follow">Follow</string>
     <string name="artist_followed">Followed</string>
     <string name="artist_unfollow">Unfollowed</string>
+    <!-- 已关注时**按钮上**的文案：说「下一步能做什么」，不说「你已经做了什么」。
+         26.9.8 之前按钮写的是「已关注」（一个状态），看起来像一个标签而不是可点的
+         按钮，用户根本不确定再点会怎样 —— 现在按钮明说「取消关注」，且是灰色描边的
+         次级样式，与实心的「关注」形成对比。 -->
+    <string name="artist_unfollow_action">Unfollow</string>
     <!-- 作者页（26.6.3）：点作者不再一律跳搜索，Pornhub / nJAV 有真正的作者页 -->
     <string name="artist_page_title">Artist</string>
     <string name="artist_page_works">Works</string>
@@ -1063,4 +1068,14 @@ Recommendations are as follows:\n
     <string name="actress_sort_videos">Videos</string>
     <string name="actress_sort_debut">Debut</string>
     <!-- One-tap network self-heal: probes mirrors + relay nodes, applies the fastest, then verifies -->
+    <!-- 26.9.9 i18n：以下原本是 .kt 里写死的中文，切到英文界面时会突兀地冒出中文。
+         统一收进资源，三语齐备。日期**格式串**也走资源（各语言给各自的 pattern）。 -->
+    <string name="copy_video_info">Copy video info</string>
+    <string name="search_artist_works">Search all works by this artist</string>
+    <string name="sync_consistent_suffix">%1$s (local and cloud already in sync)</string>
+    <string name="sync_result_summary_format">%1$s: %2$d new follows, %3$d watch records, %4$d list items</string>
+    <string name="date_format_month_day">MMM d</string>
+    <string name="date_format_month_day_weekday">EEE, MMM d</string>
+    <string name="decrease">Decrease</string>
+    <string name="increase">Increase</string>
 </resources>

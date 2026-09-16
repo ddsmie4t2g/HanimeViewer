@@ -146,8 +146,22 @@ data class HanimeVideo(
     ) {
         val isSubscribed: Boolean get() = post != null && post.isSubscribed
 
-        /** 本地关注用的身份键：有主页地址就用地址，没有才退回名字。 */
-        val followKey: String get() = url.trim().ifEmpty { name.trim() }
+        /**
+         * ⚠️ **这里刻意没有 `followKey`。**
+         *
+         * 它原来长这样：`url.trim().ifEmpty { name.trim() }` —— 原始地址当身份键。
+         * 而关注表（[io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore]）
+         * 存的是**规范化**后的键（见 [ArtistRef.identityKey]：丢域名、丢语言段、丢掉会变的
+         * `dm###` 前缀、百分号编码解回文字、名字 NFC + 小写）。
+         *
+         * 于是读写两侧永远不相等，表现为：**详情页点「关注」→ 吐司说已关注 →
+         * 按钮还是「关注」**，用户完全看不出自己到底关注上没有（26.9.8 报的这个）。
+         *
+         * 统一入口只有 [ArtistRef.followKey]，并且**读写两侧必须传同一个 site**
+         * （见 `VideoRouteActions.toggleArtistSubscription` 与
+         * `VideoIntroductionScreen.ArtistSection`）。
+         */
+        fun toArtistRef(site: SiteSource): ArtistRef = ArtistRef.from(this, site)
 
         data class POST(
             val userId: String,

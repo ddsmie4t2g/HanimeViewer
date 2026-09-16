@@ -83,6 +83,7 @@ import io.github.daisukikaffuchino.han1meviewer.ResolutionLinkMap
 import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
 import io.github.daisukikaffuchino.han1meviewer.logic.SettingsRepository
 import io.github.daisukikaffuchino.han1meviewer.logic.entity.CheckInRecordEntity
+import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeVideo
 import io.github.daisukikaffuchino.han1meviewer.logic.state.VideoLoadingState
@@ -973,7 +974,16 @@ private fun ArtistSection(
                 }
                 ArtistRow(
                     artist = artist,
-                    isFollowed = artist.followKey in followedKeys,
+                    // ⚠️ 身份键必须和「点关注」那条路**走同一个转换**
+                    // （VideoRouteActions.toggleArtistSubscription 用的是
+                    //  `ArtistRef.from(artist, SettingsRepository.siteSource)`）。
+                    //
+                    // 26.9.8 之前这里比的是 `artist.followKey`，也就是**原始 url**
+                    // （`/pornstar/x`、`…/actresses/%E6%8C%81`），而关注表里躺的是
+                    // 规范化后的键（`Pornhub|pornstar/x|…`）—— 两个字符串永远不相等，
+                    // 于是「点过关注，按钮还是关注」。
+                    isFollowed = ArtistRef.from(artist, SettingsRepository.siteSource)
+                        .followKey in followedKeys,
                     onOpenArtist = { onOpenArtist(artist) },
                     onToggleSubscribe = { onToggleSubscribe(artist) },
                 )
@@ -1057,7 +1067,7 @@ private fun ArtistRow(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
                 ) {
-                    Text(text = stringResource(R.string.artist_followed))
+                    Text(text = stringResource(R.string.artist_unfollow_action))
                 }
             } else {
                 Button(onClick = onToggleSubscribe) {

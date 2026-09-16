@@ -1,6 +1,8 @@
 package io.github.daisukikaffuchino.han1meviewer.ui.navigation.main
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.NjavActress
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
@@ -25,24 +27,32 @@ import io.github.daisukikaffuchino.han1meviewer.ui.screen.actress.ActressGallery
  * [NjavNetwork.detailUrl]（= `https://njavtv.com/actresses/<编码名>`，**不带 `/cn/`**），
  * 和女优详情页里那个 `<a href>` 完全同形。写成带 `/cn/` 的话，
  * 「从视频页关注」与「从女优一览关注」会是两条不同的身份 → 同一人却显示成未关注。
+ *
+ * ## 作品数文案走资源（26.9.9）
+ *
+ * `toArtistRef()` 是**普通函数**，拿不到 `stringResource`，所以格式串在外层
+ * Composable 里取好再传进去。此前这里写死 `"$it 部影片"`，切到英文 / 繁中界面时
+ * 会显示成简体中文 —— 同一份文案 `ActressGridCard` 早已用 `R.string.actress_video_count`，
+ * 这次统一成同一份资源。
  */
 @Composable
 fun ActressGalleryRouteScreen(
     navigateBack: () -> Unit,
     onNavigateToArtist: (ArtistRef) -> Unit,
 ) {
+    val videoCountFormat = stringResource(R.string.actress_video_count)
     ActressGalleryScreen(
         navigateBack = navigateBack,
-        onClickActress = { actress -> onNavigateToArtist(actress.toArtistRef()) },
+        onClickActress = { actress -> onNavigateToArtist(actress.toArtistRef(videoCountFormat)) },
     )
 }
 
 /** 女优索引里的条目 → 作者页身份（头像 / 作品数都直接带过去）。 */
-private fun NjavActress.toArtistRef(): ArtistRef = ArtistRef(
+private fun NjavActress.toArtistRef(videoCountFormat: String): ArtistRef = ArtistRef(
     name = name,
     avatar = avatarUrl,
     url = NjavNetwork.detailUrl(path),
-    // 与 `ArtistViewModel` 补头像时写的那份文案保持一致（`5669 部影片`）。
-    videoCount = videoCount?.let { "$it 部影片" }.orEmpty(),
+    // 与 `ActressGridCard` / `ArtistViewModel` 用同一份资源（`%1$d 部影片`）。
+    videoCount = videoCount?.let { videoCountFormat.format(it) }.orEmpty(),
     site = SiteSource.Njav.value,
 )

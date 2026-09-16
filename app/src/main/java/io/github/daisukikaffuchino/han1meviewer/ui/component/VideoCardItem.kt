@@ -330,7 +330,7 @@ fun VideoCardItem(
                 onDismissRequest = { showContextMenu = false },
             ) {
                 DropdownMenuItem(
-                    text = { Text("复制视频信息") },
+                    text = { Text(stringResource(R.string.copy_video_info)) },
                     onClick = {
                         showContextMenu = false
                         copyTextToClipboard(
@@ -344,7 +344,7 @@ fun VideoCardItem(
                 )
                 if (currentArtist != null) {
                     DropdownMenuItem(
-                        text = { Text("搜索该作者所有作品") },
+                        text = { Text(stringResource(R.string.search_artist_works)) },
                         onClick = {
                             showContextMenu = false
                             (context as? MainActivity)?.mainBackStack?.add(

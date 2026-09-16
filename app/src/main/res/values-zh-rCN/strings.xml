@@ -442,6 +442,8 @@
     <string name="artist_follow">关注</string>
     <string name="artist_followed">已关注</string>
     <string name="artist_unfollow">已取消关注</string>
+    <!-- 已关注时**按钮上**的文案：说「下一步能做什么」。见 values/strings.xml 的注释。 -->
+    <string name="artist_unfollow_action">取消关注</string>
     <!-- 作者页（26.6.3）：点作者不再一律跳搜索，Pornhub / nJAV 有真正的作者页 -->
     <string name="artist_page_title">作者</string>
     <string name="artist_page_works">作品</string>
@@ -679,7 +681,7 @@
     <string name="category_motion_anime">动态动画</string>
     <string name="category_3d_animation">3D作品</string>
     <string name="category_cosplay">Cosplay</string>
-    <string name="new_anime_trailers">新番預告片</string>
+    <string name="new_anime_trailers">新番预告片</string>
     <string name="permission_error">权限错误，请尝试重新指定文件夹！</string>
     <string name="resume_playback_title">续播功能</string>
     <string name="resume_playback_summary">如有播放记录，将自动跳转到上次退出时的位置</string>
@@ -1046,4 +1048,13 @@
     <string name="actress_sort_videos">影片</string>
     <string name="actress_sort_debut">出道</string>
     <!-- 一键网络自愈：测镜像与中转、自动落到最快、复测确认 -->
+    <!-- 26.9.9 i18n：原本写死在 .kt 里，切英文界面会冒出中文。 -->
+    <string name="copy_video_info">复制视频信息</string>
+    <string name="search_artist_works">搜索该作者所有作品</string>
+    <string name="sync_consistent_suffix">%1$s（本机与云端已一致）</string>
+    <string name="sync_result_summary_format">%1$s：新增关注 %2$d、观看记录 %3$d、清单条目 %4$d</string>
+    <string name="date_format_month_day">MM月dd日</string>
+    <string name="date_format_month_day_weekday">MM月dd日 EEEE</string>
+    <string name="decrease">减少</string>
+    <string name="increase">增加</string>
 </resources>

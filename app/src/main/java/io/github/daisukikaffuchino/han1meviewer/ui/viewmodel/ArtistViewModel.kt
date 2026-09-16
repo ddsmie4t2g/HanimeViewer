@@ -1,7 +1,9 @@
 package io.github.daisukikaffuchino.han1meviewer.ui.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.logic.FollowedArtistStore
 import io.github.daisukikaffuchino.han1meviewer.logic.NetworkRepo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistProfile
@@ -84,8 +86,14 @@ data class ArtistUiState(
  * 作者页 ViewModel。
  *
  * 与任何站点账号无关：它读的是站点公开的作者页，不需要登录。
+ *
+ * ⭐ 26.9.9 起是 [AndroidViewModel]（而不是裸 `ViewModel`）：补头像时要把
+ * 「5669 部影片」这句**本地化**文案写进 [io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef.videoCount]，
+ * 而 ViewModel 里没有 `stringResource`。用 `application.getString` 取资源，
+ * 与 `ActressGridCard` / `ActressGalleryRoute` 共用同一份 `R.string.actress_video_count`。
+ * `viewModel()` 默认走 `AndroidViewModelFactory`，构造方式不需要改。
  */
-class ArtistViewModel : ViewModel() {
+class ArtistViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ArtistUiState())
     val state: StateFlow<ArtistUiState> = _state.asStateFlow()
@@ -264,7 +272,10 @@ class ArtistViewModel : ViewModel() {
         val enriched = current.copy(
             avatar = avatar,
             videoCount = current.videoCount.ifBlank {
-                videoCount?.let { "$it 部影片" }.orEmpty()
+                // 与 `ActressGridCard` / `ActressGalleryRoute` 同一份资源。
+                // 26.9.9 之前这里写死 `"$it 部影片"` ⇒ 英文 / 繁中界面照样印简体中文。
+                videoCount?.let { getApplication<Application>().getString(R.string.actress_video_count, it) }
+                    .orEmpty()
             },
         )
         _state.value = _state.value.copy(artist = enriched)
