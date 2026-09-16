@@ -13,8 +13,48 @@ import org.junit.Test
  * 而 nJAV 同一张女优页有不止一种写法（域名 / 语言段 / 会变的 `dm###` 前缀 / query 都在变）。
  *
  * 这组测试钉住的就是「哪些写法必须算同一个人」「哪些必须分开」。
+ *
+ * ⭐ 27.0.1 追加：站点会用**显示名**当另一种 slug（同一个人在别的语言下写成另一个名字），
+ * 光比键串认不出来，于是同一个人的关注按钮在两个入口显示相反的状态。
+ * 现在由 [ArtistRef.matchesIdentity] 兜住，下面的
+ * [njavActressAliasMatchesAcrossLinkVariants] 钉着它。
  */
 class ArtistIdentityKeyTest {
+
+    /**
+     * 同一位女优、两套写法：站点给出的显示名既是名字、又可能被写进 slug。
+     *
+     * 这里 `釋アリス`（url 里的写法）与 `释アリス`（另一处给出的显示名）在**键串上不相等**
+     * （刻意的：不做繁简转换，见 [nameOnlyEntryDoesNotTransliterateSimplifiedToTraditional]），
+     * 但**站点已经明说这两个字符串指的是同一个人** —— 一边的 slug 正好等于另一边的显示名。
+     * 所以 [ArtistRef.matchesIdentity] 必须认。
+     */
+    @Test
+    fun njavActressAliasMatchesAcrossLinkVariants() {
+        val a = ArtistRef("释アリス", url = "https://njavtv.com/cn/actresses/釋アリス", site = "njav")
+        val b = ArtistRef("释アリス", url = "https://njavtv.com/cn/actresses/释アリス", site = "njav")
+        // 键串确实不同（不做繁简转换），所以「相等」这条不能退化成真。
+        assertNotEquals(a.followKey, b.followKey)
+        assertTrue(a.matchesIdentity(b))
+        assertTrue(b.matchesIdentity(a))
+        // 不相关的人、以及别的站点，绝不能被认成同一个人。
+        assertTrue(!a.matchesIdentity(ArtistRef("Other", url = "https://njavtv.com/actresses/Other", site = "njav")))
+        assertTrue(!a.matchesIdentity(ArtistRef("释アリス", url = "/model/example", site = "pornhub")))
+    }
+
+    /**
+     * ⭐ Pornhub 的身份**只用主页路径**，显示名怎么变都算同一个人。
+     *
+     * 用户 2026-09-16 报的「从关注列表点进去显示『取消关注』、从视频点进去显示『关注』」，
+     * 一半的原因就在这里：以前键里还塞了显示名，而显示名是跟着站点语言走的。
+     */
+    @Test
+    fun pornhubProfileIdentityDoesNotDependOnDisplayName() {
+        assertEquals(
+            key("Tru Kait", "/pornstar/tru-kait", SiteSource.Pornhub),
+            key("TRU KAIT Official", "https://www.pornhub.com/pornstar/tru-kait/", SiteSource.Pornhub),
+        )
+    }
 
     /** 女优一览卡片给的地址：带会变的 `dm###` 前缀与语言段。 */
     private val fromGallery =

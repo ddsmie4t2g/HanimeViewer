@@ -209,7 +209,10 @@ jobs:
             echo
             echo "### 更新内容"
             echo
-            git log -15 --pretty=format:'- %s' || true
+            # 发布说明直接取 update.json 的 updateDescription（与「检查更新」弹窗里
+            # 用户看到的**逐字一致**）。比 `git log -15` 好：日志里的提交标题是给
+            # 自己看的（带版本号、带「+」这种缩写），用户读起来没有上下文。
+            jq -r '.updateDescription' update.json
             echo
             echo
             echo "> 本线的「检查更新」读取本仓库 mod 分支的 update.json；发版后请确认该文件的 versionCode / downloadUrl 已指向本 release。"

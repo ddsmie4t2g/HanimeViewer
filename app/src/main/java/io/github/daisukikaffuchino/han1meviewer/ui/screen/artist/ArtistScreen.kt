@@ -119,13 +119,22 @@ fun ArtistScreen(
     val view = LocalView.current
     val gridState = rememberLazyGridState()
 
+    // ⭐ 27.0.1：**关注态按「目标作者」算，不按传进来的那个 `artist` 算**。
+    //
+    // 从关注列表进来时，`artist` 是关注表里那条记录（可能只有名字、没有主页地址），
+    // 而作者页拉回来之后 `state.artist` 才是**站点给的**那一份（有 `/actresses/…` 地址）。
+    // 两者算出的身份键不同 ⇒ 同一个人的按钮在两处显示相反的状态
+    // （用户 2026-09-16 报的「从关注列表点进去显示『取消关注』、从视频点进去显示『关注』」）。
+    //
+    // 所以这里先定出 [target]（和下面画资料头用的是同一个），再拿它去判关注。
+    val target = state.artist.takeIf { it.followKey.isNotEmpty() } ?: artist
+
     // 关注态在**本机**：读设置流当 key，关注/取关后按钮立刻变。
-    val isFollowed = remember(settings.followedArtistsJson, artist.followKey) {
-        FollowedArtistStore.isFollowed(artist.followKey)
+    // ⚠️ 用 `decode(...)` 拿到与写入同一套规则下的那份列表（见 [FollowedArtistStore.decode]）。
+    val isFollowed = remember(settings.followedArtistsJson, target) {
+        FollowedArtistStore.isFollowed(target, FollowedArtistStore.decode(settings.followedArtistsJson))
     }
 
-
-    val target = state.artist.takeIf { it.followKey.isNotEmpty() } ?: artist
     val profile = state.profile
     val displayName = profile?.name?.takeIf { it.isNotBlank() }
         ?: target.name.ifBlank { stringResource(R.string.artist_page_title) }
@@ -154,7 +163,9 @@ fun ArtistScreen(
                 columns = videoColumns,
                 gridState = gridState,
                 onClickVideo = onClickVideo,
-                onToggleFollow = { toggleFollow(scope, view, artist) },
+                // ⚠️ 传 [target]（= 站点给的那一份），不是传进来的 [artist]：
+                //    从关注列表进来时 `artist` 可能只有名字，关注/取关会按错误身份去写。
+                onToggleFollow = { toggleFollow(scope, view, target) },
                 onRetry = viewModel::retry,
                 onPrevPage = viewModel::prevPage,
                 onNextPage = viewModel::nextPage,

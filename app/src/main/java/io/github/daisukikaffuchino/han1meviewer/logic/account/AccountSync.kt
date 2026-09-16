@@ -198,9 +198,12 @@ object AccountSync {
         (a.followedArtists + b.followedArtists).forEach { ref ->
             val key = ref.followKey
             if (key.isEmpty()) return@forEach
-            val existing = follows[key]
+            // ⚠️ 归并的判据是「是不是同一个人」而不是「键串相等」：站点给的显示名别名
+            //    会让同一个人算出两个键，只按键归并就会把一位关注者同步成两条。
+            val existingKey = follows.entries.firstOrNull { it.value.matchesIdentity(ref) }?.key ?: key
+            val existing = follows[existingKey]
             // 信息更全的那条胜出（老记录可能没有作品数/头像，新的补上）。
-            follows[key] = when {
+            follows[existingKey] = when {
                 existing == null -> ref
                 score(ref) >= score(existing) -> ref
                 else -> existing

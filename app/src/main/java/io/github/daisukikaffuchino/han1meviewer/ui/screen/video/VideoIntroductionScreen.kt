@@ -944,9 +944,14 @@ private fun ArtistSection(
 ) {
     // 本地关注存在本机（Pornhub / nJAV 没有订阅接口，见 FollowedArtistStore），
     // 所以要在这里读一次。用 settings 流当 key：关注/取关写回后按钮会立刻变。
+    //
+    // ⚠️ 27.0.1：存的是**条目本身**而不是「键的集合」。以前这里 `mapTo { it.key }`，
+    // 再拿 `ArtistRef.from(...).followKey in followedKeys` 去比 —— 两个字符串都是
+    // 规范化身份键，看着对，但站点给的显示名别名会让同一个人算出两个键，
+    // 于是「关注了却显示没关注」。改成交给 [FollowedArtistStore.isFollowed] 判同一身份。
     val settings by SettingsRepository.settings.collectAsStateWithLifecycle()
-    val followedKeys = remember(settings.followedArtistsJson) {
-        FollowedArtistStore.all.mapTo(mutableSetOf()) { it.key }
+    val followedArtists = remember(settings.followedArtistsJson) {
+        FollowedArtistStore.decode(settings.followedArtistsJson)
     }
     // 卡片本身不再可点（改成每一行自己可点），所以形状取「未按下」那档，
     // 视觉与老版单作者时一致。cardShapes() 返回的是 ButtonShapes，
@@ -974,16 +979,22 @@ private fun ArtistSection(
                 }
                 ArtistRow(
                     artist = artist,
-                    // ⚠️ 身份键必须和「点关注」那条路**走同一个转换**
+                    // ⚠️ 判「关注了没有」必须和「点关注」那条路**走同一个转换**
                     // （VideoRouteActions.toggleArtistSubscription 用的是
-                    //  `ArtistRef.from(artist, SettingsRepository.siteSource)`）。
+                    //  `ArtistRef.from(artist, SettingsRepository.siteSource)`），
+                    // 然后交给 `isFollowed` 按**身份**比 —— 不是比键串。
                     //
                     // 26.9.8 之前这里比的是 `artist.followKey`，也就是**原始 url**
                     // （`/pornstar/x`、`…/actresses/%E6%8C%81`），而关注表里躺的是
                     // 规范化后的键（`Pornhub|pornstar/x|…`）—— 两个字符串永远不相等，
                     // 于是「点过关注，按钮还是关注」。
-                    isFollowed = ArtistRef.from(artist, SettingsRepository.siteSource)
-                        .followKey in followedKeys,
+                    //
+                    // 27.0.1：换成身份比较之后，同一个人的两种写法（比如同一条女优页在
+                    // 不同语言下 slug 写成显示名）也能认成一位，不再出现
+                    // 「这里显示已关注、那里显示未关注」。
+                    isFollowed = FollowedArtistStore.isFollowed(
+                        ArtistRef.from(artist, settings.siteSource), followedArtists,
+                    ),
                     onOpenArtist = { onOpenArtist(artist) },
                     onToggleSubscribe = { onToggleSubscribe(artist) },
                 )

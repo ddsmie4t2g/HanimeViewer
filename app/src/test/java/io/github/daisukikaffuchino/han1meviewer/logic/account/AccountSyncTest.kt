@@ -18,6 +18,24 @@ import org.junit.Test
  */
 class AccountSyncTest {
 
+    /**
+     * ⭐ 27.0.1：**同一个人、两套 slug 写法**（站点给的显示名被当成另一种 slug）
+     * 在同步合并后只能留一条。
+     *
+     * 这两条的 `followKey` 在字符串上并不相等（不做繁简转换），所以只按键串归并
+     * 会把它同步成两条关注 —— 用户在两台设备之间同步一次就多一条重复的作者。
+     */
+    @Test
+    fun actressAliasDoesNotDuplicateLegacyCloudFollow() {
+        val old = ref("释アリス", "https://njavtv.com/actresses/釋アリス", "njav")
+        val current = ref("释アリス", "https://njavtv.com/cn/actresses/释アリス", "njav")
+        val merged = AccountSync.merge(
+            AccountSnapshot(followedArtists = listOf(old)),
+            AccountSnapshot(followedArtists = listOf(current)),
+        )
+        assertEquals(1, merged.followedArtists.size)
+    }
+
     private fun ref(name: String, url: String, site: String = "pornhub", avatar: String = "") =
         ArtistRef(name = name, url = url, site = site, avatar = avatar)
 

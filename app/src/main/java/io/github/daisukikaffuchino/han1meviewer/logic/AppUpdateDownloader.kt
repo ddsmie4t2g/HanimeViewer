@@ -7,15 +7,25 @@ import io.github.daisukikaffuchino.han1meviewer.logic.network.HProxySelector
 import io.github.daisukikaffuchino.utils.LogUtil
 import io.github.daisukikaffuchino.utils.applicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * 应用内更新包下载。
@@ -97,22 +107,36 @@ object AppUpdateDownloader {
     /**
      * GitHub 加速镜像，**前缀式**：把完整的 GitHub 链接直接拼在后面即可。
      *
-     * 这些是第三方公益加速服务，可用性变化很快。2026-09-11 在本机实测（出沙箱、真实网络）：
+     * 这些是第三方公益加速服务，可用性变化很快。**判据是「真的取到了 APK 的字节」**——
+     * 只看 HTTP 200 会被骗：`gh-proxy.net` 回的是 200 + 一个 HTML 错误页，
+     * `ghproxy.link` 回 307/200 + 1.7 KB 网页，两者都「能用」的假象。
+     * 所以下面每个数字都来自 `build/probe_apk_mirrors.py`（它会校验 `PK` 魔数）。
+     *
+     * 实测（2026-09-16，本机直连，逐条用 Range 取前 1 MB）：
      *
      * | 前缀 | 结果 |
      * |---|---|
-     * | `ghproxy.net` | 206，但只有 ~12 KB/s（比官方还慢，留作最后兜底） |
-     * | `ghfast.top` | 000（完全不通） |
-     * | `gitproxy.click` | 200 但只回 195 字节的错误页 |
-     * | `gh-proxy.com` / `hub.gitmirror.com` / `gh.llkk.cc` / … | 000 |
+     * | `gh.h233.eu.org` | **382 KB/s** ✔ ⇒ 27.9 MB 约 **75 s** |
+     * | `ghproxy.net` | **180 KB/s** ✔ ⇒ 约 160 s |
+     * | `gh.xxooo.cf` | 33 KB/s ✔（太慢，仅当最后兜底） |
+     * | `gh-proxy.net` / `ghproxy.link` | ✘ 回 HTML 网页，不是包 |
+     * | `gh-proxy.com` / `ghfast.top` / `gh.llkk.cc` / `mirror.ghproxy.com` | ✘ 超时 |
+     * | `ghproxy.cc` | ✘ 证书过期 |
+     * | `hub.gitmirror.com` / `gh-proxy.top` / `ghp.ci` / `ghdl.feizhuqwq.cf` | ✘ 域名不存在 |
+     * | **官方 `github.com`** | ✘ **完全不通**（纯超时，0 字节） |
      *
-     * 所以**不要指望镜像**：官方源（配 [GitHubDns]）才是主力，镜像只是「聊胜于无」的最后一条。
-     * 不要再往这里堆域名 —— 实测十几个公共镜像几乎全灭，堆它们只会让失败路径变得更长。
+     * ⚠️ 最后一行是关键：官方源在**大陆网络下根本不工作**，而它排在候选表第一位。
+     * 只加镜像不改顺序的话，用户仍要先陪官方源把 `connectTimeout + readTimeout` 走满
+     * （还是两次，见 [ATTEMPTS_PER_SOURCE]）才轮得到镜像 —— 这就是「更新还是太慢」。
+     * 所以 [download] 现在先跑一次**源探活赛跑**（[pickLiveSource]），谁先给出真应答就用谁。
+     *
+     * ⚠️ 但**别删官方源**：海外用户直连 GitHub 又快又省流量，赛跑会自己把它选出来。
      *
      * 安全性：APK 最终要过 Android 的签名校验（同包名必须同签名），
      * 任何被篡改的包都装不上，所以走镜像不会带来「装上假包」的风险。
      */
     private val MIRROR_PREFIXES = listOf(
+        "https://gh.h233.eu.org/",
         "https://ghproxy.net/",
     )
 
@@ -133,6 +157,43 @@ object AppUpdateDownloader {
      * 看起来是连续在走，又不会把主线程压满。
      */
     private const val PROGRESS_INTERVAL_MS = 500L
+
+    /**
+     * 源探活时每个源最多读的字节数。
+     *
+     * 只要 4 个字节就够判「是不是 APK」（zip 魔数 `PK\x03\x04`），但这里多要一点，
+     * 免得某些镜像对 `bytes=0-3` 这种极小 Range 直接报错。
+     */
+    private const val PROBE_BYTES = 1024L
+
+    /**
+     * 源探活的**总预算**：这么久还没人给出可用应答，就退回「按候选表顺序依次试」。
+     *
+     * 取值逻辑与 `AppUpdateChecker` 的源赛跑一致 —— 观测到的好源都在 0.1–1.5 s 答应答，
+     * 死亡源则是**黑洞**（connect 不返回，只能等超时）。给 6 s 已经足够宽裕，
+     * 而它换来的是「不再陪死源走满两轮 20 s + 60 s 的超时」。
+     */
+    private const val PROBE_BUDGET_MS = 6_000L
+
+    /** 探活 client 的连接/读取超时。比 [READ_TIMEOUT_SECONDS] 小一个数量级，理由见 [probeClient]。 */
+    private const val PROBE_CONNECT_TIMEOUT_SECONDS = 4L
+    private const val PROBE_READ_TIMEOUT_SECONDS = 4L
+
+    /**
+     * 探活用的 client：**超时必须短**。
+     *
+     * 探活的意义就是「快速判死」，所以这里不能用 [client] 那套给大文件续传用的宽松超时
+     * （20 s connect / 60 s read）—— 那正是我们要避开的东西。
+     */
+    private val probeClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(PROBE_CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(PROBE_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .dns(GitHubDns)
+            .proxySelector(HProxySelector())
+            .proxyAuthenticator(HProxyAuthenticator.http)
+            .build()
+    }
 
     fun updateApkFile(): File = File(applicationContext.cacheDir, APK_NAME)
 
@@ -211,6 +272,82 @@ object AppUpdateDownloader {
             .build()
     }
 
+    /**
+     * **源探活赛跑**：并发问每个候选源「你能不能给我 APK」，第一个答对的胜出。
+     *
+     * 为什么需要它：候选表第一位是官方 `github.com`，而它在**大陆网络下完全不通**
+     * （实测纯超时、0 字节）。旧流程是「按顺序依次试 + 每个源试两次」，于是用户要先陪
+     * 官方源把 `connectTimeout(20 s)` 走满两轮，才轮得到镜像 —— 表现就是
+     * 「点了更新，进度条长时间不动」。
+     *
+     * 判定**不只看 HTTP 码**，必须同时满足：
+     * 1. `200` 或 `206`；
+     * 2. 前 4 字节是 `PK\x03\x04`（APK 就是 zip）。
+     *
+     * 第 2 条是关键 —— 好几个镜像失败时会回一个**完整的 HTML 错误页**（HTTP 200），
+     * 只看状态码会把流量白白导给它（实测 `gh-proxy.net` / `ghproxy.link` 都是这样）。
+     *
+     * @return 胜出的候选 URL；[PROBE_BUDGET_MS] 内无人可用就返回 null，调用方退回原顺序
+     */
+    private suspend fun pickLiveSource(candidates: List<String>): String? = coroutineScope {
+        val arrivals = Channel<String>(Channel.UNLIMITED)
+        val jobs = candidates.map { candidate ->
+            launch(Dispatchers.IO) {
+                val alive = runCatching { probeSource(candidate) }
+                    .onFailure { LogUtil.d(TAG, "探活失败：$candidate（${it.message}）") }
+                    .getOrDefault(false)
+                if (alive) arrivals.send(candidate)
+            }
+        }
+        val winner = withTimeoutOrNull(PROBE_BUDGET_MS) { arrivals.receive() }
+        // 决定之后立刻掐掉还在探的：挂死的源不再占着 socket（同 AppUpdateChecker 的源赛跑）
+        jobs.forEach { it.cancel() }
+        winner?.let { LogUtil.d(TAG, "源探活胜出：$it") }
+        winner
+    }
+
+    /**
+     * 问一个源「能不能给我 APK 的前几个字节」。
+     *
+     * 用 `Range` 只要 [PROBE_BYTES] 字节，所以对每个源都几乎零成本；读满就关，
+     * 不会真的开始下包（真正的下载仍由 [downloadFrom] 自己发一次不带 Range 前缀的请求）。
+     */
+    private suspend fun probeSource(url: String): Boolean {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .header("Range", "bytes=0-${PROBE_BYTES - 1}")
+            .get()
+            .build()
+        return probeClient.newCall(request).awaitResponse().use { response ->
+            if (response.code != 200 && response.code != 206) return@use false
+            val head = ByteArray(4)
+            runCatching { response.body.byteStream().use { stream -> stream.read(head) } }
+            head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()
+        }
+    }
+
+    /**
+     * 非阻塞地等这次 call 的响应，并且**取消时真的把请求掐掉**。
+     *
+     * ⚠️ 别改成 `execute()`：它是阻塞调用，协程取消**掐不断**它 ——
+     * [pickLiveSource] 的「到点就掐」会变成一句空话，探活那 6 s 的预算也就失去意义
+     * （同一个理由写在 `AppUpdateChecker` 的 `Call.await` 上）。
+     */
+    private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { cancel() }
+        enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (!continuation.isCancelled) continuation.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                // 取消与响应同时发生时，response 必须自己关掉，否则连接不会归还连接池。
+                if (continuation.isCancelled) response.close() else continuation.resume(response)
+            }
+        })
+    }
+
     /** 按顺序尝试的下载源：GitHub 官方 → 各加速镜像。 */
     private fun candidateUrls(url: String): List<String> = buildList {
         add(url)
@@ -243,9 +380,18 @@ object AppUpdateDownloader {
             writeIdentity(url, expectedVersionCode ?: 0)
 
             val candidates = candidateUrls(url)
+            // ⭐ 先探活、再决定顺序：官方源在大陆完全不通（纯超时），而旧流程要把它的
+            //    两轮超时走满才轮到镜像。赛跑胜出的源提到最前；海外用户会由同一次赛跑
+            //    把官方选出来 —— 不写死「镜像优先」正是为了让两边都对。
+            //    ⚠️ 注意「身份旁注」仍写**规范 URL**（[writeIdentity] 用的是入参 url），
+            //    所以换胜出者不会让半截文件被判成外来物、白丢一次续传。
+            val ordered = pickLiveSource(candidates)?.let { live ->
+                if (live == candidates.first()) candidates
+                else listOf(live) + candidates.filter { it != live }
+            } ?: candidates
             var lastError: Throwable? = null
 
-            candidates.forEachIndexed { index, candidate ->
+            ordered.forEachIndexed { index, candidate ->
                 if (index > 0) {
                     // 换源：不同源的字节未必一致，半截文件不能续，清掉重来
                     runCatching { updateApkFile().delete() }

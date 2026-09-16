@@ -164,13 +164,43 @@ data class ArtistRef(
      *
      * - **nJAV**：`actresses/<编码名>` —— 丢掉域名、语言段、会变的 `dm###` 前缀与 query，
      *   再把百分号编码**解回文字**（同一个名字可能一处写成 `%E6%8C%81`、一处直接写汉字）；
-     * - **Pornhub / 其它**：`路径::名字` —— 丢掉域名与语言段，但**不**碰路径本身
-     *   （Pornhub 的 `/pornstar/<slug>` 与 `/users/<name>` 是两类东西，绝不能合并）；
+     * - **Pornhub**：**只用作者主页路径** —— 丢掉域名、语言段与 query，但**不**碰路径本身
+     *   （Pornhub 的 `/pornstar/<slug>` 与 `/users/<name>` 是两类东西，绝不能合并），
+     *   也**不把显示名写进键**（显示名会跟着站点的语言设置变，写进去就会出现
+     *   「从关注列表点进去已关注、从视频点进去却是未关注」）；
      * - 没有地址时退回名字。
      *
      * ⚠️ 名字在键里**只当兜底**，不当主键：跨站同名作者靠 [url] 区分（见 [siteSource]）。
      */
     fun identityKey(): String = keyOf(name, url, siteSource)
+
+    /**
+     * 这两位是不是**同一个人**。
+     *
+     * [identityKey] 相等当然算；此外还要吃掉「站点自己会用显示名当别名」的情况 ——
+     * 同一个人的女优页在不同语言下，slug 可能写成站点给出的显示名，
+     * 于是 `actresses/<slug>` 与 `actresses/<显示名>` 指的是同一个人。
+     *
+     * 用户 2026-09-16 报的「从关注列表点进去显示『取消关注』、从视频点进去显示『关注』」，
+     * 就是两边算出的键不同、而比较又只比键串造成的。
+     *
+     * ⚠️ 三道闸门缺一不可：
+     * 1. **站点必须相同** —— 不同站点的同名作者是两个人；
+     * 2. 只有 **nJAV** 放开别名 —— Pornhub / hanime 的身份与显示名无关，
+     *    放开只会把两位不同的作者认成一个；
+     * 3. 两个键都得非空 —— 空键（连名字都没有的脏数据）不许互相匹配。
+     */
+    fun matchesIdentity(other: ArtistRef): Boolean {
+        if (siteSource != other.siteSource || followKey.isEmpty() || other.followKey.isEmpty()) return false
+        if (followKey == other.followKey) return true
+        if (siteSource != SiteSource.Njav) return false
+        val slug = actressKeyOf(url)?.removePrefix("actresses/")
+        val otherSlug = actressKeyOf(other.url)?.removePrefix("actresses/")
+        return (slug != null && slug == normalizeName(other.name)) ||
+                (otherSlug != null && otherSlug == normalizeName(name)) ||
+                ((slug == null || otherSlug == null) && normalizeName(name).isNotEmpty() &&
+                        normalizeName(name) == normalizeName(other.name))
+    }
 
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
@@ -195,17 +225,19 @@ data class ArtistRef(
             // ⚠️ site 与 url 可能互相矛盾（`site` 是关注那一刻的「当前站点」，
             // 而 url 是站点自己给的）。以 url 为准 —— 与 [siteSource] 的判据一致。
             val pathKey = urlPathKey(rawUrl)
-            if (pathKey.isEmpty()) return "${site.value}|" + normalizeName(name)
-            return "${site.value}|$pathKey|" + normalizeName(name)
+            // ⭐ hanime 没有作者页，url 只是一条搜索结果之类的东西，认人只能靠名字；
+            //   其余站点有真实主页路径，**键就是路径本身**，名字只当没有路径时的兜底。
+            if (pathKey.isEmpty() || site == SiteSource.Hanime1) return "${site.value}|" + normalizeName(name)
+            return "${site.value}|$pathKey"
         }
 
         /**
          * nJAV 女优地址 → `actresses/<解码后的名字>`；不是女优地址就返回 null。
          *
-         * 三种写法都要吃得下（见 [identityKey] 的表），并且：
-         * - `dm###`（会变的随机数字前缀，`/dm539/` 自己都能 301 到别处）与 `cn` / `en`
-         *   这类语言段一律丢掉；
-         * - `ranking` / `genres` 不是「某个人」，返回 null 让调用方退回名字。
+         * 三种写法都要吃得下（见 [identityKey] 的表）：`dm###` 随机数字前缀与 `cn` / `en`
+         * 语言段都出现在 **`/actresses/` 之前**，所以只要从标记之后取尾巴就自然把它们丢掉了。
+         *
+         * `ranking` / `genres` 不是「某个人」，返回 null 让调用方退回名字。
          */
         private fun actressKeyOf(rawUrl: String): String? {
             if (rawUrl.isEmpty()) return null
@@ -222,10 +254,6 @@ data class ArtistRef(
             val name = runCatching { java.net.URLDecoder.decode(tail, "UTF-8") }
                 .getOrDefault(tail)
                 .trim()
-                .removePrefix("dm")
-                .substringAfter('/')
-                .trimStart('/')
-                .trim()
             if (name.isEmpty()) return null
             // `ranking` / `genres` / `cn` 这些不是「某个人」，交给调用方退回名字。
             if (name.lowercase() in ACTRESS_RESERVED) return null
@@ -235,8 +263,11 @@ data class ArtistRef(
         /**
          * `https://www.pornhub.com/pornstar/tru-kait?x=1` → `pornstar/tru-kait`。
          *
-         * 只丢域名、协议与 query，**不碰路径内容** —— `/pornstar/<slug>` 与 `/users/<name>`
-         * 是两类不同的东西，合并了就会把两个人认成一个。
+         * 只丢域名、协议、query 与**最前面的语言段**（`cn/`、`en/`…），**不碰路径内容** ——
+         * `/pornstar/<slug>` 与 `/users/<name>` 是两类不同的东西，合并了就会把两个人认成一个。
+         *
+         * ⚠️ 语言段必须丢：同一张作者页在 `?lang=cn` 下的链接可能是 `/cn/pornstar/x`，
+         * 不丢就会算出两个键，于是「在这里关注了、到那里看还是没关注」。
          */
         private fun urlPathKey(rawUrl: String): String {
             if (rawUrl.isEmpty()) return ""
@@ -247,6 +278,7 @@ data class ArtistRef(
                     rawUrl.substringAfter("://", rawUrl).substringAfter('/', "")
                 }
             return path.substringBefore('?').trim('/').lowercase()
+                .replace(Regex("^(?:cn|en|ja|tw|zh)/"), "")
         }
 
         /**
@@ -254,7 +286,8 @@ data class ArtistRef(
          *
          * 与 [io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavActressCache] 同一套口径
          * （它那边还要按名字查头像，两边不一致就会出现「关注认得出、头像补不上」）。
-         * **不做繁简转换**：那需要一张大表，而站点自己的 href 里已经是同一种写法。
+         * **不做繁简转换**：那需要一张大表，而站点自己的 href 里已经是同一种写法 ——
+         * 语言变体交给 [matchesIdentity] 拿站点给的显示名去对照，不靠猜。
          */
         private fun normalizeName(name: String): String = runCatching {
             java.text.Normalizer.normalize(name.trim(), java.text.Normalizer.Form.NFC)

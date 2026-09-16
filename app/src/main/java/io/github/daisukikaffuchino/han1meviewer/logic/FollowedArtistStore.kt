@@ -3,10 +3,6 @@ package io.github.daisukikaffuchino.han1meviewer.logic
 import io.github.daisukikaffuchino.han1meviewer.logic.model.ArtistRef
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SiteSource
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -105,14 +101,29 @@ object FollowedArtistStore {
      * 一模一样的头像 —— 那正是用户看到的现象。
      */
     val all: List<Item>
-        get() {
-            val decoded = runCatching {
-                json.decodeFromString<List<Item>>(SettingsRepository.followedArtistsJson)
-            }.getOrDefault(emptyList())
-            val (merged, changed) = dedup(decoded)
-            if (changed) persist(merged)
-            return merged
-        }
+        get() = decode(SettingsRepository.followedArtistsJson)
+
+    /**
+     * 把一份关注表 JSON 解成条目列表（读取时合并重复项）。
+     *
+     * ⭐ 27.0.1 起界面自己拿着 `settings.followedArtistsJson` 调它，再交给
+     * [isFollowed] 判断 —— 这样「读出来的那一份」与「刚写进去的那一份」是同一份数据，
+     * 不会出现「读的走一条路、写的走另一条路」而对不上（用户 2026-09-16 报的
+     * 「从关注列表点进去显示『取消关注』、从视频点进去却显示『关注』」就是这个）。
+     */
+    fun decode(raw: String): List<Item> = dedup(runCatching {
+        json.decodeFromString<List<Item>>(raw)
+    }.getOrDefault(emptyList()))
+
+    /**
+     * [ref] 在不在 [items] 里。
+     *
+     * 比较**不是字符串相等**，而是走 [ArtistRef.matchesIdentity] —— 站点自己会用
+     * 显示名当别名（同一个人的女优页在不同语言下 slug 可能写成显示名），
+     * 字符串相等会把同一个人认成两个，于是「关注了却显示没关注」。
+     */
+    fun isFollowed(ref: ArtistRef, items: List<Item> = all): Boolean =
+        items.any { it.toArtistRef().matchesIdentity(ref) }
 
     /** 关注页要的形态（作者页头部 / 抽屉入口都用它）。 */
     val asArtistRefs: List<ArtistRef>
@@ -151,31 +162,36 @@ object FollowedArtistStore {
      *
      * 写进本机之后，[AccountSync.snapshot] 会自然把它带上用户自建账号，
      * 于是「订一次、换任何设备都能看到」这件事就成立了。
+     *
+     * ⚠️ 27.0.1 起整套「读 → 改 → 写」都在 [updateItems] 的**事务**里做：以前是
+     * 「先读出来、在内存里改、再整份写回去」，两步之间别人写进去的关注会被这次回写抹掉。
      */
     suspend fun mergeSubscriptionItems(items: List<SubscriptionItem>): Int {
         if (items.isEmpty()) return 0
 
-        val existing = all
-        // 只跟「同样是 hanime 的人」比名字：别的站有同名作者不该拦着。
-        val known = existing.filter { it.toArtistRef().siteSource == SiteSource.Hanime1 }
-            .mapTo(mutableSetOf()) { it.name.trim().lowercase() }
+        var added = 0
+        updateItems { existing ->
+            // 只跟「同样是 hanime 的人」比名字：别的站有同名作者不该拦着。
+            val known = existing.filter { it.toArtistRef().siteSource == SiteSource.Hanime1 }
+                .mapTo(mutableSetOf()) { it.name.trim().lowercase() }
 
-        val additions = mutableListOf<Item>()
-        items.forEach { item ->
-            val name = item.artistName.trim()
-            if (name.isEmpty()) return@forEach
-            if (!known.add(name.lowercase())) return@forEach
-            additions += Item(
-                name = name,
-                avatar = item.avatar,
-                // 没有主页地址：hanime 站点上没有作者页，身份只能用名字。
-                url = "",
-                site = SiteSource.Hanime1.value,
-            )
+            val additions = mutableListOf<Item>()
+            items.forEach { item ->
+                val name = item.artistName.trim()
+                if (name.isEmpty()) return@forEach
+                if (!known.add(name.lowercase())) return@forEach
+                additions += Item(
+                    name = name,
+                    avatar = item.avatar,
+                    // 没有主页地址：hanime 站点上没有作者页，身份只能用名字。
+                    url = "",
+                    site = SiteSource.Hanime1.value,
+                )
+            }
+            added = additions.size
+            existing + additions
         }
-        if (additions.isEmpty()) return 0
-        save(existing + additions)
-        return additions.size
+        return added
     }
 
     fun isFollowed(key: String): Boolean {
@@ -212,28 +228,32 @@ object FollowedArtistStore {
     /**
      * 写入一轮「新作检查」的结果，返回真正被改动的条数。
      *
+     * ⚠️ 27.0.1 起在事务里改：以前是「读一份 → 逐条改 → 整份写回」，
+     * 如果这中间用户刚点了一个「取消关注」，回写会把它**还原**回来 ——
+     * 也就是用户说的「取消了关注，一会儿又自己回来了」。
+     *
      * @param results 身份键 → [UpdateResult]
      */
     suspend fun applyUpdateResults(results: Map<String, UpdateResult>): Int {
         if (results.isEmpty()) return 0
-        val list = all
         var changed = 0
-        val updated = list.map { item ->
-            val result = results[item.key] ?: return@map item
-            val merged = item.copy(
-                newCount = result.newCount,
-                // 只在「首次看到」时补种第一页；已有记录**不动** ——
-                // 动了就等于把新作当成看过了，红点当场消失。
-                seenCodes = result.seedCodes ?: item.seenCodes,
-            )
-            if (merged != item) {
-                changed++
-                merged
-            } else {
-                item
+        updateItems { list ->
+            list.map { item ->
+                val result = results[item.key] ?: return@map item
+                val merged = item.copy(
+                    newCount = result.newCount,
+                    // 只在「首次看到」时补种第一页；已有记录**不动** ——
+                    // 动了就等于把新作当成看过了，红点当场消失。
+                    seenCodes = result.seedCodes ?: item.seenCodes,
+                )
+                if (merged != item) {
+                    changed++
+                    merged
+                } else {
+                    item
+                }
             }
         }
-        if (changed > 0) save(updated)
         return changed
     }
 
@@ -248,15 +268,14 @@ object FollowedArtistStore {
     suspend fun markSeen(ref: ArtistRef, firstPageCodes: List<String>) {
         val k = ref.followKey
         if (k.isEmpty()) return
-        val list = all
-        var changed = false
-        val updated = list.map { item ->
-            if (!sameIdentity(item, k)) return@map item
-            if (item.newCount == 0 && item.seenCodes == firstPageCodes) return@map item
-            changed = true
-            item.copy(newCount = 0, seenCodes = firstPageCodes)
+        updateItems { list ->
+            list.map { item ->
+                // 认人用 matchesIdentity，不是字符串相等 —— 见 [isFollowed]。
+                if (!item.toArtistRef().matchesIdentity(ref)) return@map item
+                if (item.newCount == 0 && item.seenCodes == firstPageCodes) return@map item
+                item.copy(newCount = 0, seenCodes = firstPageCodes)
+            }
         }
-        if (changed) save(updated)
     }
 
     /**
@@ -291,22 +310,24 @@ object FollowedArtistStore {
      *
      * ⚠️ 只补**空头像**，绝不覆盖已有的（用户可能已经从别处拿到了同一张图，
      * 或者站点换了图而旧的那张还能用）。
+     * ⚠️ 27.0.1 起在事务里改：它由后台的 `LaunchedEffect` 触发，与用户的关注操作
+     * 天然并发；不在事务里就会把并发发生的「取消关注」又补回去。
      *
      * @param avatarOf 按名字查头像；没有就返回空串
      */
     suspend fun fillMissingAvatars(avatarOf: (String) -> String): Int {
-        val list = all
         var filled = 0
-        val updated = list.map { item ->
-            if (item.avatar.isNotBlank()) return@map item
-            val ref = item.toArtistRef()
-            if (ref.siteSource != SiteSource.Njav) return@map item
-            val avatar = avatarOf(ref.name).trim()
-            if (avatar.isEmpty()) return@map item
-            filled++
-            item.copy(avatar = avatar)
+        updateItems { list ->
+            list.map { item ->
+                if (item.avatar.isNotBlank()) return@map item
+                val ref = item.toArtistRef()
+                if (ref.siteSource != SiteSource.Njav) return@map item
+                val avatar = avatarOf(ref.name).trim()
+                if (avatar.isEmpty()) return@map item
+                filled++
+                item.copy(avatar = avatar)
+            }
         }
-        if (filled > 0) save(updated)
         return filled
     }
 
@@ -325,45 +346,55 @@ object FollowedArtistStore {
     suspend fun enrich(ref: ArtistRef): Boolean {
         val k = ref.followKey
         if (k.isEmpty()) return false
-        val list = all
         var changed = false
-        val updated = list.map { item ->
-            if (!sameIdentity(item, k)) return@map item
-            val merged = item.copy(
-                name = item.name.ifBlank { ref.name },
-                avatar = item.avatar.ifBlank { ref.avatar },
-                url = item.url.ifBlank { ref.url },
-                site = item.site.ifBlank { ref.site },
-                videoCount = item.videoCount.ifBlank { ref.videoCount },
-                subscriberCount = item.subscriberCount.ifBlank { ref.subscriberCount },
-            )
-            if (merged != item) changed = true
-            merged
+        updateItems { list ->
+            list.map { item ->
+                if (!item.toArtistRef().matchesIdentity(ref)) return@map item
+                val merged = item.copy(
+                    name = item.name.ifBlank { ref.name },
+                    avatar = item.avatar.ifBlank { ref.avatar },
+                    url = item.url.ifBlank { ref.url },
+                    site = item.site.ifBlank { ref.site },
+                    videoCount = item.videoCount.ifBlank { ref.videoCount },
+                    subscriberCount = item.subscriberCount.ifBlank { ref.subscriberCount },
+                )
+                if (merged != item) changed = true
+                merged
+            }
         }
-        if (changed) save(updated)
         return changed
     }
 
     /**
      * 关注 / 取关，返回**新状态**（`true` = 现在已关注）。
      *
-     * 取关按**规范化身份键**删（见 [Item.key]），顺带把「同一身份但写法变了」的
-     * 旧记录也清掉，不然会出现「点已关注，但列表里还留着一个」。
+     * 取关按**身份**删（见 [ArtistRef.matchesIdentity]），顺带把「同一身份但写法变了」
+     * 的旧记录也清掉，不然会出现「点已关注，但列表里还留着一个」。
+     *
+     * ⚠️ 27.0.1 起「读旧列表」与「写新列表」在**同一个事务**里完成
+     * （[SettingsRepository.update]）：以前是「先读 → 判在不在 → 再写」，
+     * 中间任何一次后台回写（头像补全 / 新作检查）都能把刚落盘的关注覆盖成旧列表，
+     * 表现就是「点了关注，过一会儿又没了」。
+     *
+     * ⚠️ 调用方必须**等它返回之后**再去上传账号数据（见 `VideoViewModel` /
+     * `ArtistViewModel`）：以前是先 `launch` 上传、再落盘，传上去的是**旧列表**。
      */
     suspend fun toggle(ref: ArtistRef): Boolean {
         val k = ref.followKey
         if (k.isEmpty()) return false
-        val list = all
-        val existing = list.any { sameIdentity(it, k) }
-        val updated = if (existing) {
-            list.filterNot { sameIdentity(it, k) }
-        } else {
-            // 已关注过但换了数据源/补齐了资料时，以最后一次看到的为准 ——
-            // 保留旧记录只会让作者页头部一直显示过时的作品数。
-            list.filterNot { sameIdentity(it, k) } + ref.toFollowedItem()
+        var followed = false
+        SettingsRepository.update { settings ->
+            val list = decode(settings.followedArtistsJson)
+            followed = !isFollowed(ref, list)
+            val updated = if (followed) {
+                // 以最后一次看到的资料为准 —— 保留旧记录只会让作者页头部显示过时的作品数。
+                list + ref.toFollowedItem()
+            } else {
+                list.filterNot { it.toArtistRef().matchesIdentity(ref) }
+            }
+            settings.copy(followedArtistsJson = json.encodeToString(updated))
         }
-        save(updated)
-        return !existing
+        return followed
     }
 
     /**
@@ -373,12 +404,6 @@ object FollowedArtistStore {
     suspend fun toggle(url: String, name: String, avatar: String = ""): Boolean =
         toggle(ArtistRef(name = name, avatar = avatar, url = url))
 
-    /** 该条目是不是键 [key] 那位（两边都按 [ArtistRef.keyOf] 归一后比）。 */
-    private fun sameIdentity(item: Item, key: String): Boolean {
-        if (key.isEmpty()) return false
-        return ArtistRef.keyOf(item.name, item.url, item.toArtistRef().siteSource) == key
-    }
-
     /**
      * 把同一身份的多条记录合并成一条（26.8.3）。
      *
@@ -387,12 +412,16 @@ object FollowedArtistStore {
      * 可能更全。**绝不**因为「后来的更全」就改写已有的头像：那张图可能正被界面用着，
      * 而站点换图后旧地址往往还能用。
      *
-     * @return 合并后的列表 + 有没有真的合并掉东西（有才需要落盘）
+     * ⚠️ 合并的判据是 [ArtistRef.matchesIdentity] 而不是「键串相等」：站点给的显示名
+     * 别名会让同一个人算出两个键，只用键相等就合不掉（这正是「同一位女优关注出两条」
+     * 在修好身份键之后仍然偶发的原因）。
+     *
+     * ⚠️ 读取时**只合并、不落盘**：写入一律在 [updateItems] 的事务内完成，
+     * 免得「顺手补写」把刚好发生的关注操作覆盖掉。
      */
-    private fun dedup(list: List<Item>): Pair<List<Item>, Boolean> {
-        if (list.size <= 1) return list to false
+    private fun dedup(list: List<Item>): List<Item> {
+        if (list.size <= 1) return list
         val byIdentity = LinkedHashMap<String, Item>()
-        var changed = false
         list.forEach { item ->
             val id = ArtistRef.keyOf(item.name, item.url, item.toArtistRef().siteSource)
             if (id.isEmpty()) {
@@ -400,7 +429,10 @@ object FollowedArtistStore {
                 byIdentity["\u0000" + item.hashCode()] = item
                 return@forEach
             }
-            val first = byIdentity[id]
+            val existingId = byIdentity.entries.firstOrNull {
+                it.value.toArtistRef().matchesIdentity(item.toArtistRef())
+            }?.key ?: id
+            val first = byIdentity[existingId]
             if (first == null) {
                 byIdentity[id] = item
                 return@forEach
@@ -420,35 +452,25 @@ object FollowedArtistStore {
                 newCount = maxOf(first.newCount, item.newCount),
                 seenCodes = first.seenCodes.ifEmpty { item.seenCodes },
             )
-            if (merged != first) byIdentity[id] = merged
-            // 无论如何这一条都算「变了」：它被合并掉了（哪怕一点新信息都没带），
-            // 不置位的话下次读还会再看到这个重复项。
-            changed = true
+            if (merged != first) byIdentity[existingId] = merged
         }
-        return byIdentity.values.toList() to changed
-    }
-
-    private suspend fun save(list: List<Item>) {
-        persist(dedup(list).first)
+        return byIdentity.values.toList()
     }
 
     /**
-     * 直接落盘（**不再** dedup：调用方要么来自 [dedup] 之后的 [all]，要么自己已经合过了）。
+     * **唯一的写入口**：把「读当前值 → 改 → 写回」整体放进 [SettingsRepository.update]
+     * 的事务里，写完顺手 dedup。
      *
-     * 单独留一个同步入口是因为 [all] 是同步属性 —— 合并掉重复项之后必须顺手落盘，
-     * 否则下一次读还要再合一遍（界面也会跟着抖）。落盘本身挂起，所以只 `launch` 出去，
-     * 不让调用方等它。
+     * 为什么必须这样：以前每个入口各自「先 `all` 读一份 → 在内存里改 → `save` 整份写回」，
+     * 两个后台任务（头像补全、新作检查）与用户的关注操作同时进行时，
+     * 后写的那个会把先写的**整份**覆盖掉 —— 表现就是「刚关注完，关注又变回去了」。
      */
-    private fun persist(list: List<Item>) {
-        persistScope.launch {
-            runCatching {
-                SettingsRepository.setFollowedArtistsJson(json.encodeToString(list))
-            }
+    private suspend fun updateItems(transform: (List<Item>) -> List<Item>) {
+        SettingsRepository.update { settings ->
+            val items = decode(settings.followedArtistsJson)
+            val updated = transform(items)
+            if (updated == items) settings
+            else settings.copy(followedArtistsJson = json.encodeToString(dedup(updated)))
         }
-    }
-
-    /** [persist] 的落地 scope（与 [io.github.daisukikaffuchino.han1meviewer.logic.network.CdnRelay] 同一个套路）。 */
-    private val persistScope by lazy {
-        CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 }
