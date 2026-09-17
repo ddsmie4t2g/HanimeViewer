@@ -305,14 +305,44 @@ object AppUpdateChecker {
      * | `testingcf.jsdelivr.net` | jsDelivr / Fastly | 200 / 0.33 s（**钉 Fastly IP 后**）|
      * | `jsdelivr.b-cdn.net` | jsDelivr / **Bunny** | 200 / 0.59–4.8 s（另一张 CDN，独立于 Fastly）|
      * | `ghproxy.net` | 第三方 GitHub 代理 | 200 / 0.95 s |
+     * | `ddsmie4t2g.github.io` | **GitHub Pages** / Fastly | 200 / 0.50 s（**且不滞后**，见下）|
      * | `github.com/…/raw/…` | GitHub 本体（302 到 raw） | 本机 000（域名被墙），别的网络可能通 |
      * | `raw.githubusercontent.com` | GitHub / Fastly | 200 / 1.2–1.6 s（**钉 185.199.x 后**）|
      *
      * ⚠️ 第三方代理（`ghproxy.net`）只当**补充**：它拿到的是同一份 json，但内容由第三方
      * 转发，所以 [AppUpdatePayload.toAvailableUpdateOrNull] 仍然只信「网址合法 + 版本更大」，
      * 而安装包**始终**从 json 里给的那个地址下载 —— 签名不同会被系统拒装，装不上假包。
+     *
+     * ## ⭐ 27.0.4：为什么还要单独养一个 GitHub Pages 站点
+     *
+     * 上面的表看着源很多，但它们的分发链路其实只有**两类**，各有结构性毛病，
+     * 而且都不是「多挂一个域名」能修的 —— 这才是加这条的理由
+     * （站点侧的做法与理由见 `.github/workflows/pages.yml` 的文件头）：
+     *
+     * - **jsDelivr 那 7 条**：对 `gh/<owner>/<repo>@<branch>/<file>` 有 **12 小时的 s-maxage**，
+     *   且缓存键**不含 query string**（拼 `?t=时间戳` 无效）。⇒ 发版后最长 12 小时客户端
+     *   还拿到旧 json，表现就是「明明发了新版，检查更新却说不更新」。
+     * - **GitHub 本体那 2 条**：`raw.githubusercontent.com` / `github.com` 在部分网络下
+     *   被 DNS 投毒或直接不通（本机实测 `000`）。
+     *
+     * `ddsmie4t2g.github.io` 两类都不属于：**不经过 jsDelivr**（Pages 的 CDN TTL 是
+     * 10 分钟量级，且每次部署刷新被改动的文件），域名也与 `raw.githubusercontent.com`
+     * **不是一个**（同一段 Fastly anycast，但被墙/被投毒的范围常常不一样）。
+     * 2026-09-17 本机直连实测：`185.199.108–111.153` 四个 IP 全部可达，
+     * TLS 0.50 s / HTTP 200 —— 是**实测可用**的源，不是「多一条试试」。
+     *
+     * ⚠️ 这个地址与 `.github/workflows/pages.yml` 是**同一份约定**：
+     * 改仓库名 / 改站点路径时必须两边一起改，否则这条源会**静默 404**
+     * （赛跑里只表现为「这条源失败」，排查时很难往这儿想）。
+     *
+     * `internal`（而非 private）是给单测留的门：JVM 单测里 `android.util.Base64` 是
+     * **Stub（一调就抛 `not mocked`）**，所以 [updateSourceUrls] 那条路在单测里跑不了，
+     * 测试只能拿这份原始 base64 用 `java.util.Base64` 自己解 —— 见 [updateSourceUrls]。
      */
-    private val UPDATE_URLS = listOf(
+    internal val UPDATE_URLS = listOf(
+        // ⭐ 27.0.4：GitHub Pages（仓库 mod 分支的 update.json 由 Actions 发布过去）。
+        // 放在最前面只是给读代码的人一个「哪条最新鲜」的提示，赛跑本身与顺序无关。
+        "aHR0cHM6Ly9kZHNtaWU0dDJnLmdpdGh1Yi5pby9IYW5pbWVWaWV3ZXIvdXBkYXRlLmpzb24=",
         // jsDelivr（GitHub 内容加速，国内一般可直连）
         "aHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L2doL2Rkc21pZTR0MmcvSGFuaW1lVmlld2VyQG1vZC91cGRhdGUuanNvbg==",
         // GitHub raw（直连，可能需要代理）
@@ -333,6 +363,20 @@ object AppUpdateChecker {
         // 只当补充源：它是**别人**的服务器，所以排在自建/官方之后，且不参与任何写操作。
         "aHR0cHM6Ly9naHByb3h5Lm5ldC9odHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vZGRzbWllNHQyZy9IYW5pbWVWaWV3ZXIvbW9kL3VwZGF0ZS5qc29u",
     )
+
+    /**
+     * 把 [UPDATE_URLS] 里的 base64 解开成真正的地址（走生产的 `android.util.Base64`）。
+     *
+     * 做成函数而不是在每个调用点就地 `map { decode }`，是为了让「解码」只有一处，
+     * 免得某天只改了一处解码的 flag/编码。
+     *
+     * ⚠️ **单测不要调这个**：JVM 单测里 `android.util.Base64` 是 **Stub**
+     * （一调就抛 `RuntimeException: Method decode in android.util.Base64 not mocked`）。
+     * 单测请拿 [UPDATE_URLS] 自己用 `java.util.Base64` 解 —— 两边对同一份标准
+     * 无换行 base64 的结果是逐字节相同的，所以「地址写错了」这个风险照样能被钉住。
+     */
+    internal fun updateSourceUrls(): List<String> =
+        UPDATE_URLS.map { it.decodeFromStringByBase64(Base64.NO_WRAP) }
 
     /** 原实现用于腾讯云 COS 防盗链；对 raw.githubusercontent 无影响，保留以免动到请求结构。 */
     private const val ENCODED_UPDATE_REFERER = "aG5tdmlld2VydXAuY29t"
@@ -529,10 +573,7 @@ object AppUpdateChecker {
     private suspend fun requestUpdateJson(): String? {
         val referer = ENCODED_UPDATE_REFERER.decodeFromStringByBase64(Base64.NO_WRAP)
         val outcome = raceUpdateSources(
-            sources = UPDATE_URLS.map { encoded ->
-                val url = encoded.decodeFromStringByBase64(Base64.NO_WRAP)
-                suspend { fetchUpdateSource(url, referer) }
-            },
+            sources = updateSourceUrls().map { url -> suspend { fetchUpdateSource(url, referer) } },
             isNewer = { it > currentVersionCode },
         )
         LogUtil.d(

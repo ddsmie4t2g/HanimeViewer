@@ -2,6 +2,7 @@ package io.github.daisukikaffuchino.han1meviewer.logic
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -190,6 +191,51 @@ class AppUpdateSourceRaceTest {
                 "https://github.com/ddsmie4t2g/HanimeViewer/releases/download/v26.9.3/" +
                     "Han1meViewer-v26.9.3.apk"
             ),
+        )
+    }
+
+    /**
+     * ⭐ 27.0.4：更新源地址在源码里是 **base64**（沿用原实现的写法），
+     * **手改错一个字符既不会编译失败、也不会崩** —— 只会在运行期让这一条源默默
+     * 404 / 连不上，在赛跑日志里表现为「这条源失败」，看起来就像「又一个源坏了」。
+     *
+     * 所以把四件事钉住：能解成合法地址、只走 https、指向 update.json、彼此不重复。
+     * 最后额外要求 **GitHub Pages 那条在场** —— 它是九条源里唯一
+     * 「不经过 jsDelivr（无 12 h 缓存）、也不靠 raw.githubusercontent.com」的，
+     * 而那两条正是「发了新版却检测不到」的两个成因。
+     *
+     * ⚠️ 这里**故意**不走 `AppUpdateChecker.updateSourceUrls()`：那条路用
+     * `android.util.Base64`，而它在 JVM 单测里是 **Stub**
+     * （`Method decode in android.util.Base64 not mocked`）。
+     * 对同一份「标准、无换行、带 `=` 补齐」的 base64，`java.util.Base64` 与
+     * `android.util.Base64.NO_WRAP` 解出来逐字节相同，所以「地址写错」这个风险
+     * 照样被钉住；钉不住的只有「解码 flag 被改坏」，那属于另一类风险。
+     */
+    @Test
+    fun everyUpdateSourceIsAValidUrl() {
+        val urls = AppUpdateChecker.UPDATE_URLS.map { encoded ->
+            String(java.util.Base64.getDecoder().decode(encoded))
+        }
+
+        // 8 条（26.9.3）+ GitHub Pages 1 条（27.0.4）。用 >= 而不是 == ：
+        // 以后再加源不该被这条测试拦下来，但**少了**要有人看一眼。
+        assertTrue("更新源少于 9 条（${urls.size}）：$urls", urls.size >= 9)
+
+        urls.forEach { url ->
+            val parsed = requireNotNull(url.toHttpUrlOrNull()) { "不是合法地址：$url" }
+            assertEquals("只允许 https：$url", "https", parsed.scheme)
+            assertTrue(
+                "应当指向 update.json：$url",
+                parsed.encodedPath.endsWith("/update.json"),
+            )
+        }
+
+        // 重复只说明复制粘贴时忘了改那一条，白占一次连接
+        assertEquals("有重复的更新源：$urls", urls.size, urls.distinct().size)
+
+        assertTrue(
+            "缺少 GitHub Pages 源（.github/workflows/pages.yml 发布的那个）：$urls",
+            urls.any { it == "https://ddsmie4t2g.github.io/HanimeViewer/update.json" },
         )
     }
 }

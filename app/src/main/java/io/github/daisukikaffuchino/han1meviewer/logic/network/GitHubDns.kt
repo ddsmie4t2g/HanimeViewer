@@ -27,6 +27,17 @@ import java.net.InetAddress
  * > 于是回落到真实的慢 IP。这里一并钉住。
  *
  * 不在表里的域名原样交给系统 DNS，不影响其它请求。
+ *
+ * ## 匹配规则有两条（27.0.4 起）
+ *
+ * 1. **精确主机名**：见 [ipsByHost]（github.com / api.github.com / *.githubusercontent.com /
+ *    jsDelivr 四个入口 / data.jsdelivr.com）。
+ * 2. **后缀**：`*.github.io` ⇒ [githubPagesIps]。用途是「检查更新」的 GitHub Pages 源
+ *    （见 [ipsFor] 与 `AppUpdateChecker.UPDATE_URLS`）。
+ *
+ * ⚠️ 两条规则都**必须保留「内置 IP 后面接系统 DNS 尾巴」**这个行为（见 [lookup]）：
+ *    这个文件历史上出过的两个坑（Cloudflare 段黑洞、github.io 被 hosts 指到
+ *    127.0.0.1）都栽在「钉死了就再也出不去」上。
  */
 object GitHubDns : Dns {
 
@@ -118,6 +129,43 @@ object GitHubDns : Dns {
     )
 
     /**
+     * `*.github.io`（GitHub Pages）**统一**是 `185.199.108–111.153`。
+     *
+     * ⚠️ 尾段是 **`.153`**，而 `*.githubusercontent.com` 那组是 **`.133`** ——
+     * 同属 Fastly anycast，但**不是同一段**，别互相套用（套错了不会报错，只会连不上）。
+     *
+     * 用**后缀**匹配而不是钉一个精确主机名：同一个账号下的 Pages 站点共用这一段，
+     * 将来换仓库名 / 加第二个站点不必动代码。
+     * 27.0.4 起应用侧的用途是「检查更新」的第 9 条源
+     * （见 `AppUpdateChecker.UPDATE_URLS` 的第一条，站点由 `.github/workflows/pages.yml`
+     * 在 update.json 变更时自动发布）。
+     *
+     * 2026-09-17 实测（本机直连，四个 IP 逐个 `--resolve`）：TLS 0.50 s、HTTP 200。
+     */
+    private val githubPagesIps = listOf(
+        "185.199.108.153",
+        "185.199.109.153",
+        "185.199.110.153",
+        "185.199.111.153",
+    )
+
+    /** GitHub Pages 的域名后缀（见 [githubPagesIps]）。 */
+    private const val GITHUB_PAGES_SUFFIX = ".github.io"
+
+    /**
+     * 这个主机名该钉哪些 IP；不在表里（也不匹配后缀）返回 null = 交给系统 DNS。
+     *
+     * 单独抽出来是因为多了「后缀匹配」这条规则 —— 精确表 + 后缀表混在一个
+     * `?:` 链里读起来容易看漏（而这个文件的坑恰恰都是「看漏一条规则」造成的）。
+     */
+    private fun ipsFor(hostname: String): List<String>? {
+        val key = hostname.lowercase().removeSuffix(".")
+        ipsByHost[key]?.let { return it }
+        if (key.endsWith(GITHUB_PAGES_SUFFIX)) return githubPagesIps
+        return null
+    }
+
+    /**
      * 解析域名。
      *
      * ⚠️ **内置 IP 后面一定要接上系统 DNS 的结果**（去重后追加），不能只返回内置表。
@@ -132,7 +180,7 @@ object GitHubDns : Dns {
      * 代价是「多绕一次」，而不是「彻底不可用」。
      */
     override fun lookup(hostname: String): List<InetAddress> {
-        val candidates = ipsByHost[hostname.lowercase()] ?: return Dns.SYSTEM.lookup(hostname)
+        val candidates = ipsFor(hostname) ?: return Dns.SYSTEM.lookup(hostname)
         val pinned = candidates.mapNotNull { ip ->
             runCatching { InetAddress.getByName(ip) }.getOrNull()
         }

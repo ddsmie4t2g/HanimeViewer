@@ -1,0 +1,170 @@
+name: Pages (update.json)
+
+# 「检查更新」的第 9 条基础设施：把仓库**根目录的 update.json 原样**发布到 GitHub Pages，
+# 客户端从 `https://ddsmie4t2g.github.io/HanimeViewer/update.json` 取。
+#
+# ⚠️ 这个地址与 `AppUpdateChecker.UPDATE_URLS` 里的那条 base64 **是同一份约定**：
+#    改这里（换仓库名、加路径）必须同时改客户端，否则那条源会**静默 404** ——
+#    赛跑里表现为「这条源失败」，用户看到的是「又有源坏了」。两处改完记得各看一眼。
+#
+# ## 为什么还要第 9 条（现有 8 条源拿的都是同一个文件）
+#
+# 现有 8 条源的分发链路其实只有**两类**，各有结构性毛病，而且**都不是「多挂一个域名」
+# 能修的** —— 这才是加这条的理由：
+#
+# 1) **jsDelivr（7 条）**：对 `gh/<owner>/<repo>@<branch>/<file>` 有 **12 小时的 s-maxage**，
+#    缓存键**不含 query string**（所以拼 `?t=<时间戳>` 完全无效）。
+#    ⇒ 发版后最长 12 小时客户端还拿到旧 json，表现就是用户报的
+#      「明明发了新版，检查更新却说不更新」。release.yml 末步的
+#      `purge.jsdelivr.net` 只能缓解，而且那一步是 `curl … || true`（失败静默）。
+# 2) **GitHub 本体（2 条）**：`raw.githubusercontent.com` / `github.com` 在国内
+#    常被 DNS 投毒或直连不通（本机实测 `000`）。
+#
+# GitHub Pages 不属于上面任何一类：
+#   - **不经过 jsDelivr** ⇒ 没有那 12 小时的分支索引缓存；Pages 自己的 CDN TTL 是
+#     **10 分钟**量级，且每次部署都会刷新被改动的文件（滞后从 12 h 压到 ≤10 min）；
+#   - 域名是 **`*.github.io`**，与 `raw.githubusercontent.com` **不是同一个域名**
+#     （同一段 Fastly anycast，但被墙/被投毒的范围常常不一样）。
+#     2026-09-17 实测（本机直连）：`185.199.108–111.153` 四个 IP 全部可达，
+#     TLS 0.50 s、HTTP 200。⇒ 这条是**实测可用**的，不是「多一条试试」。
+#
+# ## 站点内容不复制
+#
+# `_site/update.json` 是**构建时从仓库根目录 cp 过去的**，仓库里始终只有一份
+# update.json（发版时改的就是它），不存在「两份 json 漂移」这种坑。
+# Pages 上多出来的只有一个自动生成的 index.html（人肉核对用）。
+#
+# ## ⚠️ 首次启用：需要**人工点一次**（之后全自动）
+#
+# `actions/configure-pages` 的 `enablement` 选项**默认是 false**，而且它的
+# action.yml 里写得很明确：
+#
+#   > Try to enable Pages for the repository if it is not already enabled.
+#   > This option **requires a token other than `GITHUB_TOKEN`** to be provided.
+#   > In the context of a Personal Access Token, the `repo` scope or Pages write
+#   > permission is required.
+#
+# 也就是说**本工作流自己没有能力**把一个从没开过 Pages 的仓库开起来
+# （GITHUB_TOKEN 不够）。所以本仓库必须**人工开一次**：
+#
+#   https://github.com/ddsmie4t2g/HanimeViewer/settings/pages
+#   → Build and deployment → Source 选 **GitHub Actions**
+#
+# ⚠️ 这一步需要该仓库的 **admin** 权限：推代码用的 `Wanttosleep2005` 只是
+#    collaborator（实测 `repos/…/permissions = {admin:false, push:true}`），
+#    **进不去这个设置页**，要用仓库所有者 `ddsmie4t2g` 的账号操作。
+#    （或者给一个带 `repo` scope、对 `ddsmie4t2g/HanimeViewer` 有 admin 的 PAT，
+#      用 `gh api --method POST repos/ddsmie4t2g/HanimeViewer/pages -f build_type=workflow`
+#      开 —— 但那是把长期写权限交给别处，能点一下就别用 PAT。）
+#
+# 开完之后：推一次 mod（或 Actions 里 Run workflow）就能看到站点上线；
+# 之后每次改 `update.json` 都会自动跟着发布。
+#
+# 没开就推送**不会**静默失败：`actions/deploy-pages` 会直接报
+# 「Get Pages site failed. Please verify that the repository has Pages enabled
+# and configured to build using GitHub Actions」，按上面那行开完重跑即可。
+#
+# ## 触发
+#
+# 推 `mod` 且动到 `update.json`（正常发版就是这种形态），外加手动重跑
+# （怀疑 CDN 还缓存着旧内容时，去 Actions 里点一下 Run workflow 就是一次刷新）。
+
+on:
+  push:
+    branches: [mod]
+    paths:
+      - 'update.json'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Pages 是「一个站点一份产物」，不需要并发：后一次部署直接顶掉前一次。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Publish update.json to GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ⚠️ 这里**刻意不传** `enablement: true` —— 它要求非 GITHUB_TOKEN 的令牌，
+      #    传了反而每次都要多带一个长期 PAT secret；本仓库走「人工开一次」，
+      #    理由与步骤见文件头的「首次启用」。
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      # ⚠️ 故意**不做**任何转换：直接把仓库里的 update.json 拷进去。
+      #    这条源的价值就在于「和其它 8 条是同一个字节」—— 要是在这里顺手
+      #    改点什么（比如补个字段），它就从「同一份内容的另一个入口」变成
+      #    「另一份内容」，排查时会被带偏。
+      - name: Assemble site (copy update.json as-is)
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp update.json _site/update.json
+
+          VERSION="$(jq -r '.versionName' update.json)"
+          DOWNLOAD="$(jq -r '.downloadUrl' update.json)"
+          DESC="$(jq -r '.updateDescription | @html' update.json)"
+          echo "站点版本：$VERSION"
+          echo "下载地址：$DOWNLOAD"
+
+          cat > _site/index.html <<HTML
+          <!doctype html>
+          <html lang="zh-CN">
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <title>HanimeViewer (mod) v${VERSION}</title>
+          <style>
+            :root { color-scheme: light dark; }
+            body { margin: 0 auto; max-width: 46rem; padding: 2rem 1.25rem 4rem;
+                   font: 16px/1.7 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+            h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+            h1 small { font-weight: 400; opacity: .6; }
+            .lead { opacity: .75; margin: 0 0 1.5rem; }
+            a.btn { display: inline-block; padding: .6rem 1.1rem; border-radius: .5rem;
+                    background: #2f6fed; color: #fff; text-decoration: none; font-weight: 600; }
+            pre { white-space: pre-wrap; word-break: break-word; background: rgba(127,127,127,.12);
+                  padding: 1rem; border-radius: .5rem; }
+            code { background: rgba(127,127,127,.16); padding: .1rem .3rem; border-radius: .25rem; }
+            footer { margin-top: 2rem; font-size: .875rem; opacity: .7; }
+          </style>
+          <h1>HanimeViewer (mod) <small>v${VERSION}</small></h1>
+          <p class="lead">本页是应用「检查更新」的更新源之一，内容与仓库 <code>update.json</code> 逐字节一致。</p>
+          <p><a class="btn" href="${DOWNLOAD}">下载 APK</a></p>
+          <p>更新源地址：<a href="update.json">update.json</a></p>
+          <hr>
+          <pre>${DESC}</pre>
+          <footer>本页由 GitHub Actions 在 <code>update.json</code> 变更时自动生成。</footer>
+          </html>
+          HTML
+
+          echo "----- _site -----"
+          ls -l _site
+
+      # ⚠️ 这两个 action 的版本别乱升/乱配：`upload-pages-artifact` 与
+      #    `deploy-pages` 是**成对**的。这里照抄 GitHub 官方 starter workflow
+      #    （actions/starter-workflows `pages/static.yml`，2026-09-17 核对）的配对：
+      #    `upload-pages-artifact@v3` + `deploy-pages@v5`。
+      #    官方最新 release 是 upload v5.0.0 / deploy v5.0.1，但 starter 仍用
+      #    upload@v3 —— 说明 v4/v5 的 upload 有别的约束，别自作聪明对齐大版本号。
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

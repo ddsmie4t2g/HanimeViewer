@@ -209,8 +209,30 @@ android {
         //                              的中转节点生效**，没配节点时它不起作用；代理能直连这些域名
         //                              时关掉纯赚隐私（封面图那条第三方中转会把图片 URL 交给
         //                              `wsrv.nl`）。
-        versionCode = 27_000_003
-        versionName = "27.0.3"
+        //     27.0.4 → 27_000_004   27.0.4：⚠️ **不换数据源、不动播放**，只给「检查更新」换血：
+        //                            ①**新增第 9 条更新源 = GitHub Pages**
+        //                              （`https://ddsmie4t2g.github.io/HanimeViewer/update.json`，
+        //                              站点由新增的 `.github/workflows/pages.yml` 在 update.json
+        //                              变更时自动发布，内容与仓库里的**逐字节一致**）。
+        //                              旧的 8 条看着多，分发链路其实只有两类，各有结构性毛病：
+        //                              · jsDelivr 那 7 条对 `gh/<owner>/<repo>@<branch>/<file>` 有
+        //                                **12 小时 s-maxage**，且缓存键不含 query string（拼
+        //                                `?t=` 无效）⇒ 发版后最长 12 h 还拿到旧 json，正是
+        //                                「明明发了新版，检查更新却说不更新」的根因；
+        //                              · GitHub 本体那 2 条（raw / github.com）国内常被投毒或不通。
+        //                              Pages 两类都不属于：不经过 jsDelivr（滞后 ≤10 min）、域名是
+        //                              `*.github.io`（与 raw 不是一个域名）。本机 2026-09-17 直连
+        //                              实测 185.199.108–111.153 四个 IP 全部 TLS 0.50 s / HTTP 200。
+        //                            ②`GitHubDns` 加一条**后缀**规则：`*.github.io` →
+        //                              185.199.108–111.153（⚠️ 尾段是 `.153`，与
+        //                              `*.githubusercontent.com` 的 `.133` **不是同一段**）。
+        //                              用后缀而非精确主机名，换仓库名不必改代码。
+        //                            ③`AppUpdateSourceRaceTest` 新增一条：把「9 条源都能解成
+        //                              合法 https 地址、都指向 update.json、互不重复、且 Pages
+        //                              那条在场」钉住 —— base64 手改错一位**不报错**，
+        //                              只会在运行期静默失败（形状同「又一个源坏了」）。
+        versionCode = 27_000_004
+        versionName = "27.0.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
