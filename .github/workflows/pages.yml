@@ -64,6 +64,48 @@ name: Pages (update.json)
 # 「Get Pages site failed. Please verify that the repository has Pages enabled
 # and configured to build using GitHub Actions」，按上面那行开完重跑即可。
 #
+# ✅ 2026-09-17 仓库所有者已开（`build_type` 已确认为 `workflow`）。
+#
+# ## ⚠️⚠️ 第二个坑：环境名不能是 `github-pages`（本仓库的活动分支不是 main）
+#
+# 开了 Pages 之后**仍然会失败**，而且失败得很隐蔽 —— 值得单独记一笔。
+#
+# **现象**：job 只跑 1 秒就红，但**没有任何步骤**：
+#   `runner_id: 0`、`steps: []`、耗时 1 s，且 `gh api …/actions/jobs/<id>/logs`
+#   返回 **404 BlobNotFound**（因为根本没有 runner 产出日志）。
+#   ⇒ 这是「job 在**分配 runner 之前**就被平台拒了」，不是脚本写错。
+#   排查入口是 **annotations**（不在 job steps 里，也不在日志里）：
+#     https://api.github.com/repos/<owner>/<repo>/check-runs/<check_run_id>/annotations
+#   原文：
+#     Branch "mod" is not allowed to deploy to github-pages due to environment
+#     protection rules.
+#     The deployment was rejected or didn't satisfy other protection rules.
+#
+# **根因**：第一次跑本工作流时，GitHub 会**自动创建** `github-pages` 这个
+#   environment，并顺手给它挂一条 `branch_policy` —— **只放行默认分支**：
+#     repos/…/environments/github-pages
+#       → deployment_branch_policy: {protected_branches: false, custom_branch_policies: true}
+#       → deployment-branch-policies: [{name: "main", type: "branch"}]
+#   本仓库的活动分支是 **`mod`**（默认分支是 `main`，但发版全在 mod 上）⇒ 每个
+#   部署 job 都被这条策略挡在门外。**与工作流内容无关，换机器也没用。**
+#
+# **两种修法**：
+#   (1) 【GitHub 推荐】让有 **admin** 的人去
+#       Settings → Environments → github-pages → Deployment branches and tags
+#       加一条 `mod`（或直接切到 All branches）。
+#       ⚠️ 推代码用的 `Wanttosleep2005` 只是 collaborator（admin:false）⇒
+#          `POST …/deployment-branch-policies` 报 **403 Must have admin rights**，
+#          **agent 自己改不了**，必须仓库所有者点。
+#   (2) 【本仓库采用】不用 `github-pages` 这个名字 —— 换一个环境名，GitHub
+#       **不会**给新环境预置任何分支策略（新环境默认「所有分支」），于是 mod 可部署。
+#       `actions/deploy-pages` 的 README 明写允许这样：
+#         > The deployment should target the `github-pages` environment
+#         > (you may use a different environment name if needed, but this is
+#         >  not recommended.)
+#       本仓库选 (2) 的理由：这个站点**只发一个 update.json**，分支限制在这里
+#       没有任何实际防护价值（能推 mod 的人本来就能改仓库），却要额外的 admin 操作。
+#       若哪天想回到推荐做法，把下面的 `name:` 改回 `github-pages` 并按 (1) 加白名单即可。
+#
 # ## 触发
 #
 # 推 `mod` 且动到 `update.json`（正常发版就是这种形态），外加手动重跑
@@ -91,8 +133,12 @@ jobs:
   deploy:
     name: Publish update.json to GitHub Pages
     runs-on: ubuntu-latest
+    # ⚠️⚠️ **不要**改回 `github-pages`：那个环境被 GitHub 自动预置了
+    #    「只允许默认分支 main 部署」的分支策略，而本仓库发版在 `mod` 上
+    #    ⇒ 每个部署 job 都会在分配 runner 前被拒（现象/根因见文件头第二节）。
+    #    换成别的名字后 GitHub 不会给新环境预置策略，`mod` 才能部署。
     environment:
-      name: github-pages
+      name: github-pages-mod
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
