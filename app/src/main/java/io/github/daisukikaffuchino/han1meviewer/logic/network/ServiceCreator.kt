@@ -76,6 +76,11 @@ object ServiceCreator {
             // 30 s 与 HLS 下载链路（hlsClient）保持一致。
             .readTimeout(30, TimeUnit.SECONDS)
             .protocols(listOf(Protocol.HTTP_1_1))
+            // ⭐ 26.9.17：这里原来有个**实打实的错配** —— 设置里「单文件下载连接数」
+            //    （`downloadSegments`）最大可以拉到 8，而 OkHttp 默认每 host 只放 5 个并发，
+            //    于是用户把分片调到 6/7/8 时，多出来的分片**根本发不出去**，白等前面那 5 个。
+            //    对齐到 8：分片设几片，就真能同时跑几片。
+            .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 8 })
             .sslSocketFactory(CdnRelay.sslContext.socketFactory, CdnRelay.trustManager)
             .addInterceptor(UserAgentInterceptor)
             .addInterceptor(downloadSpeedLimitInterceptor)
@@ -95,6 +100,10 @@ object ServiceCreator {
     private fun buildHClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
+            // ⭐ 26.9.17：OkHttp 默认每 host 只放 5 个并发。首页/列表/搜索本来就会同时发好几个请求
+            //    （作者页、榜单、续页预取叠加时更明显），走代理时带宽够却排不上队。放宽到 8。
+            //    只动同 host 并发数，总并发（`maxRequests`，默认 64）与连接池保持默认。
+            .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 8 })
             .addInterceptor(UserAgentInterceptor)
             .addInterceptor(UrlLoggingInterceptor())
             .addInterceptor(CloudflareInterceptor(applicationContext))

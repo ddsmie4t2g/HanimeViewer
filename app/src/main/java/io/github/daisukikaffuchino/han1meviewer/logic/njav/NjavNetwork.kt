@@ -219,6 +219,9 @@ object NjavNetwork {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
+            // ⭐ 26.9.17：与其它网络栈对齐 —— OkHttp 默认每 host 5 个并发，
+            //    而列表页一次会并发多个请求（首屏 + 自动续页预取），走代理时会被压着。
+            .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 8 })
             .addInterceptor(UserAgentInterceptor)
             .addInterceptor(UrlLoggingInterceptor())
             .cookieJar(HCookieJar())

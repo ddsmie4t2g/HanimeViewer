@@ -13,6 +13,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
@@ -38,9 +39,45 @@ class ExoPlaybackEngine(
     context: Context,
 ) : PlaybackEngine, Player.Listener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val player = ExoPlayer.Builder(context.applicationContext).build().apply {
-        addListener(this@ExoPlaybackEngine)
-    }
+
+    /**
+     * 缓冲策略（26.9.17 从默认值调宽）。
+     *
+     * ## 为什么改
+     *
+     * ExoPlayer 默认 `min = max = 50 s`、重缓冲后要等 **5 s** 才恢复播放。走代理时带宽通常很充裕，
+     * 50 s 的缓冲上限意味着「刚好吃饱就停手」，多余带宽完全没用上；而网络抖一下之后
+     * 那 5 s 的等待则直接表现为「卡住不动」。
+     *
+     * | 参数 | 默认 | 现在 | 作用 |
+     * |---|---|---|---|
+     * | `minBufferMs` | 50 s | 45 s | 持续缓冲的下限，低于它才开始补 |
+     * | `maxBufferMs` | 50 s | **90 s** | 缓冲上限 ⇒ 提前多存 40 s，把代理带宽用满 |
+     * | `bufferForPlaybackMs` | 2.5 s | **1.5 s** | 起播前的最少缓冲 ⇒ 起播更快 |
+     * | `bufferForPlaybackAfterRebufferMs` | 5 s | **3 s** | 抖动后恢复播放更快 |
+     *
+     * ⚠️ `maxBufferMs` 提高会增加内存占用（1080p 约 +25 MB 量级）。取 90 s 而不是更大，
+     * 是为了在「吃满带宽」和「低端机内存」之间留余地；真要在低端机上回收内存，
+     * 把这个值调回 50_000 即可，其余三个参数可以不动。
+     *
+     * ⚠️ 这里**不能**设 `callTimeout`（那是播放链路的事，见 [PlaybackHttpClient]），
+     * LoadControl 只管缓冲水位，与单次请求的超时无关。
+     */
+    private val loadControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+            /* minBufferMs = */ 45_000,
+            /* maxBufferMs = */ 90_000,
+            /* bufferForPlaybackMs = */ 1_500,
+            /* bufferForPlaybackAfterRebufferMs = */ 3_000,
+        )
+        .build()
+
+    private val player = ExoPlayer.Builder(context.applicationContext)
+        .setLoadControl(loadControl)
+        .build()
+        .apply {
+            addListener(this@ExoPlaybackEngine)
+        }
     private val appContext = context.applicationContext
     private val mutableState = MutableStateFlow(PlaybackEngineState())
     private var progressJob: Job? = null

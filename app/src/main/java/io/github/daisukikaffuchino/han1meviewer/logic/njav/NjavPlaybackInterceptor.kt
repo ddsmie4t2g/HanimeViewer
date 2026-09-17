@@ -74,6 +74,11 @@ object PlaybackHttpClient {
             // 0 = 不限制总时长（视频是长连接，设了就必然被掐）
             .callTimeout(0, TimeUnit.MILLISECONDS)
             .retryOnConnectionFailure(true)
+            // ⭐ 26.9.17：HLS 的主清单、子清单、分片，以及拖动进度条时的多分片补取，
+            //    全都打在同一台 CDN 上。OkHttp 默认每 host 只有 5 个并发，
+            //    代理带宽充裕时这是实打实的瓶颈。放宽到 8。
+            //    ⚠️ 只动同 host 并发数 —— `callTimeout` 必须保持 0，否则长视频会被从中间掐断。
+            .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 8 })
             .dns(HDns())
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)

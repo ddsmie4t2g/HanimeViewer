@@ -50,10 +50,19 @@ class CdnRelayInterceptor : Interceptor {
         // 用户可在「网络设置 → CDN 中转」关掉。每次请求都读一次，改设置立即生效。
         if (!CdnRelay.enabled) return chain.proceed(request)
 
-        // 已被实测确认「大陆任何网络下直连都不通」的域名（Pornhub 及其 CDN），
-        // 跳过直连、直接中转 —— 免得每个请求都先白撞一次 RST（见 CdnRelay 的 ALWAYS_RELAY_HOSTS）。
-        if (CdnRelay.mustRelay(host)) {
-            if (CdnRelay.cachedReachable == false) return chain.proceed(request)
+        // ⭐ 26.9.17 修「Pornhub 开代理首页白屏」：判据从「`cachedReachable != false`」收紧成
+        //    「**刚刚证明过中转通**」（[CdnRelay.relayConfirmedReachable]）。
+        //
+        //    旧判据在下面两种情况下都不等于 false，于是照样强制改道：
+        //      ① 冷启动时健康结论还没产生，或结论过期 10 分钟后 ⇒ `null`；
+        //      ② 启动预热那次探活失败、但连败还没到阈值（`healthy = failures < 3`）⇒ `true`。
+        //    结果：中转已经下线时，Pornhub 首页那 10 个 JSON + 1 个主页 HTML（**全部并发**）
+        //    会被一起送去一个连不上的地址，而首页那边又把每节的异常吞成空列表 ⇒ 一片空白。
+        //    可用户此刻开着系统 VPN / 代理，直连本来是**能通**的 —— 是这里没让他走。
+        //
+        //    中转活着时，预热那一趟探活就会把结论置为 true，一个请求都不会多绕；
+        //    中转不在时，请求老实走直连，交给用户的代理去接。
+        if (CdnRelay.mustRelay(host) && CdnRelay.relayConfirmedReachable) {
             return relay(chain, request, null)
         }
 
@@ -63,6 +72,13 @@ class CdnRelayInterceptor : Interceptor {
             if (CdnRelay.cachedReachable == false) return chain.proceed(request)
             return relay(chain, request, null)
         }
+
+        // ⭐ 26.9.17：Pornhub 系**不走下面那个「只放一个探子」的闸门**，理由是代价不对称。
+        //    闸门是为 hembed 那类「直连失败要白等 0.8–2.6 s」的域名设计的；
+        //    而 Pornhub 系的直连失败是**立即 RST**（实测 0.1–0.3 s），撞一次几乎不要钱，
+        //    反倒是**漏判**很贵：冷启动时首页 10 个请求同时到达，闸门只放 1 个去试直连，
+        //    另外 9 个被直接送进（可能已下线的）中转 —— 有代理的用户本来直连能通，却被这 9 次绕路毁掉。
+        if (CdnRelay.mustRelay(host)) return directThenRelay(chain, request)
 
         // 同一 host 的并发请求里只让**第一个**去试直连（见 CdnRelay.tryBeginDirectProbe）。
         // 冷启动时首页那 20–30 张封面是同时发的，如果一个一个去撞墙，
@@ -81,15 +97,33 @@ class CdnRelayInterceptor : Interceptor {
             //    否则该 host 这一次会话就永远被当作「正在探测」，全走中转。
             CdnRelay.endDirectProbe(host)
         }
-        direct.getOrNull()?.let { if (it.isSuccessful) return it }
+        return directThenRelay(chain, request, direct)
+    }
+
+    /**
+     * 「直连优先、失败才中转」这条公共尾巴。
+     *
+     * [direct] 非空表示直连已经试过一次（主流程在闸门内试的），直接复用结果；
+     * 为空则自己试一次。与主流程的唯一差别是**完全不碰
+     * [CdnRelay.tryBeginDirectProbe] 闸门** —— 理由见 [intercept] 里的注释。
+     */
+    private fun directThenRelay(
+        chain: Interceptor.Chain,
+        request: Request,
+        direct: Result<Response>? = null,
+    ): Response {
+        val attempt = direct ?: runCatching { chain.proceed(request) }
+        attempt.getOrNull()?.let { if (it.isSuccessful) return it }
 
         // 走到这里只可能是「抛异常」。4xx/5xx 的场景在上面就已经返回了。
-        direct.getOrNull()?.close()
-        val cause = direct.exceptionOrNull()
+        attempt.getOrNull()?.close()
+        val cause = attempt.exceptionOrNull()
         if (cause == null) return chain.proceed(request)
 
-        CdnRelay.markKnownDead(host)
+        CdnRelay.markKnownDead(request.url.host.lowercase())
         LogUtil.w(TAG, "直连失败，改走中转: ${request.url} (${cause.message})")
+        // 中转也被判死时别再白等一次超时 —— 抛直连的错误，那才是根因。
+        if (CdnRelay.cachedReachable == false) throw cause
         return relay(chain, request, cause)
     }
 

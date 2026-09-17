@@ -391,6 +391,12 @@ object PhNetwork {
         OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(40, TimeUnit.SECONDS)
+            // ⭐ 26.9.17：OkHttp 默认 `maxRequestsPerHost = 5`，而 Pornhub 首页要**并发**取
+            //    10 个栏目，它们的 host 全是 `www.pornhub.com` —— 默认值会把这一批压成两批，
+            //    首屏时间直接翻倍。走代理时带宽本来是够的，卡点就在这个默认值上。
+            //    放宽到 10 让那 10 个请求真的同时飞出去。只动「同 host 并发数」，
+            //    总并发（`maxRequests`，默认 64）与连接池保持不动。
+            .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 10 })
             .addInterceptor(UserAgentInterceptor)
             // ⚠️ 必须排在 UserAgentInterceptor **之后** —— 它负责把移动 UA 换成桌面 UA，
             //    顺序反了就等于没换（见 DesktopUserAgentInterceptor 的注释）。

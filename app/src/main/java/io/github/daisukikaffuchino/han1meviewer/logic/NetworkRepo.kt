@@ -886,6 +886,11 @@ object NetworkRepo {
         val carousel = async(Dispatchers.IO) { runCatching { fetchPhHomepageHot() }
             .getOrDefault(mutableListOf()) }
 
+        // ⭐ 26.9.17：记下「有几节是**因为异常**才空的」。
+        //    站点真的没有内容时会回 200 + 空列表（那不是故障）；而每一节都抛异常
+        //    只有一种解释：链路根本没通（中转下线 / 没代理 / 断网）。两者必须分开 ——
+        //    见下面 allFailed 那段。用原子计数是因为这些 async 是**并发**的。
+        val failedSections = java.util.concurrent.atomic.AtomicInteger()
         val sections = PhNetwork.HOME_SECTIONS.map { (key, query) ->
             async(Dispatchers.IO) {
                 key to runCatching {
@@ -895,9 +900,22 @@ object NetworkRepo {
                     } else {
                         throw ParseException("Pornhub: HTTP ${response.code()} - $key")
                     }
-                }.getOrDefault(mutableListOf<HanimeInfo>())
+                }.onFailure { failedSections.incrementAndGet() }
+                    .getOrDefault(mutableListOf<HanimeInfo>())
             }
         }.awaitAll().toMap()
+
+        // ⚠️⚠️ 26.9.17 修「Pornhub 首页白屏」：
+        //    原来这里**无条件** send 一份首页。而每一节的异常在上面被 `getOrDefault` 吞成空列表后，
+        //    `PhParser.homePage` 仍然会造出一个「Success 但所有槽位都空」的 HomePage，
+        //    UI 把空行过滤掉后就什么都不画 —— 用户看到的是一片空白，**既没有提示也没有重试入口**，
+        //    完全看不出是网络问题。（下拉刷新才会恢复正常，因为那时中转已被记死、改走了直连。）
+        //
+        //    判据刻意只收紧到「**全部**栏目都因异常而空」：只要有一节拿到了 200
+        //    （哪怕内容是空列表），就说明链路是通的，照旧正常渲染。
+        if (failedSections.get() == PhNetwork.HOME_SECTIONS.size) {
+            throw ParseException("Pornhub: 全部栏目请求失败（网络不可达）")
+        }
 
         send(PhParser.homePage(sections))
 

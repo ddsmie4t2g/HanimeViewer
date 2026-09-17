@@ -33,6 +33,11 @@ object ImageNetworkClient {
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
+            // ⭐ 26.9.17：首页一屏要铺十几到几十张封面，而它们的 host 集中在少数几台 CDN 上
+            //    （`vdownload.hembed.com` / `fourhoi.com` / `*.phncdn.com`）。
+            //    OkHttp 默认每 host 只放 5 个并发，滚动时后面的图只能排队 —— 走代理带宽充裕时
+            //    这个默认值就是瓶颈。放宽到 8，只动同 host 并发数，不动总并发。
+            .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 8 })
             .sslSocketFactory(CdnRelay.sslContext.socketFactory, CdnRelay.trustManager)
             .proxySelector(HProxySelector())
             .proxyAuthenticator(HProxyAuthenticator.http)

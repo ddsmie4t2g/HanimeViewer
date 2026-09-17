@@ -411,6 +411,36 @@ object CdnRelay {
     val cachedReachable: Boolean?
         get() = runCatching { RelayNodeStore.cachedActiveReachable }.getOrNull()
 
+    /**
+     * 「中转**确定**可达」—— 只有**最近一次探活就成功**时才为 `true`。
+     *
+     * ## 为什么不能拿 [cachedReachable] 当这个判据
+     *
+     * [cachedReachable] 的语义是「这台机器还在优选池里」，它对失败是**刻意宽容**的：
+     * [RelayNodeStore.check] 里那句
+     * `healthy = reachable || failures < FAILURE_THRESHOLD`
+     * 意味着探活失败 1–2 次时它**仍然返回 `true`**（为了不让一次网络抖动就把节点踢出优选）。
+     * 这对「在多台机器里挑一台」是对的，对「要不要**跳过直连**、强制改道」却是致命的：
+     *
+     * | 时刻 | [cachedReachable] | 真实情况 |
+     * |---|---|---|
+     * | 冷启动，健康结论还是空的 | `null` | 完全不知道中转通不通 |
+     * | 启动预热那次探活失败，连败 1 次 | **`true`** | 中转其实已经下线 |
+     * | 健康结论过期（[RelayNodeStore.HEALTH_TTL_MS] 10 分钟） | `null` | 又回到「不知道」 |
+     *
+     * 26.9.17 之前，[CdnRelayInterceptor] 对 Pornhub 系的判据是「[cachedReachable] != false
+     * ⇒ 强制走中转」，于是上面三种情况**全部**会把请求送去一个连不上的地址。
+     *
+     * 所以这里把判据收紧成「**刚证明过它通**」：探活成功会把 `consecutiveFailures` 归零，
+     * 因此 `health.healthy && consecutiveFailures == 0` 恰好等价于「最近一次探活通过」。
+     * 中转真的可用时预热那一趟会立刻把它置为 `true`，一个请求都不多绕。
+     */
+    val relayConfirmedReachable: Boolean
+        get() = runCatching {
+            RelayNodeStore.healthOf(RelayNodeStore.activeNode().id)
+                ?.let { it.healthy && it.consecutiveFailures == 0 } == true
+        }.getOrDefault(false)
+
     /** 真正打一次 `/ping`。失败不抛，只会得到 `false`。 */
     suspend fun probe(force: Boolean = false): Boolean =
         runCatching { RelayNodeStore.checkActive(force = force) }.getOrDefault(false)
@@ -435,6 +465,11 @@ object CdnRelay {
         val now = System.currentTimeMillis()
         if (now - probeAt < REPROBE_MIN_INTERVAL_MS) return
         if (!probeInFlight.compareAndSet(false, true)) return
+        // ⚠️ 26.9.17 补上：原来这一行是缺的，`probeAt` 从初始化后就再没被写过（恒为 0），
+        //    于是 `now - probeAt` 永远远大于 30 s ⇒ **节流条件形同虚设**。
+        //    后果：中转下线时，每个失败的请求都会再去排一次探活（每个探活是 3 × 5 s 的
+        //    阻塞式 ping），失败请求一多就变成持续的网络风暴，还会占满 IO 线程池。
+        probeAt = now
         probeScope.launch {
             try {
                 probe(force = true)
