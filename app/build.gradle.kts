@@ -193,8 +193,24 @@ android {
         //                            播放器「无偏好时回退到最后一项」是当年中转只有 2.4 Mbps 的
         //                            取舍，但改法会动到档位菜单的显示顺序（UI 变化），用户明确
         //                            选择本版保持原样。
-        versionCode = 27_000_002
-        versionName = "27.0.2"
+        //     27.0.2 → 27_000_003   27.0.3：⚠️ 同样**不换数据源**，本版**只改文案**（3 键 × 三语
+        //                            共 6 处），让网络设置里的说明与代码实际行为对齐：
+        //                            ①`use_built_in_hosts`：标题「应用内置 Hosts」→「**启用自定义
+        //                              Hosts**」。旧标题会让人以为「关掉就不用内置映射」——
+        //                              实际上内置 IP 表（hanime1.me/.com、njavtv.com、surrit.com、
+        //                              fourhoi.com）在 `HDns.lookup` 里是**最前面几步、命中即返回**，
+        //                              根本不看开关；这个开关**唯一**的专属作用只是「让用户在
+        //                              『自定义 Hosts』里自填的 IP 生效」（且只对 hanime 系有效）。
+        //                              旧文案是 26.8 之前的历史遗留（那时内置表确实受开关控制）。
+        //                            ②`use_built_in_hosts_summary`：写清「仅对你自填的 IP 生效；
+        //                              hanime / nJAV 的内置映射始终生效、无法关闭」。
+        //                            ③`allow_cdn_relay_summary`：删掉已不成立的「关掉就没法看
+        //                              视频了」——自建中转已下线，这个开关现在**只对用户自己添加
+        //                              的中转节点生效**，没配节点时它不起作用；代理能直连这些域名
+        //                              时关掉纯赚隐私（封面图那条第三方中转会把图片 URL 交给
+        //                              `wsrv.nl`）。
+        versionCode = 27_000_003
+        versionName = "27.0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
