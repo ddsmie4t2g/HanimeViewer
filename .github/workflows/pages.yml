@@ -160,6 +160,11 @@ jobs:
       #    `upload-pages-artifact@v3` + `deploy-pages@v5`。
       #    官方最新 release 是 upload v5.0.0 / deploy v5.0.1，但 starter 仍用
       #    upload@v3 —— 说明 v4/v5 的 upload 有别的约束，别自作聪明对齐大版本号。
+      #
+      # ⚠️ 日志里会出现 `Node.js 20 is deprecated … actions/checkout@v4,
+      #    actions/configure-pages@v5` 的**警告** —— 这是**正常**的（runner 强制把它们
+      #    跑在 Node 24 上），不影响部署，别为它去升版本。本仓库其它工作流
+      #    （release.yml / ci.yml）也统一停在 checkout@v4，保持一致。
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
