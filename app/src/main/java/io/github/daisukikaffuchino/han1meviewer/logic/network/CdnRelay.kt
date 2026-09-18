@@ -18,6 +18,7 @@ import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
@@ -235,6 +236,137 @@ object CdnRelay {
     fun endDirectProbe(host: String) {
         directProbeInFlight.remove(host.lowercase())
     }
+
+    //<editor-fold desc="会话级「中转连接不上」记忆（26.9.18 引入）">
+
+    /**
+     * 上一次「中转在**连接层**失败」的时刻；`0` = 没有这个结论。
+     *
+     * ## 为什么必须有它
+     *
+     * 对 `pornhub.com` / `*.phncdn.com` 这类 `mustRelay` 域名，直连是 **SNI 阻断**（必死），
+     * 中转是唯一的出路。而中转一旦下线（进程停了、IP 被临时封、端口被拒），
+     * [CdnRelayInterceptor] 的**每一个**请求都会替这个域名走一遍
+     * 「撞墙 0.1–0.3 s → 再绕一次连不上的中转（connect refused 秒回 / 不通则等满超时）」。
+     *
+     * 首页/详情页一次会并发十几个请求（Pornhub 首页是 10 个 JSON + 1 个 HTML），
+     * 每个都白做两遍无用功 —— 用户看到的不是「报错」，而是**转圈然后白屏**。
+     * 26.9.17 修的是「判据太宽导致误走中转」，这里补的是**另一个方向**：
+     * 已经确定走不通了，就别让后面的请求再各撞一遍。
+     *
+     * ## 为什么是「机器级」而不是「按 host」
+     *
+     * 「中转通不通」是端点级事实，与被中转的目标域名无关。所以这里不像
+     * [directIsKnownDead] 那样按 host 分开记 —— 一个布尔值就够。
+     *
+     * ## ⚠️ 为什么不用 `cachedReachable == false`
+     *
+     * 那个判据对失败**刻意宽容**（[RelayNodeStore] 里
+     * `healthy = reachable || failures < FAILURE_THRESHOLD`），探活失败 1–2 次时仍返回
+     * `true`。于是「中转已经下线」时它照样为真 ⇒ 请求继续白绕 —— 26.9.17 在
+     * `mustRelay` 那里踩过同一个坑（见 [relayConfirmedReachable] 的注释）。
+     *
+     * ## ⚠️⚠️ 必须带 TTL：这个记忆**只能让体验变好，不能把路堵死**
+     *
+     * 「一次连接失败」推出「这台中转一直不可达」是归纳，**归纳会错**（中转重启、
+     * IP 解封、网络切换）。所以这里不是永久黑名单：超过 [RELAY_UNREACHABLE_TTL_MS]
+     * 就自动放行一次重试，成功即彻底解除。
+     *
+     * 没有 TTL 的后果是很实际的：用户在隧道里丢了一次连接 ⇒ 之后**每一次**请求都
+     * 不再尝试中转 ⇒ 视频再也放不出来，而重启 App 才能恢复。这种「优化」比不做还糟。
+     */
+    private val relayUnreachableAt = AtomicLong(0L)
+
+    /** 这个结论的有效期。到点自动放行一次重试。 */
+    private const val RELAY_UNREACHABLE_TTL_MS = 120_000L
+
+    /**
+     * 中转是否**确定连接不上**（且结论还没过期）。
+     *
+     * `true` 时，[CdnRelayInterceptor] 会跳过「绕中转」这一步，直接抛直连的真实错误 ——
+     * 既不白等，报错也能指向根因。
+     *
+     * ⚠️ 注意它**不阻断**「探活刚确认可达」那条路径（见 [relayConfirmedReachable]）：
+     * 那条路是标记的**解除途径**，不是被标记影响的对象。
+     */
+    fun isRelayKnownUnreachable(): Boolean = relayUnreachableAt.get().let {
+        it != 0L && System.currentTimeMillis() - it < RELAY_UNREACHABLE_TTL_MS
+    }
+
+    /**
+     * 记一次「中转连接层失败」。只由 [interceptor.CdnRelayInterceptor] 在
+     * **连接类异常**（见 `isConnectionLevelFailure`）时调用 —— 不是任何 IOException：
+     * 「中转活着但上游把连接掐了」属于次生现象，不该把中转判死。
+     */
+    fun markRelayUnreachable() {
+        val prev = relayUnreachableAt.getAndSet(System.currentTimeMillis())
+        if (prev == 0L || System.currentTimeMillis() - prev >= RELAY_UNREACHABLE_TTL_MS) {
+            LogUtil.w(TAG, "中转连接不上：本会话 ${RELAY_UNREACHABLE_TTL_MS / 1000}s 内不再为被封域名绕它")
+        }
+    }
+
+    /**
+     * 中转**真的取回了响应**时解除标记。
+     *
+     * 用「实际请求成功」而不是「探活成功」作为解除信号：探活只证明端口和证书没问题，
+     * 真实请求走通才说明这条路可用。两者都会解除（探活成功 ⇒ 后续 `mustRelay` 请求
+     * 会真的走中转 ⇒ 成功即解除），这里选更硬的那个证据。
+     */
+    fun markRelayReachable() {
+        if (relayUnreachableAt.getAndSet(0L) != 0L) {
+            LogUtil.i(TAG, "中转已恢复可达，解除「连接不上」标记")
+        }
+    }
+
+    /**
+     * 「此刻还值得为中转花一次往返吗」—— 判断「要不要绕中转」的**统一入口**。
+     *
+     * 由两个独立结论合成，两者**缺一不可**：
+     *
+     * | 来源 | 语义 | 它单独用会漏什么 |
+     * |---|---|---|
+     * | [cachedReachable] `!= false` | 节点健康检查没把它判死 | 对失败刻意宽容（连败 < 3 仍为 `true`）⇒ 中转已下线也返回 `true` |
+     * | [!isRelayKnownUnreachable] | 本会话没有**实际**连接失败过 | 只在真正看到失败之后才成立 ⇒ 冷启动时还是不知道 |
+     *
+     * 合起来的效果：冷启动按老行为试一次（可能白等一次），一旦撞上连接失败就
+     * 立刻在 [RELAY_UNREACHABLE_TTL_MS] 内不再白费；中转回来（探活成功 + 真实请求走通）
+     * 或被 TTL 放行后自动恢复。
+     *
+     * ⚠️ 调用方**不要**用它去挡「探活刚确认可达」那条路径（[relayConfirmedReachable]），
+     * 那是解除标记的途径，挡了就会自己把自己锁住。
+     */
+    fun isRelayWorthTrying(): Boolean =
+        !isRelayKnownUnreachable() &&
+            runCatching { RelayNodeStore.cachedActiveReachable }.getOrNull() != false
+
+    /**
+     * 这个异常够不够格说明「**中转这台机器不可达**」。
+     *
+     * 判定范围刻意收窄到**连接建立阶段**：
+     *
+     * | 异常 | 含义 | 记？ |
+     * |---|---|---|
+     * | `ConnectException` | 端口拒绝（进程不在） | ✅ |
+     * | `SocketTimeoutException` | connect 或 read 超时 | ✅（见下） |
+     * | `SSLException` | TLS 握手失败（证书被换 / 被 RST） | ✅ |
+     * | `NoRouteToHostException` / `UnknownHostException` | 路由/N 解析不通 | ✅ |
+     * | 其它 `IOException`（`SocketException: Connection reset` 等） | 多半是**上游**把连接掐了，中转本身是活的 | ❌ |
+     *
+     * `SocketTimeoutException` 在这里放宽了（`readTimeout` 也算）—— 严格说 read 超时
+     * 意味着「中转慢」而不是「不通」，拿它标记会误伤。但播放链路 `readTimeout` 是 30 s
+     * 且中转是分块流式回传，连续 30 s 一块数据都没有，实际就等于「这条道废了」；
+     * 而漏判的代价（每个请求白等一次 connect 超时）明显更大。权衡后含进来。
+     */
+    internal fun isConnectionLevelFailure(e: Throwable): Boolean = when (e) {
+        is java.net.ConnectException,
+        is java.net.SocketTimeoutException,
+        is java.net.NoRouteToHostException,
+        is java.net.UnknownHostException,
+        is javax.net.ssl.SSLException -> true
+        else -> false
+    }
+
+    //</editor-fold>
 
     /** 用户可在设置里关掉（隐私 / 自己的线路本来就能直连时没必要绕）。 */
     val enabled: Boolean

@@ -231,8 +231,51 @@ android {
         //                              合法 https 地址、都指向 update.json、互不重复、且 Pages
         //                              那条在场」钉住 —— base64 手改错一位**不报错**，
         //                              只会在运行期静默失败（形状同「又一个源坏了」）。
-        versionCode = 27_000_004
-        versionName = "27.0.4"
+        //     27.0.5 → 27_000_005   27.0.5：⚠️ **不换数据源、不改播放引擎**，只修「中转不可达时
+        //                            客户端还在每一路请求上白等」这一件事：
+        //                            背景：自建中转已于 26.9.17 下线，但客户端对 `mustRelay` 域名
+        //                            （pornhub.com / *.phncdn.com）**没有直连尝试**，只能绕中转。
+        //                            旧逻辑里「中转连不上」只触发一次探活排期，**从不记录
+        //                            「中转不可达」**；而 `markKnownDead(host)` 只覆盖「直连已死」
+        //                            那条分支（`mustRelay` 分支排在它**后面**）。结果是每个请求
+        //                            都要付两次代价：撞一次被封的直连 + 绕一次死掉的中转。首页
+        //                            ~12 路并发叠加 ⇒ 转圈之后白屏。
+        //                            ①`CdnRelay` 新增**会话级**记忆：`relayUnreachableAt` +
+        //                              `RELAY_UNREACHABLE_TTL_MS = 120_000`；对外的统一判据
+        //                              `isRelayWorthTrying()`（= 节点没被判死 **且** 本会话没撞过）；
+        //                              写侧 `markRelayUnreachable()` / `markRelayReachable()`。
+        //                              ⚠️ 刻意**不是永久黑名单**：一次抖动就把整条播放链路钉死到
+        //                              重启，比原问题更糟；TTL 到期自动放行。
+        //                            ②只在**连接层失败**时标记 —— `isConnectionLevelFailure()`：
+        //                              收 `ConnectException` / `SocketTimeoutException` /
+        //                              `SSLException` / `NoRouteToHostException` /
+        //                              `UnknownHostException`；**不收** `SocketException:
+        //                              Connection reset` 一类**数据层**异常（那是上游掐的，
+        //                              中转本身活着，记了会误伤）。`SocketTimeoutException` 是
+        //                              刻意放宽的：OkHttp 分不出 connect 超时与 read 超时，而播放
+        //                              链路 readTimeout 30 s + 中转分块流式回传，连续 30 s 无数据
+        //                              实际就等于这条道废了。
+        //                            ③`CdnRelayInterceptor` 三处判据由 `cachedReachable == false`
+        //                              换成 `!isRelayWorthTrying()`；`relay()` 取回响应即
+        //                              `markRelayReachable()`。⚠️ `mustRelay &&
+        //                              relayConfirmedReachable` 那条路**故意不动** —— 它是「解除
+        //                              标记」的路，堵了会自锁。
+        //                            ④新增单测 `CdnRelayConnectionFailureTest`（3 例）钉住上面
+        //                              的分类边界，含一条 `subtypeOrderDoesNotLeak`
+        //                              （`SocketTimeoutException` 是 `InterruptedIOException`
+        //                              的子类，别按父类收）。
+        //                            ⑤`HDns` 只改注释与一个死 IP：移除 `cloudFlareIps` 里
+        //                              `104.21.42.221`（doh.pub 仍返回它，但实测 connect 超时）；
+        //                              修正 `fourhoi.com` 的口径（系统 DNS 拿得到真 IP、钉 IP
+        //                              反而 2/2 TLS RST ⇒ 是 **SNI 阻断**而非 DNS 投毒，钉 IP
+        //                              没用，wsrv.nl 才是真兜底）；给 `surrit.com` 补注它**不走
+        //                              中转**（这正是中转全灭期间「不挂梯子还能看视频」的原因——
+        //                              看的是 nJAV 源）。
+        //                            ⚠️ 本版**治的是「不再白转圈」，不是「Pornhub 能看了」**：
+        //                            不挂梯子时 `mustRelay` 域名仍被墙，客户端无解；挂梯子走直连
+        //                            那条路照常可用。
+        versionCode = 27_000_005
+        versionName = "27.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

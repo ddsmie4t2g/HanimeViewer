@@ -17,6 +17,21 @@ import java.io.IOException
  * | `vdownload.hembed.com`、`fourhoi.com` | 立即 RST | **直连优先，失败才中转**（海外用户直连更快） |
  * | `pornhub.com`、`*.phncdn.com` | 立即 RST（SNI 阻断，换 IP 也没用） | **一律中转**，不试直连（见 [CdnRelay.mustRelay]） |
  *
+ * ## ⭐ 中转**自己也连不上**时的降级（26.9.18 引入）
+ *
+ * 上表假设「中转可用」。中转下线时（进程停了 / 端口被拒 / IP 被临时封），
+ * 若不做处理，`mustRelay` 的域名会变成**每个请求都白做两遍无用功**
+ * （撞墙 0.1–0.3 s → 再绕一次连不上的中转），首页十几个并发叠起来，
+ * 用户看到的不是报错而是**转圈然后白屏**。
+ *
+ * 所以 [relay] 在**连接层失败**时调 [CdnRelay.markRelayUnreachable]，
+ * 之后所有判据统一走 [CdnRelay.isRelayWorthTrying]（= 节点没被判死 **且** 本会话没撞过
+ * 连接失败）：不值得试就**别再绕**，直接把直连的真实错误抛出去。
+ *
+ * 这个标记是**会话级 + 带 TTL** 的（[CdnRelay] 里的 `RELAY_UNREACHABLE_TTL_MS`），
+ * 且 [relay] 每次取回响应都会 [CdnRelay.markRelayReachable] —— 所以中转恢复后会自动回来，
+ * 不会把路永久堵死。
+ *
  * 背景与原理见 [CdnRelay] 的类注释 —— 一句话：这些域名在内地**连代理都救不了**，
  * 因为 TLS 的 SNI 是明文，墙在明文隧道里就能读到并 RST，只有「中转站终结 TLS」这一条路。
  *
@@ -67,9 +82,12 @@ class CdnRelayInterceptor : Interceptor {
         }
 
         if (CdnRelay.isKnownDead(host)) {
-            // 已验证过直连必死。中转若也被探活判死，就别再绕这一趟了 ——
+            // 已验证过直连必死。中转若也不值得一试，就别再绕这一趟了 ——
             // 直接把**直连的原始错误**抛出去：报错指向真实原因，还省掉一次白等的超时。
-            if (CdnRelay.cachedReachable == false) return chain.proceed(request)
+            // ⭐ 26.9.18：判据从「`cachedReachable == false`」换成 [CdnRelay.isRelayWorthTrying]
+            //    —— 前者对失败刻意宽容（连败 < 3 仍返回 true），中转真的下线时它照样为真，
+            //    于是每个请求都会白绕一次。详见 CdnRelay 里那张判据对照表。
+            if (!CdnRelay.isRelayWorthTrying()) return chain.proceed(request)
             return relay(chain, request, null)
         }
 
@@ -86,7 +104,8 @@ class CdnRelayInterceptor : Interceptor {
         // 「一打开 App，封面转半天」。拿不到闸门的请求直接先走中转 ——
         // 反正直连能不能通是 host 级的事实，探一次就够了。
         if (!CdnRelay.tryBeginDirectProbe(host)) {
-            if (CdnRelay.cachedReachable == false) return chain.proceed(request)
+            // ⭐ 26.9.18：同上，中转不值得一试时直接走直连，别白绕。
+            if (!CdnRelay.isRelayWorthTrying()) return chain.proceed(request)
             return relay(chain, request, null)
         }
 
@@ -122,8 +141,8 @@ class CdnRelayInterceptor : Interceptor {
 
         CdnRelay.markKnownDead(request.url.host.lowercase())
         LogUtil.w(TAG, "直连失败，改走中转: ${request.url} (${cause.message})")
-        // 中转也被判死时别再白等一次超时 —— 抛直连的错误，那才是根因。
-        if (CdnRelay.cachedReachable == false) throw cause
+        // 中转也不值得一试时别再白等一次超时 —— 抛直连的错误，那才是根因。
+        if (!CdnRelay.isRelayWorthTrying()) throw cause
         return relay(chain, request, cause)
     }
 
@@ -139,11 +158,21 @@ class CdnRelayInterceptor : Interceptor {
             ?: return cause?.let { throw it } ?: chain.proceed(request)
 
         return try {
-            chain.proceed(request.newBuilder().url(forwarded).build())
+            val response = chain.proceed(request.newBuilder().url(forwarded).build())
+            // ⭐ 26.9.18：真的把响应取回来了 = 这条路可用，解除会话级「中转连接不上」标记。
+            CdnRelay.markRelayReachable()
+            response
         } catch (e: IOException) {
-            // 中转自己也可能失败。这里**只安排一次后台复探，不立刻把中转判死** ——
-            // 一次网络抖动就把中转停用 5 分钟，代价（视频看不了）远大于收益。
-            // 真死了的话复探会记下来，下一个请求就不再白绕。
+            // 中转自己也可能失败。这里分两种，处理方式不同：
+            //
+            // ① **连接层失败**（端口拒绝 / 超时 / TLS 握手失败）⇒ 「中转这台机器不可达」
+            //    是**机器级事实**，记进本会话，后面的请求不再各绕一遍。
+            //    对 `mustRelay` 的域名尤其关键：它们直连必死、中转是唯一出路，
+            //    不记就是首页十几个并发请求全部白等两遍（体感 = 转圈然后白屏）。
+            // ② 其它 IOException（上游把连接掐了之类）⇒ 中转本身是活的，**不标记**。
+            if (CdnRelay.isConnectionLevelFailure(e)) CdnRelay.markRelayUnreachable()
+            // 不立刻把节点整个判死：一次网络抖动就把中转停用，代价（视频看不了）远大于收益。
+            // 真死了的话复探会记下来。
             CdnRelay.scheduleReprobe()
             // 抛直连的错更能说明问题（中转失败通常是次生现象）。
             cause?.let { throw it }
