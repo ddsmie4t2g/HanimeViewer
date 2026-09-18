@@ -25,6 +25,7 @@ import io.github.daisukikaffuchino.han1meviewer.logic.entity.download.HanimeDown
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeVideo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
+import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavActressCache
 import io.github.daisukikaffuchino.han1meviewer.logic.state.VideoLoadingState
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
 import io.github.daisukikaffuchino.han1meviewer.ui.viewmodel.AppViewModel.csrfToken
@@ -332,7 +333,56 @@ class VideoViewModel(
                 if (emitState is VideoLoadingState.Success) {
                     _hanimeVideoFlow.update { emitState.info }
                     csrfToken = emitState.info.csrfToken
+                    fillNjavArtistAvatars(emitState.info)
                 }
+            }
+        }
+    }
+
+    /**
+     * nJAV 详情页**给不出作者头像**，这里按名字补。
+     *
+     * `NjavParser.artistsOf` 只能把 `avatarUrl` 填成空串（站点在女优页给的是「首字占位符」，
+     * 不是图片），真头像在女优一览的 `fourhoi.com/actress/<id>-t.jpg`。所以详情页这条链路
+     * 必须自己去索引页按名字找 —— 这件事以前只做在**女优页**和**关注表**上
+     * （`ArtistViewModel` / `FollowedArtistStore.fillMissingAvatars`），
+     * 详情页从来没做过，表现就是头像位置一片空白。
+     *
+     * 两步走，尽量少打网络：
+     * 1. 先查本地索引缓存（[NjavActressCache]）—— 0 网络，浏览过女优一览就命中；
+     * 2. 没命中的再联网翻索引页（`NetworkRepo.findNjavActress`，内部并行 + 回填缓存）。
+     *
+     * ⚠️ 只在 nJAV 源上做：hanime / Pornhub 的解析器**直接给得出**头像，多打这次请求是纯浪费。
+     * ⚠️ 逐个回写、且回写前核对片名 —— 用户可能已经切到别的片子，别把头像写串到新页面上。
+     * ⚠️ 整个方法**不阻塞**首屏：它在 `viewModelScope` 里异步跑，拿到一个显示一个。
+     */
+    private fun fillNjavArtistAvatars(video: HanimeVideo) {
+        if (!SettingsRepository.isNjavSite) return
+        val pending = video.artists.filter { it.avatarUrl.isBlank() }
+        if (pending.isEmpty()) return
+
+        viewModelScope.launch {
+            for (artist in pending) {
+                val avatar = NjavActressCache.avatarOf(artist.name).takeIf { it.isNotBlank() }
+                    ?: runCatching { NetworkRepo.findNjavActress(artist.name)?.avatarUrl }
+                        .getOrNull()
+                        ?.takeIf { it.isNotBlank() }
+                    ?: continue
+
+                // 已经翻页到别的片子了就别写 —— 否则会把 A 的头像画到 B 的页面上。
+                val current = _hanimeVideoFlow.value ?: return@launch
+                if (current.title != video.title) return@launch
+
+                val updated = current.copy(
+                    artists = current.artists.map {
+                        if (it.name == artist.name) it.copy(avatarUrl = avatar) else it
+                    },
+                    artist = current.artist?.let {
+                        if (it.name == artist.name) it.copy(avatarUrl = avatar) else it
+                    },
+                )
+                _hanimeVideoFlow.value = updated
+                _hanimeVideoStateFlow.value = VideoLoadingState.Success(updated)
             }
         }
     }

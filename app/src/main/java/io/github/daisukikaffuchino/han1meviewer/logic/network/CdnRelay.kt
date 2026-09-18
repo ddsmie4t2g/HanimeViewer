@@ -199,6 +199,21 @@ object CdnRelay {
     fun markKnownDead(host: String) = directIsKnownDead.add(host.lowercase())
 
     /**
+     * 直连**成功**了 ⇒ 撤销「该 host 直连必死」的结论。
+     *
+     * ⚠️ 为什么必须有这个反向操作：用户完全可能**中途挂上代理 / VPN**，而那一刻起直连
+     * 本来是通的。没有这条清除，[directIsKnownDead] 会一直为真，该 host 的后续请求
+     * 被永远当作「直连没戏」，每次都要先多绕一趟中转（而中转可能恰恰不在）。
+     *
+     * 只在真的拿到成功响应时调用（`CdnRelayInterceptor.directThenRelay` 里直连成功那条分支）。
+     */
+    fun markDirectAlive(host: String) {
+        if (directIsKnownDead.remove(host.lowercase())) {
+            LogUtil.i(TAG, "直连已恢复：$host")
+        }
+    }
+
+    /**
      * 「此刻正有请求在试探该 host 的直连」。
      *
      * ## 为什么需要它
@@ -266,32 +281,57 @@ object CdnRelay {
      * `true`。于是「中转已经下线」时它照样为真 ⇒ 请求继续白绕 —— 26.9.17 在
      * `mustRelay` 那里踩过同一个坑（见 [relayConfirmedReachable] 的注释）。
      *
-     * ## ⚠️⚠️ 必须带 TTL：这个记忆**只能让体验变好，不能把路堵死**
+     * ## ⚠️⚠️ 这个记忆**只能让体验变好，不能把路堵死**
      *
      * 「一次连接失败」推出「这台中转一直不可达」是归纳，**归纳会错**（中转重启、
-     * IP 解封、网络切换）。所以这里不是永久黑名单：超过 [RELAY_UNREACHABLE_TTL_MS]
-     * 就自动放行一次重试，成功即彻底解除。
+     * IP 解封、网络切换）。所以必须有一条**恢复通道**，否则后果很实际：
+     * 用户在隧道里丢了一次连接 ⇒ 之后**每一次**请求都不再尝试中转 ⇒
+     * 视频再也放不出来，重启 App 才能恢复。这种「优化」比不做还糟。
      *
-     * 没有 TTL 的后果是很实际的：用户在隧道里丢了一次连接 ⇒ 之后**每一次**请求都
-     * 不再尝试中转 ⇒ 视频再也放不出来，而重启 App 才能恢复。这种「优化」比不做还糟。
+     * ⚠️ 26.9.18 换了恢复通道：从「**用时间**解除」改成「**用探活**解除」。
+     *
+     * | 通道 | 代价 |
+     * |---|---|
+     * | 时间（旧） | TTL 一到标记就撤 ⇒ **整批**并发请求同时去撞死掉的中转 ⇒ 成片封面 loadfailed |
+     * | 探活（现） | 每 [RELAY_REVERIFY_AFTER_MS] 排一次 `/ping`（5 s 超时、30 s 节流），成功才解除 |
+     *
+     * 探活这条通道覆盖面够用：[probe] 成功时会调 [markRelayReachable]，
+     * 而启动预热（[warmUp]）与失败复探（[scheduleReprobe]）都会走到它。
+     * 唯一牺牲的是「中转悄悄恢复了但没人探」的窗口 —— 那最多让用户少用一会儿中转，
+     * 而不会像旧语义那样持续制造失败的封面。
      */
     private val relayUnreachableAt = AtomicLong(0L)
 
-    /** 这个结论的有效期。到点自动放行一次重试。 */
-    private const val RELAY_UNREACHABLE_TTL_MS = 120_000L
+    /**
+     * 标记保持多久之后**开始尝试重新验证**。
+     *
+     * ⚠️ 26.9.18 语义收紧（原来叫 `RELAY_UNREACHABLE_TTL_MS`，含义是「到点就放行一次」）。
+     * 旧语义有个要命的副作用：TTL 到期那一刻，**同一批并发请求会一起被放行** ——
+     * Pornhub 首页十几张封面是同时发的，于是每隔两分钟就来一次「整批封面集体绕死中转 ⇒
+     * 集体 loadfailed」。用户看到的就是「一屏里很多封面加载失败」。
+     *
+     * 现在改成「到点只排**一次探活**」：探活（`/ping`，5 s 超时，自带 30 s 节流）成功
+     * 才由 [markRelayReachable] 解除标记；业务请求不拿自己去试错。
+     * 这样既保住了「不能把路永久堵死」（探活就是那条恢复通道），
+     * 又不会让失效的中转持续吃掉封面。
+     */
+    private const val RELAY_REVERIFY_AFTER_MS = 120_000L
 
     /**
-     * 中转是否**确定连接不上**（且结论还没过期）。
+     * 中转是否**确定连接不上**。
      *
-     * `true` 时，[CdnRelayInterceptor] 会跳过「绕中转」这一步，直接抛直连的真实错误 ——
-     * 既不白等，报错也能指向根因。
+     * `true` 时，[CdnRelayInterceptor] 会跳过「绕中转」这一步，直接走直连（或抛直连的
+     * 真实错误）—— 既不白等，报错也能指向根因。
+     *
+     * ⚠️ 26.9.18 起这是一个**纯标记**，不再随时间自动失效。解除只有两条途径：
+     * ① 探活成功（[probe] 里 `also { if (it) markRelayReachable() }`）；
+     * ② 真实的中转请求走通了（[markRelayReachable]）。
+     * 为什么不能用时间解除，见 [RELAY_REVERIFY_AFTER_MS] 的注释。
      *
      * ⚠️ 注意它**不阻断**「探活刚确认可达」那条路径（见 [relayConfirmedReachable]）：
      * 那条路是标记的**解除途径**，不是被标记影响的对象。
      */
-    fun isRelayKnownUnreachable(): Boolean = relayUnreachableAt.get().let {
-        it != 0L && System.currentTimeMillis() - it < RELAY_UNREACHABLE_TTL_MS
-    }
+    fun isRelayKnownUnreachable(): Boolean = relayUnreachableAt.get() != 0L
 
     /**
      * 记一次「中转连接层失败」。只由 [interceptor.CdnRelayInterceptor] 在
@@ -300,8 +340,8 @@ object CdnRelay {
      */
     fun markRelayUnreachable() {
         val prev = relayUnreachableAt.getAndSet(System.currentTimeMillis())
-        if (prev == 0L || System.currentTimeMillis() - prev >= RELAY_UNREACHABLE_TTL_MS) {
-            LogUtil.w(TAG, "中转连接不上：本会话 ${RELAY_UNREACHABLE_TTL_MS / 1000}s 内不再为被封域名绕它")
+        if (prev == 0L) {
+            LogUtil.w(TAG, "中转连接不上：不再为被封域名绕它，直到探活证实它回来")
         }
     }
 
@@ -328,16 +368,27 @@ object CdnRelay {
      * | [cachedReachable] `!= false` | 节点健康检查没把它判死 | 对失败刻意宽容（连败 < 3 仍为 `true`）⇒ 中转已下线也返回 `true` |
      * | [!isRelayKnownUnreachable] | 本会话没有**实际**连接失败过 | 只在真正看到失败之后才成立 ⇒ 冷启动时还是不知道 |
      *
-     * 合起来的效果：冷启动按老行为试一次（可能白等一次），一旦撞上连接失败就
-     * 立刻在 [RELAY_UNREACHABLE_TTL_MS] 内不再白费；中转回来（探活成功 + 真实请求走通）
-     * 或被 TTL 放行后自动恢复。
+     * 合起来的效果：冷启动按老行为试一次（可能白等一次），一旦撞上连接失败就**不再白费**。
+     *
+     * ⚠️ 26.9.18：标记**不再随时间失效**，所以这里返回 `false` 后会一直保持，
+     * 直到探活证实中转回来了（见 [isRelayKnownUnreachable]）。标记存在且已超过
+     * [RELAY_REVERIFY_AFTER_MS] 时，这里**不会**放行，只会排一次探活去验 ——
+     * 「放行**整批**并发请求去撞一台已知失效的中转」正是
+     * 「一屏封面集体 loadfailed」的来源。
      *
      * ⚠️ 调用方**不要**用它去挡「探活刚确认可达」那条路径（[relayConfirmedReachable]），
      * 那是解除标记的途径，挡了就会自己把自己锁住。
      */
-    fun isRelayWorthTrying(): Boolean =
-        !isRelayKnownUnreachable() &&
-            runCatching { RelayNodeStore.cachedActiveReachable }.getOrNull() != false
+    fun isRelayWorthTrying(): Boolean {
+        val markedAt = relayUnreachableAt.get()
+        if (markedAt == 0L) {
+            // 从没撞过连接失败：按老行为，看节点健康结论。
+            return runCatching { RelayNodeStore.cachedActiveReachable }.getOrNull() != false
+        }
+        // 有「连接不上」的结论：业务请求不再拿自己去试，只负责把重新验证排上。
+        if (System.currentTimeMillis() - markedAt >= RELAY_REVERIFY_AFTER_MS) requestReverify()
+        return false
+    }
 
     /**
      * 这个异常够不够格说明「**中转这台机器不可达**」。
@@ -573,9 +624,17 @@ object CdnRelay {
                 ?.let { it.healthy && it.consecutiveFailures == 0 } == true
         }.getOrDefault(false)
 
-    /** 真正打一次 `/ping`。失败不抛，只会得到 `false`。 */
+    /**
+     * 真正打一次 `/ping`。失败不抛，只会得到 `false`。
+     *
+     * ⭐ 26.9.18：**成功即解除「中转连接不上」标记**。这是那个标记的自动恢复通道
+     * （另一条是真实中转请求走通，见 [markRelayReachable]）。少了这一句，
+     * 标记就真成了永久黑名单 —— 而它现在不再靠时间失效，所以这句是必需的。
+     */
     suspend fun probe(force: Boolean = false): Boolean =
-        runCatching { RelayNodeStore.checkActive(force = force) }.getOrDefault(false)
+        runCatching { RelayNodeStore.checkActive(force = force) }
+            .getOrDefault(false)
+            .also { if (it) markRelayReachable() }
 
     /**
      * 启动时预热一次，让第一个视频请求不必先等一次探活超时。
@@ -594,6 +653,21 @@ object CdnRelay {
      */
     fun scheduleReprobe() {
         runCatching { RelayNodeStore.reportFailure() }
+        requestReverify()
+    }
+
+    /**
+     * 排一次「重新验证中转回来没有」，**不记失败**。
+     *
+     * 与 [scheduleReprobe] 的唯一区别是「要不要给节点记一次失败」：那个用在
+     * 「中转刚刚真的失败」时；这个用在 [isRelayWorthTrying] 发现标记已过期、
+     * 主动去验一验时 —— 那会儿并没有观察到新失败，不该去累积节点的失败计数
+     * （累积到阈值会把节点换掉，而它可能只是被我们判错了）。
+     *
+     * 节流与去重靠 [probeAt] / [probeInFlight]：标记过期后每个请求都会调进来，
+     * 但 30 s 内只会真的探一次。
+     */
+    private fun requestReverify() {
         val now = System.currentTimeMillis()
         if (now - probeAt < REPROBE_MIN_INTERVAL_MS) return
         if (!probeInFlight.compareAndSet(false, true)) return

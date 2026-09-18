@@ -60,7 +60,18 @@ class ImageRelayInterceptor : Interceptor {
          */
         private val BLOCKED_IMAGE_HOSTS = setOf(
             "vdownload.hembed.com", // hanime 全站图片
-            "fourhoi.com",          // nJAV 封面（含 www 子域，见 matches）
+            "fourhoi.com",          // nJAV 封面与女优头像（含 www 子域，见 matches）
+            // Pornhub 全部图片（`pix-*.phncdn.com` / `ev-h.phncdn.com` / `ci.phncdn.com` …）。
+            //
+            // ⚠️ 26.9.18 才补进来，补之前它的处境是「一条兜底都不剩」：
+            //    这类封面的直连是 **SNI 阻断**（必死，挂普通代理也救不了），
+            //    而唯一的替代路径是自建中转 —— 中转已于 26.9.17 下线。
+            //    于是 Pornhub 封面在直连失败后无处可去，成片 `loadfailed`。
+            //
+            // 代价与既有取舍一致：直连和中转都失败时，这张封面的完整 URL 会交给第三方
+            // wsrv.nl。这在「网络设置」里可以关掉，且 Pornhub 封面本就是公开地址、
+            // 不含私人签名串（不像 hanime 那些带 `?secure=` 的）。权衡后加进来。
+            "phncdn.com",
         )
 
         /** 只中转图片；wsrv.nl 对视频返回 404，传过去没有意义。 */

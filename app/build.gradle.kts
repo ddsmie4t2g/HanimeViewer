@@ -274,8 +274,60 @@ android {
         //                            ⚠️ 本版**治的是「不再白转圈」，不是「Pornhub 能看了」**：
         //                            不挂梯子时 `mustRelay` 域名仍被墙，客户端无解；挂梯子走直连
         //                            那条路照常可用。
-        versionCode = 27_000_005
-        versionName = "27.0.5"
+        //     27.0.6 → 27_000_006   27.0.6：⚠️ **不换数据源、不改播放引擎**，修三件独立的事：
+        //                            ①**nJAV 视频页的「作者 / 女优」头像一直是空白。**
+        //                              根因：`NjavParser.artistsOf` 只能把 `avatarUrl` 填成
+        //                              **空串**（站点在女优页给的是「首字占位符」而非图片，
+        //                              真头像在女优一览的 `fourhoi.com/actress/<id>-t.jpg`），
+        //                              而「按名字去索引页找头像」这件事以前只做在**女优页**
+        //                              （`ArtistViewModel`）和**关注表**
+        //                              （`FollowedArtistStore.fillMissingAvatars`）上，
+        //                              **详情页这条链路从来没做过** ⇒
+        //                              `AsyncImage(model = "")` 什么都不画（`ArtistRow` 里
+        //                              没有 placeholder / error 占位），就是一片空白。
+        //                              修法：`VideoViewModel.fillNjavArtistAvatars` ——
+        //                              先查本地 `NjavActressCache`（0 网络），未命中才走
+        //                              `NetworkRepo.findNjavActress`；逐个回写、拿到一个显示一个；
+        //                              ⚠️ 回写前**核对片名**，别在用户翻页后把 A 的头像画到 B 上；
+        //                              ⚠️ 只在 nJAV 源上做（另两家解析器直接给得出头像）。
+        //                            ②**Pornhub 播放 404**（`error_code_io_bad_http_status`）。
+        //                              实测规则：主清单与子清单**不要** Referer，但 `.ts` 分片
+        //                              不带会 404。这条 Referer 过去**只有服务器侧能补**
+        //                              （请求换成自建中转地址后，与 CDN 对话的是中转服务器，
+        //                              它按中转 URL 的 `?ref=` 补）—— 中转 26.9.17 下线后
+        //                              请求走直连，通道整条消失 ⇒ `.ts` 404。
+        //                              **这也解释了「挂了代理还是 404」：缺的是请求头不是线路。**
+        //                              修法：`PlaybackHeaders.pornhubSegmentReferer` 补
+        //                              「中转不可用时」分支，判据 `relayConfirmedReachable`
+        //                              （**刚被证明可达**，冷启动时不改变老路径）；
+        //                              ⚠️ 只给 `.ts` / `.mp4`，**不给 `.m3u8`**。
+        //                            ③**Pornhub 封面成片 `loadfailed`** —— 三个缺陷叠加：
+        //                              (a) `isRelayWorthTrying()` 的「时间放行」是**整批**放行：
+        //                                  TTL 到期那一刻同一批并发封面一起去撞死掉的中转，
+        //                                  于是每隔两分钟来一次「整屏封面集体失败」。
+        //                                  改为**标记不再随时间失效**，解除只走 ① 探活成功
+        //                                  ② 真实中转请求走通；到点只排一次探活
+        //                                  （`requestReverify`，只探活**不记节点失败**），
+        //                                  并让 `probe()` 成功时 `markRelayReachable()`。
+        //                              (b) `directIsKnownDead` **只进不出**：用户中途挂上代理后
+        //                                  直连本来是通的，却被永远记着「直连必死」⇒
+        //                                  新增 `markDirectAlive(host)`，直连成功即撤销。
+        //                              (c) `phncdn.com` **一条兜底都没有，而且兜底拦截器本身失效**：
+        //                                  它不在 `ImageRelayInterceptor.BLOCKED_IMAGE_HOSTS`
+        //                                  （被当成「反正有自建中转兜着」），而拦截器顺序是
+        //                                  `CdnRelay → ImageRelay`，`CdnRelay` 在「直连和中转
+        //                                  都拿不到」时直接 `throw cause` 短路，内层 wsrv.nl 的
+        //                                  `runCatching` 兜的是**它自己内层**的 `chain.proceed`，
+        //                                  外层抛的异常它看不见 ⇒ 兜底**从来没执行过**。
+        //                                  修法：把 `ImageRelayInterceptor` 提到
+        //                                  `CdnRelayInterceptor` **外面**，并把 `phncdn.com`
+        //                                  加进兜底名单（封面 URL 交给第三方 wsrv.nl，
+        //                                  可在网络设置里关掉；该 URL 本就是公开地址）。
+        //                            ⚠️ 本版**不承诺「挂代理就能看 Pornhub」**：这类域名是
+        //                            **SNI 阻断**，裸 SOCKS5 / HTTP 代理救不了（SNI 在
+        //                            ClientHello 明文里）。播放本身仍需一条能过 SNI 的线路。
+        versionCode = 27_000_006
+        versionName = "27.0.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

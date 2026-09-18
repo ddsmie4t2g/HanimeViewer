@@ -26,11 +26,21 @@ import java.io.IOException
  *
  * 所以 [relay] 在**连接层失败**时调 [CdnRelay.markRelayUnreachable]，
  * 之后所有判据统一走 [CdnRelay.isRelayWorthTrying]（= 节点没被判死 **且** 本会话没撞过
- * 连接失败）：不值得试就**别再绕**，直接把直连的真实错误抛出去。
+ * 连接失败）：不值得试就**别再绕**，改走直连（挂代理 / VPN 的用户直连本来就能通）。
  *
- * 这个标记是**会话级 + 带 TTL** 的（[CdnRelay] 里的 `RELAY_UNREACHABLE_TTL_MS`），
- * 且 [relay] 每次取回响应都会 [CdnRelay.markRelayReachable] —— 所以中转恢复后会自动回来，
- * 不会把路永久堵死。
+ * ⚠️ 26.9.18 二次收紧：这个标记**不再随时间失效**。解除只有两条途径 ——
+ * ① 探活成功（`CdnRelay.probe`）；② [relay] 真的取回响应（[CdnRelay.markRelayReachable]）。
+ *
+ * 为什么不能用时间解除：TTL 到期那一刻，同一批并发请求（Pornhub 首页十几张封面）
+ * 会被**一起**放行去撞那台已经死掉的中转，于是每隔两分钟就来一次「整批封面集体
+ * loadfailed」。改成「到点只排一次探活」之后，业务请求不再拿自己当探针。
+ * 详见 `CdnRelay.RELAY_REVERIFY_AFTER_MS` 的注释。
+ *
+ * ## 直连成功时要**撤销**「直连必死」的结论
+ *
+ * 用户可能中途挂上代理 / VPN，那一刻起直连本来是通的。所以 [directThenRelay] 在真的
+ * 拿到成功响应时会调 [CdnRelay.markDirectAlive] 把该 host 从「已知死」里摘出来，
+ * 否则它会永远被当作「直连没戏」，每次先白绕一趟中转。
  *
  * 背景与原理见 [CdnRelay] 的类注释 —— 一句话：这些域名在内地**连代理都救不了**，
  * 因为 TLS 的 SNI 是明文，墙在明文隧道里就能读到并 RST，只有「中转站终结 TLS」这一条路。
@@ -132,7 +142,15 @@ class CdnRelayInterceptor : Interceptor {
         direct: Result<Response>? = null,
     ): Response {
         val attempt = direct ?: runCatching { chain.proceed(request) }
-        attempt.getOrNull()?.let { if (it.isSuccessful) return it }
+        attempt.getOrNull()?.let {
+            if (it.isSuccessful) {
+                // ⭐ 26.9.18：直连真的走通了 ⇒ 撤销「该 host 直连必死」的结论。
+                //    用户完全可能中途挂上代理 / VPN，那一刻起直连本来是通的；
+                //    不清除的话，该 host 会被永远当作「直连没戏」，每次先白绕一趟中转。
+                CdnRelay.markDirectAlive(request.url.host.lowercase())
+                return it
+            }
+        }
 
         // 走到这里只可能是「抛异常」。4xx/5xx 的场景在上面就已经返回了。
         attempt.getOrNull()?.close()

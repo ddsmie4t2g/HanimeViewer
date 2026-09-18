@@ -19,13 +19,27 @@ import java.util.concurrent.TimeUnit
  * - [HProxySelector] / [HProxyAuthenticator]：漏挂代理的表现是「文字能加载、图一张不出」，
  *   用户完全看不出是代理没生效（这条经验来自 [io.github.daisukikaffuchino.han1meviewer.util.HImageMeower]）。
  * - [HDns]：系统 DNS 对本站系域名是**投毒**的，图片也得走同一套解析。
- * - [CdnRelayInterceptor]：`hembed` / `fourhoi` 图片走**自建** TLS 中转（自己的服务器，
- *   URL 不外泄给第三方）。正常情况下轮不到下面那层。
- * - [ImageRelayInterceptor]：上一层的**兜底** —— 只有自建中转也拿不到时才退到 `wsrv.nl`。
- *   保留它是因为它不依赖任何自有设施，自建中转哪天挂了封面还不至于全黑。
- * - [ImageRetryInterceptor]（9.0）：**装在最外层**，跨洋链路抖一次不至于让这张封面永久
- *   停在 `loadfailed`。放最外层是有意的：重试会重新走一遍「直连还是中转」的判定，
- *   第一次撞墙留下的 [CdnRelay.isKnownDead] 结论能让重试直接走中转。
+ *
+ * ## ⚠️ 拦截器顺序（由外到内 = 添加顺序，动它会改变行为）
+ *
+ * ```
+ * ImageRetryInterceptor（最外） → ImageRelayInterceptor → CdnRelayInterceptor（最内） → 网络
+ * ```
+ *
+ * - [ImageRetryInterceptor]（9.0）：跨洋链路抖一次不至于让这张封面永久停在 `loadfailed`。
+ *   放最外层是有意的：重试会重新走一遍「直连还是中转」的判定。
+ * - [CdnRelayInterceptor]：`hembed` / `fourhoi` / `phncdn` 走**自建** TLS 中转（自己的
+ *   服务器，URL 不外泄给第三方）。放**最内层**，这样它失败时外层的 wsrv.nl 还能接手。
+ * - [ImageRelayInterceptor]：`wsrv.nl` 兜底。不依赖任何自有设施，自建中转哪天挂了封面
+ *   还不至于全黑。
+ *
+ * ⚠️⚠️ 26.9.18 把 [ImageRelayInterceptor] 从最内层提到 [CdnRelayInterceptor] **外面**。
+ * 原来顺序是 `CdnRelay → ImageRelay`，而 CdnRelay 在「直连和中转都拿不到」时会直接
+ * **抛异常**（见 `CdnRelayInterceptor.directThenRelay` 的 `throw cause`），异常在它那一层
+ * 就短路了 —— 内层的 wsrv.nl 兜底**根本没有机会执行**（它 `runCatching` 的是自己内层的
+ * `chain.proceed`，外层抛的异常它看不见）。同时 `phncdn.com` 当时也不在它的兜底名单里。
+ * 两条加起来 = **Pornhub 封面在自建中转下线后完全没有任何兜底**，
+ * 表现就是「挂不挂代理都有一批封面 loadfailed」。
  */
 object ImageNetworkClient {
 
@@ -43,8 +57,8 @@ object ImageNetworkClient {
             .proxyAuthenticator(HProxyAuthenticator.http)
             .dns(HDns())
             .addInterceptor(ImageRetryInterceptor())
-            .addInterceptor(CdnRelayInterceptor())
             .addInterceptor(ImageRelayInterceptor())
+            .addInterceptor(CdnRelayInterceptor())
             .build()
     }
 }
