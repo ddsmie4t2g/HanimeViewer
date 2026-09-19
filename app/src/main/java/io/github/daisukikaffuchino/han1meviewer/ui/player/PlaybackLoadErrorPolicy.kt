@@ -4,6 +4,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.ParserException
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSourceException
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
@@ -50,11 +51,28 @@ import java.net.UnknownHostException
  * `Range: bytes=<断点>-`。hembed 支持 Range（下载链路一直在用 206 校验），
  * 所以一次重试只补没读到的那一段 —— 多给几次重试的代价只是「多等几秒」，不是「重下整部」。
  *
+ * ## ⚠️⚠️ 27.0.8 的回归修复：**4xx 绝不能判成「立刻放弃」**
+ *
+ * 27.0.7 把「4xx」整类划进了「重试也不会变好 ⇒ 预算 0（立刻报错）」。这个判断是**错的**，
+ * 代价是「有些视频根本看不了、开不开代理都一样」：
+ *
+ * | 为什么错 | 说明 |
+ * |---|---|
+ * | 4xx 在 media3 的语义里**是可恢复的** | 默认 `getFallbackSelectionFor` 专门为 `403 / 404 / 410 / 416 / 500 / 503` 返回换轨重试（`FALLBACK_TYPE_SELECTION`）——换轨（HLS 换 variant、多轨换线路）**正是这类错误的解法**，而「预算 0」让播放器连换轨的机会都没有 |
+ * | 多镜像站点天生允许「首次 4xx」 | 这类站点的分片/清单走 CDN 边缘，某节点未同步时首次 403/404、重试换节点即成功。默认策略的 3 次重试正是为它准备的 |
+ * | 416 不是「链接坏了」 | `Range` 起点越界（例如续播位置落在换清晰度后的新文件之外）会返回 416，重试/换轨即可，判死等于「打开就报错」 |
+ *
+ * ⇒ 27.0.8 起：**4xx 恢复默认语义（可重试 + 可换轨）**，与 media3 默认的宽容度**只增不减**。
+ * 「不可重试」的集合回到 media3 默认那几类（见 [isNonRetriable]）——
+ * **即本策略在任何情况下都不会比默认更早放弃**，这是这次回归的硬约束。
+ *
  * ## 预算（为什么不是一个数）
  *
  * | 情况 | 预算 | 为什么 |
  * |---|---|---|
- * | 4xx（403/404/410/416…）· 解析失败 · 文件不存在 · 明文禁令 | **0（立刻报错）** | 这些不会因为重试变好。尤其 hembed 的签名过期就是 **403**，跟着重试 15 次等于让用户干等一分钟才看到「403」 |
+ * | 解析失败 · 文件不存在 · 明文禁令 · 加载器内部异常 · `Range` 越界 | **0（立刻报错）** | 与 media3 默认**完全同一集合**：重试不会变好 |
+ * | 4xx（403/404/410/416…） | **3** | 与默认一致（见上面那段）；**不是 0** |
+ * | 5xx（500/502/503） | **6** | 服务端/网关抽风，值得多等几轮 |
  * | `UnknownHostException` | **3** | 「这个域名解析不出来」是 host 级事实，6 秒内三次都一样，别拖成 1 分钟 |
  * | 清单（`.m3u8` / manifest） | **6** | 清单只有几 KB，≈20 秒足够；再久不如早点告诉用户 |
  * | 其它（`Connection reset` / 超时 / TLS / EOF） | **[TRANSPORT_RETRY_COUNT]** | 掐了再续是唯一出路。延迟封顶 5 s ⇒ 约 1 分钟的耐心 |
@@ -62,8 +80,7 @@ import java.net.UnknownHostException
  * 延迟沿用 media3 的曲线 `min((errorCount-1)*1000, 5000)`，不另造一套。
  *
  * ⚠️ **判据必须走 cause 链**：`OkHttpDataSource` 那条链路会把真正的异常埋进
- * `IOException → ExecutionException → …`，只看最外层（media3 默认实现就只看链上每一层是否
- * 命中类型，所以它是安全的）会漏掉 403。
+ * `IOException → ExecutionException → …`，只看最外层会漏掉真正的状态码。
  *
  * ⚠️ **别覆盖 [getFallbackSelectionFor]**：默认那条（403/404/410/416/500/503 ⇒ 换轨重试）
  * 是有用的，继承即可。
@@ -77,7 +94,7 @@ class PlaybackLoadErrorPolicy(
 
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
         val exception = loadErrorInfo.exception
-        if (isFatalError(exception)) return C.TIME_UNSET
+        if (isNonRetriable(exception)) return C.TIME_UNSET
         val budget = retryBudget(
             exception = exception,
             dataType = loadErrorInfo.mediaLoadData.dataType,
@@ -102,6 +119,17 @@ class PlaybackLoadErrorPolicy(
         /** 清单很小，重试几次就够。 */
         const val MANIFEST_RETRY_COUNT = 6
 
+        /** 服务端 / 网关错误：值得多等几轮。 */
+        const val SERVER_ERROR_RETRY_COUNT = 6
+
+        /**
+         * 4xx 的重试次数。
+         *
+         * ⚠️⚠️ **不能是 0** —— 见类注释「27.0.8 的回归修复」。这是 media3 默认值，
+         * 也是「首次 403/404、换节点成功」这类多镜像站点唯一的机会。
+         */
+        const val CLIENT_ERROR_RETRY_COUNT = 3
+
         const val BASE_RETRY_DELAY_MS = 1_000L
         const val MAX_RETRY_DELAY_MS = 5_000L
 
@@ -110,7 +138,8 @@ class PlaybackLoadErrorPolicy(
          * `DataSpec`（内含 `android.net.Uri`），JVM 单测里造不出来，所以同时保留消息匹配
          * （media3 给它的 message 正是 `Response code: 403`）。真实路径上类型分支先命中。
          */
-        private val CLIENT_ERROR_MESSAGE = Regex("""response code: 4\d\d""", RegexOption.IGNORE_CASE)
+        private val STATUS_MESSAGE =
+            Regex("""response code: (\d\d\d)""", RegexOption.IGNORE_CASE)
 
         /** 与 media3 默认一致的退避曲线：1 s、2 s、3 s、4 s，之后固定 5 s。 */
         fun retryDelayMs(errorCount: Int): Long =
@@ -121,20 +150,59 @@ class PlaybackLoadErrorPolicy(
             exception: Throwable?,
             dataType: Int,
             transportRetryCount: Int = TRANSPORT_RETRY_COUNT,
-        ): Int = when {
-            anyCause(exception) { it is UnknownHostException } -> DNS_RETRY_COUNT
-            dataType == C.DATA_TYPE_MANIFEST -> minOf(MANIFEST_RETRY_COUNT, transportRetryCount)
-            else -> transportRetryCount
+        ): Int {
+            val status = httpStatusOf(exception)
+            return when {
+                dataType == C.DATA_TYPE_MANIFEST -> minOf(MANIFEST_RETRY_COUNT, transportRetryCount)
+                anyCause(exception) { it is UnknownHostException } -> DNS_RETRY_COUNT
+                status != null && status in 500..599 -> SERVER_ERROR_RETRY_COUNT
+                status != null && status in 400..499 -> CLIENT_ERROR_RETRY_COUNT
+                else -> transportRetryCount
+            }
         }
 
-        /** 重试也不会变好的错误 —— 这些直接报错。 */
-        fun isFatalError(error: Throwable?): Boolean = anyCause(error) { cause ->
+        /**
+         * 重试也不会变好的错误 —— 这些直接报错。
+         *
+         * ⚠️⚠️ **这个集合必须与 media3 默认的 `isAnyCauseNonRetriable` 保持一致，只能更小、不能更大**：
+         * 27.0.7 往里塞了「4xx」，直接导致「有些视频根本看不了」。
+         */
+        fun isNonRetriable(error: Throwable?): Boolean = anyCause(error) { cause ->
             cause is ParserException ||
                 cause is FileNotFoundException ||
                 cause is HttpDataSource.CleartextNotPermittedException ||
                 cause is Loader.UnexpectedLoaderException ||
-                (cause is HttpDataSource.InvalidResponseCodeException && cause.responseCode in 400..499) ||
-                CLIENT_ERROR_MESSAGE.containsMatchIn(cause.message.orEmpty())
+                (cause is DataSourceException &&
+                    cause.reason == DataSourceException.POSITION_OUT_OF_RANGE)
+        }
+
+        /**
+         * 沿 cause 链找 HTTP 状态码（类型优先，消息兜底）。
+         *
+         * 类型分支在真实链路上先命中；消息分支是给单测留的路（见 [STATUS_MESSAGE] 的说明）。
+         */
+        fun httpStatusOf(error: Throwable?): Int? {
+            var status: Int? = null
+            anyCause(error) { cause ->
+                when (cause) {
+                    is HttpDataSource.InvalidResponseCodeException -> {
+                        status = cause.responseCode
+                        true
+                    }
+
+                    else -> {
+                        val code = STATUS_MESSAGE.find(cause.message.orEmpty())
+                            ?.groupValues?.getOrNull(1)?.toIntOrNull()
+                        if (code != null) {
+                            status = code
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+            }
+            return status
         }
 
         private inline fun anyCause(error: Throwable?, predicate: (Throwable) -> Boolean): Boolean {

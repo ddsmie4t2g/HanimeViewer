@@ -2,8 +2,10 @@ package io.github.daisukikaffuchino.han1meviewer.ui.player
 
 import androidx.media3.common.C
 import androidx.media3.common.ParserException
+import androidx.media3.datasource.DataSourceException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.FileNotFoundException
@@ -21,12 +23,12 @@ import java.util.concurrent.ExecutionException
  *
  * | 判错方向 | 后果 |
  * |---|---|
- * | **判窄**（把 4xx 也当可重试） | hembed 的签名过期是 403，重试 15 次 ⇒ 用户干等一分钟才看到「403」，而这条链接**永远不会好** |
- * | **判宽**（把 `Connection reset` 当致命） | 回到修之前的状态：掐一下就直接报错，用户以为片子坏了 |
+ * | **判窄**（连 `Connection reset` 都当致命） | 回到修之前的状态：掐一下就直接报错，用户以为片子坏了 |
+ * | **判宽过头 ⇒ 反过来把 4xx 当致命** | ⚠️⚠️ 这就是 **27.0.7 的真实事故**：有些视频**根本看不了、开不开代理都一样**（见 `clientErrorsAreRetriable` 那条用例） |
  *
  * ⚠️ 这里只测纯函数：`LoadErrorHandlingPolicy.LoadErrorInfo` 要 `DataSpec`（内含
  * `android.net.Uri`），JVM 单测里造不出来 —— 所以判据没有和 media3 的类型绑死，
- * 见 [PlaybackLoadErrorPolicy.isFatalError] 里那条消息兜底。
+ * 见 [PlaybackLoadErrorPolicy.httpStatusOf] 里那条消息兜底。
  *
  * ⚠️ 别在这些用例里碰 `LogUtil`（`enabled` 默认取 `BuildConfig.DEBUG`，单测跑 debug 变体 ⇒
  * 真的会去调 `android.util.Log` ⇒ JVM 上抛 `not mocked`）。这里没用到日志。
@@ -45,10 +47,10 @@ class PlaybackLoadErrorPolicyTest {
      * `IOException(ExecutionException(真异常))` 且 message = `cause.toString()`）。
      */
     @Test
-    fun wrappedSocketResetIsStillRetriable() {
+    fun wrappedSocketResetIsRetriable() {
         assertFalse(
             "连接被掐不是致命错误 —— 它正是这个策略存在的理由",
-            PlaybackLoadErrorPolicy.isFatalError(wrappedReset),
+            PlaybackLoadErrorPolicy.isNonRetriable(wrappedReset),
         )
         assertEquals(
             "传输层预算给满",
@@ -61,39 +63,85 @@ class PlaybackLoadErrorPolicyTest {
         )
     }
 
-    /** 4xx 一律不重试（签名过期 403、分片 404、区间越界 416）。 */
+    /**
+     * ⭐⭐ **27.0.7 回归的钉子：4xx 必须可重试。**
+     *
+     * 27.0.7 把 4xx 整类划成「预算 0（立刻报错）」，于是：
+     * - 多镜像站点「首次 403/404、换节点/换轨即成功」这条唯一的机会被砍掉（默认 `getFallbackSelectionFor`
+     *   专门为 403/404/410/416/500/503 准备了换轨）；
+     * - `Range` 越界返回的 416 也被当死。
+     *
+     * 结果就是用户报的「有些视频根本看不了」。**这条用例不许再被改回去。**
+     */
     @Test
-    fun clientErrorsAreFatal() {
-        assertTrue(
-            "403：签名过期，重试一万次也一样",
-            PlaybackLoadErrorPolicy.isFatalError(IOException("Response code: 403")),
-        )
-        assertTrue("404", PlaybackLoadErrorPolicy.isFatalError(IOException("Response code: 404")))
-        assertTrue("416", PlaybackLoadErrorPolicy.isFatalError(IOException("Response code: 416")))
+    fun clientErrorsAreRetriable() {
+        for (code in listOf(403, 404, 410, 416)) {
+            val error = IOException("Response code: $code")
+            assertFalse(
+                "$code 不是致命错误（默认策略把它当可换轨/可重试）",
+                PlaybackLoadErrorPolicy.isNonRetriable(error),
+            )
+            assertEquals(
+                "$code 的预算必须与 media3 默认一致（3 次），不能是 0",
+                PlaybackLoadErrorPolicy.CLIENT_ERROR_RETRY_COUNT,
+                PlaybackLoadErrorPolicy.retryBudget(error, C.DATA_TYPE_MEDIA),
+            )
+        }
     }
 
-    /** 5xx 与 4xx 相反：服务端抽风值得重试。 */
+    /** 5xx：服务端抽风，值得比 4xx 多等几轮。 */
     @Test
-    fun serverErrorsAreRetriable() {
-        assertFalse(
-            "500 / 503 是服务端临时抽风，默认策略本来就重试它们",
-            PlaybackLoadErrorPolicy.isFatalError(IOException("Response code: 500")),
+    fun serverErrorsGetALongerBudget() {
+        val error = IOException("Response code: 503")
+        assertFalse(PlaybackLoadErrorPolicy.isNonRetriable(error))
+        assertEquals(
+            PlaybackLoadErrorPolicy.SERVER_ERROR_RETRY_COUNT,
+            PlaybackLoadErrorPolicy.retryBudget(error, C.DATA_TYPE_MEDIA),
         )
-        assertFalse(PlaybackLoadErrorPolicy.isFatalError(IOException("Response code: 503")))
     }
 
-    /** 解析失败 / 文件不存在：确定性问题，重试只会白等。 */
+    /**
+     * 「不可重试」的集合必须与 media3 默认一致 —— **只能更小，不能更大**。
+     *
+     * 27.0.7 的教训就是往里多塞了一类（4xx）。这条用例把「多塞」本身钉住。
+     */
     @Test
-    fun deterministicFailuresAreFatal() {
+    fun nonRetriableSetIsNotBroaderThanMedia3Default() {
+        val mustStayRetriable = listOf(
+            IOException("Response code: 403"),
+            IOException("Response code: 404"),
+            IOException("Response code: 416"),
+            IOException("Response code: 500"),
+            wrappedReset,
+            UnknownHostException("vdownload.hembed.com"),
+            IOException("unexpected end of stream"),
+        )
+        for (error in mustStayRetriable) {
+            assertFalse(
+                "${error.message} 必须保持可重试 —— 判窄会让视频「打开就报错」",
+                PlaybackLoadErrorPolicy.isNonRetriable(error),
+            )
+        }
+    }
+
+    /** 解析失败 / 文件不存在 / `Range` 越界：确定性问题，重试只会白等。 */
+    @Test
+    fun deterministicFailuresAreNotRetriable() {
         assertTrue(
             "容器解析失败",
-            PlaybackLoadErrorPolicy.isFatalError(
+            PlaybackLoadErrorPolicy.isNonRetriable(
                 ParserException.createForMalformedContainer("bad container", null),
             ),
         )
         assertTrue(
             "本地文件不存在",
-            PlaybackLoadErrorPolicy.isFatalError(FileNotFoundException("nope.mp4")),
+            PlaybackLoadErrorPolicy.isNonRetriable(FileNotFoundException("nope.mp4")),
+        )
+        assertTrue(
+            "Range 越界（media3 默认也把它当不可重试）",
+            PlaybackLoadErrorPolicy.isNonRetriable(
+                DataSourceException(IOException("range"), DataSourceException.POSITION_OUT_OF_RANGE),
+            ),
         )
     }
 
@@ -101,7 +149,7 @@ class PlaybackLoadErrorPolicyTest {
     @Test
     fun dnsFailureGetsAShortBudget() {
         val dns = UnknownHostException("vdownload.hembed.com")
-        assertFalse("DNS 失败不是致命的（换个网络就能好）", PlaybackLoadErrorPolicy.isFatalError(dns))
+        assertFalse("DNS 失败不是致命的（换个网络就能好）", PlaybackLoadErrorPolicy.isNonRetriable(dns))
         assertEquals(
             "host 级事实，3 次（≈6 s）就够下结论",
             PlaybackLoadErrorPolicy.DNS_RETRY_COUNT,
@@ -153,12 +201,15 @@ class PlaybackLoadErrorPolicyTest {
     /** 判据要走 **cause 链**：真异常常被埋在两层包装里（`cause` 为 null 也要安全）。 */
     @Test
     fun judgementWalksTheCauseChain() {
-        val nested = IOException("outer", IOException("middle", IOException("Response code: 403")))
-        assertTrue(
-            "嵌套三层的 403 也要认得出来",
-            PlaybackLoadErrorPolicy.isFatalError(nested),
+        val nested = IOException("outer", IOException("middle", IOException("Response code: 404")))
+        assertEquals(
+            "嵌套三层的状态码也要认得出来",
+            404,
+            PlaybackLoadErrorPolicy.httpStatusOf(nested),
         )
-        assertFalse("没有 cause 也不能崩", PlaybackLoadErrorPolicy.isFatalError(null))
-        assertFalse(PlaybackLoadErrorPolicy.isFatalError(IllegalStateException("boom")))
+        assertFalse("没有 cause 也不能崩", PlaybackLoadErrorPolicy.isNonRetriable(null))
+        assertNull("认不出状态码就返回 null（由调用方按「其它传输错误」处理）",
+            PlaybackLoadErrorPolicy.httpStatusOf(IllegalStateException("boom")))
+        assertFalse(PlaybackLoadErrorPolicy.isNonRetriable(IllegalStateException("boom")))
     }
 }

@@ -26,6 +26,7 @@ import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeInfo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.HanimeVideo
 import io.github.daisukikaffuchino.han1meviewer.logic.model.SubscriptionItem
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavActressCache
+import io.github.daisukikaffuchino.han1meviewer.logic.njav.NjavNetwork
 import io.github.daisukikaffuchino.han1meviewer.logic.state.VideoLoadingState
 import io.github.daisukikaffuchino.han1meviewer.logic.state.WebsiteState
 import io.github.daisukikaffuchino.han1meviewer.ui.viewmodel.AppViewModel.csrfToken
@@ -52,6 +53,9 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 /**
@@ -89,6 +93,15 @@ class VideoViewModel(
          * 最小的 HKeyframe 保存間隔，暫定 5s
          */
         const val MIN_H_KEYFRAME_SAVE_INTERVAL = 5_000 // ms
+
+        /**
+         * 详情页补 nJAV 女优头像的并发度。
+         *
+         * 每个未命中的人最多要翻 3 页索引（`NetworkRepo.findNjavActress`），
+         * 女优多的片子（合作片 5–10 位）串行会拖成十几秒；4 是「快」与「别把站点打烦」的折中
+         * （与关注新作红点那条用的是同一个数）。
+         */
+        const val NJAV_AVATAR_CONCURRENCY = 4
     }
     private val videoIntroUiStateMap = mutableMapOf<String, VideoIntroUiState>()
     private val _videoCodeFlow = MutableStateFlow(EMPTY_STRING)
@@ -355,6 +368,7 @@ class VideoViewModel(
      * ⚠️ 只在 nJAV 源上做：hanime / Pornhub 的解析器**直接给得出**头像，多打这次请求是纯浪费。
      * ⚠️ 逐个回写、且回写前核对片名 —— 用户可能已经切到别的片子，别把头像写串到新页面上。
      * ⚠️ 整个方法**不阻塞**首屏：它在 `viewModelScope` 里异步跑，拿到一个显示一个。
+     * ⚠️⚠️ 回写**只碰 [_hanimeVideoFlow]，绝不碰 [_hanimeVideoStateFlow]** —— 见 [applyNjavAvatar]。
      */
     private fun fillNjavArtistAvatars(video: HanimeVideo) {
         if (!SettingsRepository.isNjavSite) return
@@ -362,29 +376,70 @@ class VideoViewModel(
         if (pending.isEmpty()) return
 
         viewModelScope.launch {
+            // 并发 [NJAV_AVATAR_CONCURRENCY]：女优多的时候（合作片常见 5–10 位）串行查会把
+            // 「补头像」拖成十几秒 —— 而每个未命中的人最多要翻 3 页索引（见 findNjavActress）。
+            // 每个子协程查完**自己**回主线程回写，所以还是「拿到一个显示一个」。
+            val gate = Semaphore(NJAV_AVATAR_CONCURRENCY)
             for (artist in pending) {
-                val avatar = NjavActressCache.avatarOf(artist.name).takeIf { it.isNotBlank() }
-                    ?: runCatching { NetworkRepo.findNjavActress(artist.name)?.avatarUrl }
-                        .getOrNull()
-                        ?.takeIf { it.isNotBlank() }
-                    ?: continue
-
-                // 已经翻页到别的片子了就别写 —— 否则会把 A 的头像画到 B 的页面上。
-                val current = _hanimeVideoFlow.value ?: return@launch
-                if (current.title != video.title) return@launch
-
-                val updated = current.copy(
-                    artists = current.artists.map {
-                        if (it.name == artist.name) it.copy(avatarUrl = avatar) else it
-                    },
-                    artist = current.artist?.let {
-                        if (it.name == artist.name) it.copy(avatarUrl = avatar) else it
-                    },
-                )
-                _hanimeVideoFlow.value = updated
-                _hanimeVideoStateFlow.value = VideoLoadingState.Success(updated)
+                launch {
+                    val avatar = withContext(Dispatchers.IO) {
+                        gate.withPermit { resolveNjavAvatar(artist) }
+                    } ?: return@launch
+                    applyNjavAvatar(video, artist.name, avatar)
+                }
             }
         }
+    }
+
+    /**
+     * 查一位女优的头像直链。**先本地（路径 → 名字），最后才联网** —— 顺序不能反。
+     */
+    private suspend fun resolveNjavAvatar(artist: HanimeVideo.Artist): String? {
+        // 1) 本地缓存 · 按**女优路径** —— 最稳的一条。
+        //    详情页给的名字与索引页的写法**可能繁简不同**（索引页 `href` 用繁体、`h4` 用简体，
+        //    见 `NjavActress.path` 的注释），按名字查会 miss，按路径不会。
+        //    ⚠️ 27.0.6 的详情页补头像**漏了这一步**（`ArtistViewModel.resolveMissingAvatarIfNeeded`
+        //    一直这么做），所以「有些女优头像还是显示不出来」。
+        runCatching { NjavNetwork.actressPathFrom(artist.url) }.getOrNull()
+            ?.let { path -> NjavActressCache.findByPath(path)?.avatarUrl }
+            ?.takeIf { it.isNotBlank() }
+            ?.let { return it }
+
+        // 2) 本地缓存 · 按名字（浏览过女优一览/排行，或者此前补过任何一个人，这里就命中）
+        NjavActressCache.avatarOf(artist.name).takeIf { it.isNotBlank() }?.let { return it }
+
+        // 3) 联网：先抓当月排行（一页 100 位）再并行翻索引页，见 [NetworkRepo.findNjavActress]。
+        val found = runCatching { NetworkRepo.findNjavActress(artist.name) }.getOrNull()
+            ?: return null
+        // 把这次的结果也记到「详情页这个写法」下（繁简/别名）——下次就是命中缓存、同帧出图。
+        runCatching { NjavActressCache.rememberAlias(artist.name, found) }
+        return found.avatarUrl.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * 把查到的头像贴进详情页。
+     *
+     * ⚠️⚠️ **只更新展示流 [_hanimeVideoFlow]，绝不写 [_hanimeVideoStateFlow]。**
+     *
+     * 详情页把「收到一次 `VideoLoadingState.Success`」当作**可以起播**的信号
+     * （`VideoRouteHostScreen` 里那段 collect ⇒ `playbackController.load(...)`），
+     * 而 27.0.6/27.0.7 这里原来**每拿到一个头像就写一次 state** ⇒ 女优越多写得越多，
+     * 播放器就被反复重建：表现为**底部导航栏一直闪 + 视频不停重新加载**。
+     * 头像只是 `@Transient` 的展示字段，**不影响视频地址**，所以完全没必要碰 state。
+     */
+    private fun applyNjavAvatar(video: HanimeVideo, artistName: String, avatar: String) {
+        // 已经翻页到别的片子了就别写 —— 否则会把 A 的头像画到 B 的页面上。
+        val current = _hanimeVideoFlow.value ?: return
+        if (current.title != video.title) return
+
+        _hanimeVideoFlow.value = current.copy(
+            artists = current.artists.map {
+                if (it.name == artistName) it.copy(avatarUrl = avatar) else it
+            },
+            artist = current.artist?.let {
+                if (it.name == artistName) it.copy(avatarUrl = avatar) else it
+            },
+        )
     }
 
     fun restoreFromCacheIfExists(code: String): Boolean {

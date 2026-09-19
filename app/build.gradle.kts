@@ -359,8 +359,43 @@ android {
         //                            错误文案改用 `Throwable.toNetworkErrorMessageRes()` 按**类型**判定
         //                            （类型检查不受混淆影响）+ 复用首页那套三语文案，末尾保留
         //                            `errorCodeName`，**未新增任何字符串**。
-        versionCode = 27_000_007
-        versionName = "27.0.7"
+        //     27.0.8 → 27_000_008   27.0.8：⚠️ **修 27.0.7 的播放回归**（「有些视频根本看不了，开不开
+        //                            代理都一样」）+ 两个 nJAV 详情页问题。不换数据源、不动界面。
+        //                            ①**回归根因（27.0.7 引入）**：`PlaybackLoadErrorPolicy` 把
+        //                              「4xx」整类划成「预算 0 ⇒ 立刻报错」。错在两处：
+        //                              (a) media3 默认 `getFallbackSelectionFor` **专门为
+        //                                  403/404/410/416/500/503 准备换轨重试** —— 4xx 在它
+        //                                  的语义里是可恢复的；「预算 0」把换轨的机会也砍了；
+        //                              (b) 多镜像站点天生有「首次 403/404、换节点即成功」
+        //                                  （CDN 边缘未同步）、`Range` 越界返回 416 也不是「链接坏了」。
+        //                              ⇒ 用户看到「打开就报错」。
+        //                              修法：**「不可重试」的集合回到 media3 默认那几类**
+        //                              （`isNonRetriable`：ParserException / FileNotFoundException /
+        //                              CleartextNotPermittedException / UnexpectedLoaderException /
+        //                              DataSourceException(POSITION_OUT_OF_RANGE)），
+        //                              **4xx 恢复默认语义 = 重试 3 次（`CLIENT_ERROR_RETRY_COUNT`）**、
+        //                              5xx 给 6 次；传输层仍是 15 次不再动。
+        //                              ⚠️⚠️ 硬约束：**本策略在任何情况下都不比 media3 默认更早放弃** ——
+        //                              `PlaybackLoadErrorPolicyTest.nonRetriableSetIsNotBroaderThanMedia3Default`
+        //                              把这条钉住了，别再往 fatal 里加东西。
+        //                            ②**nJAV 头像仍补不全**：详情页补头像时**只按名字查**
+        //                              （`NjavActressCache.avatarOf`），而索引页 `href` 用繁体、
+        //                              `h4` 用简体 ⇒ 繁简写法不一致的人必然 miss。
+        //                              修法：照 `ArtistViewModel.resolveMissingAvatarIfNeeded`
+        //                              那条已跑通的路 —— **先按女优路径查**（`NjavNetwork.actressPathFrom`
+        //                              → `NjavActressCache.findByPath`，0 网络且最稳），再按名字查缓存，
+        //                              最后才联网；联网命中后 `rememberAlias` 记下详情页这个写法。
+        //                            ③**女优一多，界面一直刷新、视频反复重新加载**：
+        //                              详情页把「收到一次 `VideoLoadingState.Success`」当作**可以起播**
+        //                              （`VideoRouteHostScreen` 的 collect ⇒ `playbackController.load`），
+        //                              而补头像那条路原来**每拿到一个头像就写一次 state** ⇒
+        //                              合作片 5–10 位女优 = 播放器被重建 5–10 次（底部导航栏闪烁）。
+        //                              修法：补头像**只写 `_hanimeVideoFlow`（展示流）、绝不写 state**，
+        //                              并改成**并发 4**（`NJAV_AVATAR_CONCURRENCY`）；
+        //                              另在 `VideoRouteHostScreen` 加第二道闸 —— 记「片号 + 实际地址」，
+        //                              一模一样就跳过 load（换片 / 换地址照常加载）。
+        versionCode = 27_000_008
+        versionName = "27.0.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

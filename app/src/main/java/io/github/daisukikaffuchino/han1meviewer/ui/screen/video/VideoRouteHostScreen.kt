@@ -178,6 +178,17 @@ fun VideoRouteHostScreen(
     var speedBeforeLongPress by remember { mutableStateOf<Float?>(null) }
     var showResumeButton by remember { mutableStateOf(false) }
     var pendingPlayback by remember { mutableStateOf<PendingPlayback?>(null) }
+    // ⚠️ 「上一次真正起播用的（片号 + 播放地址）」。
+    //
+    // 下面那段 `hanimeVideoStateFlow.collect` 是**把「收到一次 Success」当作「可以起播」**的，
+    // 而 Success 并不只在「刚解析完」时发：详情页的**展示性更新**也可能再发一次
+    // （27.0.6 起 nJAV 会异步补齐作者头像 ⇒ 每补一个就可能写一次 state，
+    //  见 `VideoViewModel.applyNjavAvatar` —— 那边已改成不再写 state，这里是第二道闸）。
+    // 没有这道闸时，女优一多就会**反复重建播放器**：底部导航栏一直在闪 + 视频不停重新加载。
+    //
+    // 判据用「片号 + 实际地址」这一对：一模一样才跳过 —— 换片、换清晰度、
+    // 或者签名 URL 刷新了都会照常重新加载。
+    var playbackLoadKey by remember(route.videoCode, route.localUri) { mutableStateOf<String?>(null) }
     var mobilePlaybackConfirmed by remember(route.videoCode, route.localUri) {
         mutableStateOf(false)
     }
@@ -526,14 +537,21 @@ fun VideoRouteHostScreen(
                             ) {
                                 pendingPlayback = request
                             } else {
-                                playbackController.load(
-                                    title = request.title,
-                                    qualities = request.qualities,
-                                    preferredQuality = request.preferredQuality,
-                                    artworkUri = request.artworkUri,
-                                    startPositionMs = request.startPositionMs,
-                                    playWhenReady = true,
-                                )
+                                // 同一个片号 + 同一批地址 ⇒ 这次 Success 只是**展示字段**变了
+                                // （例如作者头像补齐），别重建播放器（见 playbackLoadKey 的注释）。
+                                val loadKey = route.videoCode + "|" +
+                                    request.qualities.joinToString("|") { it.uri }
+                                if (loadKey != playbackLoadKey) {
+                                    playbackController.load(
+                                        title = request.title,
+                                        qualities = request.qualities,
+                                        preferredQuality = request.preferredQuality,
+                                        artworkUri = request.artworkUri,
+                                        startPositionMs = request.startPositionMs,
+                                        playWhenReady = true,
+                                    )
+                                    playbackLoadKey = loadKey
+                                }
                             }
                         }
                         if (!viewModel.fromDownload) {
@@ -1000,6 +1018,9 @@ fun VideoRouteHostScreen(
                     startPositionMs = it.startPositionMs,
                     playWhenReady = true,
                 )
+                // 记下这次真正起播用的 key，语义与 collect 里那处一致。
+                playbackLoadKey = route.videoCode + "|" +
+                    it.qualities.joinToString("|") { quality -> quality.uri }
             }
         },
         onDismiss = { pendingPlayback = null },
