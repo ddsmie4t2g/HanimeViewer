@@ -2,6 +2,7 @@ package io.github.daisukikaffuchino.han1meviewer.util
 
 import com.google.common.util.concurrent.ListenableFuture
 import io.github.daisukikaffuchino.han1meviewer.R
+import io.github.daisukikaffuchino.han1meviewer.logic.network.LineUnreachableException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
@@ -103,6 +104,21 @@ private data object DirectExecutor : Executor {
 fun Throwable.toNetworkErrorMessageRes(): Int {
     val rawMessage = message.orEmpty().lowercase()
     return when {
+        // ⭐ 26.9.19：这一档必须在**最前面**。
+        //
+        // 它是唯一一条「由客户端自己判定的确定结论」（直连已验死 + 自建中转不可用），
+        // 其余判据都是对远端响应或线路抖动的**猜测**。命中它时用户该做的事很明确 ——
+        // 开代理 —— 所以不能被 `timeout` / `connection reset` 之类更模糊的分支抢走。
+        //
+        // ⚠️ 类型匹配在播放链路里通常**命中不了**：media3 的 `OkHttpDataSource` 会把失败
+        // 包成 `IOException(ExecutionException(真异常))`，最外层是个普通 `IOException`。
+        // 好在那个 `IOException` 的 message 就是 `cause.toString()`（含 `line-unreachable`），
+        // 所以下面那条消息兜底才是真实生效的那条 —— 两条都留着，缺一不可。
+        this is LineUnreachableException ||
+                rawMessage.contains("line-unreachable") -> {
+            R.string.home_error_line_unreachable
+        }
+
         this is UnknownHostException ||
                 rawMessage.contains("unable to resolve host") ||
                 rawMessage.contains("no address associated with hostname") -> {

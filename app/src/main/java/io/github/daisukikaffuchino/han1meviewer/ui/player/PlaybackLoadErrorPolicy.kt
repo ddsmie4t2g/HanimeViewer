@@ -9,6 +9,7 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.Loader
+import io.github.daisukikaffuchino.han1meviewer.logic.network.LineUnreachableException
 import java.io.FileNotFoundException
 import java.net.UnknownHostException
 
@@ -75,6 +76,7 @@ import java.net.UnknownHostException
  * | 5xx（500/502/503） | **6** | 服务端/网关抽风，值得多等几轮 |
  * | `UnknownHostException` | **3** | 「这个域名解析不出来」是 host 级事实，6 秒内三次都一样，别拖成 1 分钟 |
  * | 清单（`.m3u8` / manifest） | **6** | 清单只有几 KB，≈20 秒足够；再久不如早点告诉用户 |
+ * | [LineUnreachableException]（直连必死 **且** 中转不可用） | **2** | 本地**立刻**抛出、不发请求，2 次只为留住「用户刚挂上代理」的窗口。见 [LINE_UNREACHABLE_RETRY_COUNT] —— ⚠️ 26.9.19 之前它落进下面那档，拿 15 次预算，制造了「一直转圈」 |
  * | 其它（`Connection reset` / 超时 / TLS / EOF） | **[TRANSPORT_RETRY_COUNT]** | 掐了再续是唯一出路。延迟封顶 5 s ⇒ 约 1 分钟的耐心 |
  *
  * 延迟沿用 media3 的曲线 `min((errorCount-1)*1000, 5000)`，不另造一套。
@@ -112,6 +114,34 @@ class PlaybackLoadErrorPolicy(
 
         /** 传输层被掐时的重试次数（≈1 分钟的耐心，见 [retryDelayMs]）。 */
         const val TRANSPORT_RETRY_COUNT = 15
+
+        /**
+         * 「整条线路没有出口」时的重试次数 —— 拿到
+         * [io.github.daisukikaffuchino.han1meviewer.logic.network.LineUnreachableException] 时用。
+         *
+         * ## ⚠️⚠️ 这是 26.9.19「一直转圈」事故的修复点
+         *
+         * 那个异常的含义是**客户端已经确认过「直连必死 + 中转不可用」**（见
+         * `CdnRelayInterceptor` 里那两处抛出点）。它和 [TRANSPORT_RETRY_COUNT] 想治的
+         * 「掐一下、等会儿就好」是**相反**的情况：
+         *
+         * | | 原始 `SocketException: Connection reset` | [LineUnreachableException] |
+         * |---|---|---|
+         * | 语义 | 中间设备抖了一下 | 这条线路现在**没有出口** |
+         * | 每次重试的代价 | **真实再撞一次墙** 0.8–2.6 s | **0**（本地立刻抛出，不发请求）|
+         * | 该给几次 | 15（等它恢复） | 2（只为留住「用户刚挂上代理」那一个窗口）|
+         *
+         * 原先它落进 `else` 档拿 15 次预算，而这 15 次每一次都要付一次撞墙的时间
+         * ⇒ ≈ 100 s 的转圈、且一个字提示都没有 —— 正是用户报的现象。
+         *
+         * ## 为什么是 2 而不是 0
+         *
+         * `CdnRelay` 里「直连必死」的结论带 TTL（`DIRECT_DEAD_TTL_MS`，120 s）。给 0 次
+         * 意味着这一轮**完全没有机会**发现「用户刚挂上代理」，只能等下一次用户手动点播放。
+         * 2 次重试（延迟 0 ms + 1 s）刚好跨过一个很短的时间窗，代价 ≈ 3 s；
+         * 而结论一旦在重试期间过期，重试就会真的去验一次直连，通了即恢复。
+         */
+        const val LINE_UNREACHABLE_RETRY_COUNT = 2
 
         /** 域名解析失败：host 级事实，别让用户干等。 */
         const val DNS_RETRY_COUNT = 3
@@ -151,6 +181,12 @@ class PlaybackLoadErrorPolicy(
             dataType: Int,
             transportRetryCount: Int = TRANSPORT_RETRY_COUNT,
         ): Int {
+            // ⚠️ 这一档必须排在**最前面**（包括「清单」那条之前）：[LineUnreachableException]
+            //    是本地立刻抛出的、与 dataType 无关的确定性结论 —— 清单虽然只有几 KB，
+            //    但同样没必要为它走 6 次预算（那 6 次一样是白等）。
+            if (anyCause(exception) { it is LineUnreachableException }) {
+                return LINE_UNREACHABLE_RETRY_COUNT
+            }
             val status = httpStatusOf(exception)
             return when {
                 dataType == C.DATA_TYPE_MANIFEST -> minOf(MANIFEST_RETRY_COUNT, transportRetryCount)

@@ -394,8 +394,25 @@ android {
         //                              并改成**并发 4**（`NJAV_AVATAR_CONCURRENCY`）；
         //                              另在 `VideoRouteHostScreen` 加第二道闸 —— 记「片号 + 实际地址」，
         //                              一模一样就跳过 load（换片 / 换地址照常加载）。
-        versionCode = 27_000_008
-        versionName = "27.0.8"
+        // 27.0.9（2026-09-19 晚）——「里番 / 新片一直加载转圈、转不出来」
+        //    ── 根因分两层，缺一不可：
+        //    ①**线路**：`vdownload.hembed.com` 实测是**确定性 SNI 阻断**
+        //      （7 个 IP × 8 次 TLS 握手 = **0/56**；TCP 443 全通、只有 TLS 被 RST），
+        //      而自建中转已于 26.9.17 删除 ⇒ 大陆直连 hanime 视频**必然失败**。
+        //      换 IP 无效；换 SNI 也无效（`vdownload-3/-4/-5` 是**另一个站**，
+        //      Laravel、mp4 路径一律 403；Fastly 借 Host → 421）。
+        //      ⚠️ 本次修的是「**不再白转圈 + 说清原因**」，**不是**「不挂代理能看」。
+        //    ②**客户端**：RST 被 `PlaybackLoadErrorPolicy` 归成「传输被掐、重试就会好」
+        //      ⇒ 预算 15 次，而每次重试都**真实再撞一次墙**（0.8–2.6 s）⇒ **≈100 s 转圈**，
+        //      且期间**没有任何提示**。封面还能出（图片链路有 wsrv.nl 兜底）⇒
+        //      用户看到的就是「能进视频界面、但视频一直转不出来」。
+        //    修法：新增 `LineUnreachableException`（**本地立刻抛出、不发请求**）+
+        //      `CdnRelay.isDeadEnd()`（直连已验死 **且** 中转不可用）⇒ 重试预算降到 **2**
+        //      （≈3 s）+ 专属文案「视频线路不可达……请开启代理或加速后重试」。
+        //    ⚠️ 配套（**两处改动是一体的，别只留一处**）：`CdnRelay` 的「直连必死」结论
+        //      加了 **120 s TTL** —— 否则用户中途挂上代理也恢复不了，只能重启 App。
+        versionCode = 27_000_009
+        versionName = "27.0.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

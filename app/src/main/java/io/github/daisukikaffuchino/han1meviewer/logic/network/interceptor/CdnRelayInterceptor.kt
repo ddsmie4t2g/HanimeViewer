@@ -1,6 +1,7 @@
 package io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor
 
 import io.github.daisukikaffuchino.han1meviewer.logic.network.CdnRelay
+import io.github.daisukikaffuchino.han1meviewer.logic.network.LineUnreachableException
 import io.github.daisukikaffuchino.utils.LogUtil
 import okhttp3.Interceptor
 import okhttp3.Request
@@ -35,6 +36,28 @@ import java.io.IOException
  * 会被**一起**放行去撞那台已经死掉的中转，于是每隔两分钟就来一次「整批封面集体
  * loadfailed」。改成「到点只排一次探活」之后，业务请求不再拿自己当探针。
  * 详见 `CdnRelay.RELAY_REVERIFY_AFTER_MS` 的注释。
+ *
+ * ## ⭐⭐ 26.9.19：「没有任何出路」要抛 [LineUnreachableException]，不能只是「走直连」
+ *
+ * 26.9.18 那套降级的落点是「直连」（`chain.proceed`）。中转已经下线时这等于
+ * **把请求交给一条确定不通的路**，而它抛出的原始 RST 在上层看来是「传输被掐、
+ * 重试就会好」—— 播放链路会重试 15 次，每一次都真实地再撞一次墙（0.8–2.6 s）
+ * ⇒ **一分多钟的转圈**，而用户一个字提示都看不到。这就是 26.9.19 用户报的
+ * 「能进视频界面，但一直加载转圈、视频转不出来」。
+ *
+ * 现在三处「确定没有出路」的落点统一改抛 [LineUnreachableException]：
+ *
+ * | 落点 | 条件 |
+ * |---|---|
+ * | [intercept] 里「该 host 直连已验死」那条分支 | [CdnRelay.isDeadEnd] |
+ * | [directThenRelay] 收尾（直连刚失败、中转也不值得一试） | [CdnRelay.isDeadEnd] |
+ *
+ * 它是**本地立刻抛出**的，因此上层的 2 次重试几乎不花时间，3 秒内就能把
+ * 「要开代理」这件事说清楚。
+ *
+ * ⚠️ 与之配套的是 [CdnRelay] 里新加的 `DIRECT_DEAD_TTL_MS`：「直连必死」的结论必须
+ * 会过期，否则用户中途挂上代理也恢复不了（只剩重启 App 一条路）。两处改动是一体的，
+ * 不要只留一处。
  *
  * ## 直连成功时要**撤销**「直连必死」的结论
  *
@@ -92,12 +115,20 @@ class CdnRelayInterceptor : Interceptor {
         }
 
         if (CdnRelay.isKnownDead(host)) {
-            // 已验证过直连必死。中转若也不值得一试，就别再绕这一趟了 ——
-            // 直接把**直连的原始错误**抛出去：报错指向真实原因，还省掉一次白等的超时。
-            // ⭐ 26.9.18：判据从「`cachedReachable == false`」换成 [CdnRelay.isRelayWorthTrying]
-            //    —— 前者对失败刻意宽容（连败 < 3 仍返回 true），中转真的下线时它照样为真，
-            //    于是每个请求都会白绕一次。详见 CdnRelay 里那张判据对照表。
-            if (!CdnRelay.isRelayWorthTrying()) return chain.proceed(request)
+            // 已验证过直连必死。中转若也不值得一试，就是**一条路都不剩**了 ——
+            // ⭐⭐ 26.9.19：这里抛 [LineUnreachableException] 而不是直连的原始 RST。
+            //
+            //    两者对用户是**天壤之别**：原始 RST（`SocketException: Connection reset`）
+            //    在 `PlaybackLoadErrorPolicy` 眼里属于「传输被掐、重试就会好」，预算 15 次 ——
+            //    而每一次重试都要真实地再撞一次墙（0.8–2.6 s），合计 ≈ 100 s 的转圈，
+            //    用户看到的就是「一直加载、视频转不出来」。
+            //
+            //    本异常是**本地立刻抛出**的（不发任何请求），且带类型语义 ⇒ 预算降到 2 次、
+            //    文案直接指向「要开代理」。代价从「一分多钟的白等」变成「三秒内说清」。
+            //
+            // ⚠️ 判据用 [CdnRelay.isDeadEnd]（= 直连已验死 **且** 中转不值得一试），
+            //    两个条件都是已观测的事实；缺任何一个都说明还值得试，不能抛。
+            if (CdnRelay.isDeadEnd(host)) throw LineUnreachableException(host)
             return relay(chain, request, null)
         }
 
@@ -159,8 +190,14 @@ class CdnRelayInterceptor : Interceptor {
 
         CdnRelay.markKnownDead(request.url.host.lowercase())
         LogUtil.w(TAG, "直连失败，改走中转: ${request.url} (${cause.message})")
-        // 中转也不值得一试时别再白等一次超时 —— 抛直连的错误，那才是根因。
-        if (!CdnRelay.isRelayWorthTrying()) throw cause
+        // 中转也不值得一试 ⇒ 一条路都不剩了（直连刚被验死 + 中转不可用），
+        // 抛 [LineUnreachableException] 而不是原始 `cause`。这不是「换个异常抛」那么轻：
+        // 原始 `cause` 是 RST，上层会按「掐一下、重试就好」处理 15 次
+        // （每次重试都要真实地再撞一次墙）；而本异常是本地立刻抛出的，
+        // 预算 2 次、文案直接指向「要开代理」。详见 A 处那段注释。
+        if (CdnRelay.isDeadEnd(request.url.host.lowercase())) {
+            throw LineUnreachableException(request.url.host.lowercase())
+        }
         return relay(chain, request, cause)
     }
 

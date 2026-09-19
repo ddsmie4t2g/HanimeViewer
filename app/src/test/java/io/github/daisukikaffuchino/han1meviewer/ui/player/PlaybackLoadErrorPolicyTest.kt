@@ -3,6 +3,7 @@ package io.github.daisukikaffuchino.han1meviewer.ui.player
 import androidx.media3.common.C
 import androidx.media3.common.ParserException
 import androidx.media3.datasource.DataSourceException
+import io.github.daisukikaffuchino.han1meviewer.logic.network.LineUnreachableException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -154,6 +155,48 @@ class PlaybackLoadErrorPolicyTest {
             "host 级事实，3 次（≈6 s）就够下结论",
             PlaybackLoadErrorPolicy.DNS_RETRY_COUNT,
             PlaybackLoadErrorPolicy.retryBudget(dns, C.DATA_TYPE_MEDIA),
+        )
+    }
+
+    /**
+     * ⭐⭐ **26.9.19「一直加载转圈」的钉子：线路没有出口时必须快速放弃。**
+     *
+     * [LineUnreachableException] 与 `Connection reset` 看起来都是「连不上」，但**代价差 30 倍**：
+     *
+     * | | 预算 | 每次重试的代价 | 合计 | 用户看到 |
+     * |---|---|---|---|---|
+     * | `Connection reset` | 15 | 真实再撞一次墙 0.8–2.6 s | ≈ 100 s | 「一直转圈，转不出来」 |
+     * | [LineUnreachableException] | 2 | **0**（本地立刻抛出，不发请求） | ≈ 3 s | 「线路不可达，请开代理」 |
+     *
+     * 事故成因：hembed 直连被确定性阻断、自建中转已下线，每个请求都要真实撞墙，
+     * 而 15 次的预算把「一次失败」放大成了一分多钟 —— **且期间一个字提示都没有**。
+     *
+     * **这条用例不许被改回 15，也不许把它塞进 `isNonRetriable`。**
+     */
+    @Test
+    fun lineUnreachableGetsAShortBudget() {
+        val dead = LineUnreachableException("vdownload.hembed.com")
+        assertFalse(
+            "不能是「不可重试」—— 那 2 次是留给「用户刚挂上代理」的窗口",
+            PlaybackLoadErrorPolicy.isNonRetriable(dead),
+        )
+        assertEquals(
+            "本地立刻抛出，2 次足够把结论说出来",
+            PlaybackLoadErrorPolicy.LINE_UNREACHABLE_RETRY_COUNT,
+            PlaybackLoadErrorPolicy.retryBudget(dead, C.DATA_TYPE_MEDIA),
+        )
+        assertEquals(
+            "⚠️ 与 dataType 无关：清单也要走这一档，不能落进清单那条 6 次的预算",
+            PlaybackLoadErrorPolicy.LINE_UNREACHABLE_RETRY_COUNT,
+            PlaybackLoadErrorPolicy.retryBudget(dead, C.DATA_TYPE_MANIFEST),
+        )
+        assertEquals(
+            "media3 1.10 会把它包进 IOException(ExecutionException(…))，走 cause 链也要认得出来",
+            PlaybackLoadErrorPolicy.LINE_UNREACHABLE_RETRY_COUNT,
+            PlaybackLoadErrorPolicy.retryBudget(
+                IOException(ExecutionException(dead)),
+                C.DATA_TYPE_MEDIA,
+            ),
         )
     }
 

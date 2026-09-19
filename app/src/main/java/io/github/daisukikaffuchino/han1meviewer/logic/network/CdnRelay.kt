@@ -184,19 +184,58 @@ object CdnRelay {
     }
 
     /**
-     * 会话级的「直连必死」记忆。
+     * 会话级的「直连必死」记忆：`host -> 记结论的时刻`。
      *
      * 直连失败一次要花掉一次 RST 的时间（实测 0.8–2.6 s）。播放一个视频会发出
      * 几十上百个 Range 请求，如果每个都先撞一次墙再中转，等于白白多等几分钟。
-     * 这里按 host 记一次结论，本进程内后续请求直接走中转。
+     * 这里按 host 记一次结论，窗口内后续请求直接走中转。
      *
      * 不落盘：网络环境会变（换 Wi-Fi、开/关代理），下一次启动重新探一次最稳。
+     *
+     * ⚠️ 26.9.19：类型从 `newKeySet<String>()` 改成 `Map<String, Long>`（带时刻），
+     * 因为结论必须能过期 —— 理由见 [DIRECT_DEAD_TTL_MS]。
      */
-    private val directIsKnownDead = ConcurrentHashMap.newKeySet<String>()
+    private val directIsKnownDead = ConcurrentHashMap<String, Long>()
 
-    fun isKnownDead(host: String): Boolean = directIsKnownDead.contains(host.lowercase())
+    /**
+     * 「直连必死」这条结论的存活时间。
+     *
+     * ## 为什么结论必须能过期（26.9.19 引入）
+     *
+     * 原来的语义是「本会话一旦判死就再也不试直连」。它省时间，但把
+     * **「用户中途挂上代理 / VPN」这条路彻底堵死**了 —— 那一刻起直连本来是通的，
+     * 可我们不再去试，用户只能重启 App 才能真正恢复。
+     *
+     * 而在自建中转已于 26.9.17 下线的今天，**用户的代理是 hembed 视频唯一的出路**
+     * （实测 `vdownload.hembed.com` 从大陆 0/56 次 TLS 握手成功，确定性 SNI 阻断，
+     * 换 IP、换 SNI 都救不了）。⇒ 「挂上代理后自动恢复」是**主路径**，不是边角，
+     * 所以结论必须会过期。
+     *
+     * ## 为什么是 120 s
+     *
+     * 到期只是让**一个**探子重新去验一次直连（[tryBeginDirectProbe] 闸门保证同 host 并发里
+     * 只有一个），代价是一次 0.8–2.6 s 的白等；而它买到的是「用户开了代理之后，
+     * 最多 2 分钟自动恢复」。低于 60 s 会让纯直连用户在长视频里反复白撞，
+     * 高于 5 分钟则让「开了代理回来点播放」的体验变得不可接受。
+     */
+    private const val DIRECT_DEAD_TTL_MS = 120_000L
 
-    fun markKnownDead(host: String) = directIsKnownDead.add(host.lowercase())
+    /**
+     * 该 host 的直连**是不是已经验过必死**（且结论还没过期）。
+     *
+     * ⚠️ 结论过期后这里返回 `false`（＝「不知道」），请求会重新走一遍直连探测。
+     * 这是刻意的：**「不知道」和「知道死了」必须区分开** —— 前者要探，
+     * 后者才谈得上跳过。别把它当缓存命中率来优化。
+     */
+    fun isKnownDead(host: String): Boolean {
+        val at = directIsKnownDead[host.lowercase()] ?: return false
+        return System.currentTimeMillis() - at < DIRECT_DEAD_TTL_MS
+    }
+
+    /** 记一次「该 host 直连必死」。每次调用都会刷新时刻，从而延长结论的有效期。 */
+    fun markKnownDead(host: String) {
+        directIsKnownDead[host.lowercase()] = System.currentTimeMillis()
+    }
 
     /**
      * 直连**成功**了 ⇒ 撤销「该 host 直连必死」的结论。
@@ -208,9 +247,25 @@ object CdnRelay {
      * 只在真的拿到成功响应时调用（`CdnRelayInterceptor.directThenRelay` 里直连成功那条分支）。
      */
     fun markDirectAlive(host: String) {
-        if (directIsKnownDead.remove(host.lowercase())) {
+        if (directIsKnownDead.remove(host.lowercase()) != null) {
             LogUtil.i(TAG, "直连已恢复：$host")
         }
+    }
+
+    /**
+     * 该 host 现在是不是**一条路都不剩**：直连已验死，中转也不值得一试。
+     *
+     * ⚠️ 这个判据是 [io.github.daisukikaffuchino.han1meviewer.logic.network.interceptor.CdnRelayInterceptor]
+     * 决定「要不要抛 [LineUnreachableException]」的唯一依据，而那个异常一旦抛出，
+     * 播放链路的错误就直接落在用户眼前（见 `PlaybackLoadErrorPolicy`）。所以这里
+     * 刻意**不接受任何猜测**：两个条件都必须来自已经观测过的事实。
+     *
+     * ⚠️ [isRelayWorthTrying] 内部会按需排一次中转探活（自带节流），
+     * 所以重复调用它没有副作用，但也是**热路径**上的调用 —— 别在循环里反复问。
+     */
+    fun isDeadEnd(host: String): Boolean {
+        val lower = host.lowercase()
+        return isKnownDead(lower) && !isRelayWorthTrying()
     }
 
     /**

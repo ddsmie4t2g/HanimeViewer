@@ -827,6 +827,7 @@
     <string name="home_error_connect">無法連線至伺服器，請檢查網路是否可用，或稍後再試。</string>
     <string name="home_error_connection_interrupted">連線已中斷，可能是目前網路不穩定或伺服器主動斷開，請切換網路後重試。</string>
     <string name="home_error_connection_reset">連線已重設，可能是目前網路不穩定或存取遭攔截，請切換網路後重試。</string>
+    <string name="home_error_line_unreachable">影片線路不可達：目前網路無法直連該網站的影片伺服器，且沒有可用的中轉。請開啟代理或加速後重試。</string>
     <string name="home_error_forbidden">伺服器拒絕了此次存取，請稍後重試，或檢查目前網站/網路設定。</string>
     <string name="home_error_not_found">找不到請求的內容，可能是網站內容已變更，請稍後重試。</string>
     <string name="home_error_server_unavailable">伺服器暫時無法使用，請稍後再試。</string>

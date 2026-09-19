@@ -839,6 +839,7 @@ Recommendations are as follows:\n
     <string name="home_error_connect">Unable to connect to the server. Please check whether your network is available, or try again later.</string>
     <string name="home_error_connection_interrupted">The connection was interrupted. The current network may be unstable or the server may have disconnected. Please switch networks and try again.</string>
     <string name="home_error_connection_reset">The connection was reset. The current network may be unstable or access may be blocked. Please switch networks and try again.</string>
+    <string name="home_error_line_unreachable">Video line unreachable: your network cannot connect to this site\'s video server directly, and no relay is available. Please enable a proxy/VPN and try again.</string>
     <string name="home_error_forbidden">The server refused this request. Please try again later, or check your current site/network settings.</string>
     <string name="home_error_not_found">The requested content was not found. The site content may have changed. Please try again later.</string>
     <string name="home_error_server_unavailable">The server is temporarily unavailable. Please try again later.</string>
