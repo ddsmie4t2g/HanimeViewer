@@ -326,8 +326,41 @@ android {
         //                            ⚠️ 本版**不承诺「挂代理就能看 Pornhub」**：这类域名是
         //                            **SNI 阻断**，裸 SOCKS5 / HTTP 代理救不了（SNI 在
         //                            ClientHello 明文里）。播放本身仍需一条能过 SNI 的线路。
-        versionCode = 27_000_006
-        versionName = "27.0.6"
+        //     27.0.7 → 27_000_007   27.0.7：修「部分视频播一会儿就报 IO 错误停下」（不换数据源、不动界面）。
+        //                            现象（用户报）：详情页正常，播到中途报
+        //                            `ERROR_CODE_IO_NETWORK_CONNECTION_FAILED：e23 java.io.IOException:
+        //                             java.util.concurrent.ExecutionException: java.net.SocketException:
+        //                             Connection reset`
+        //                            ⚠️ 这串里**只有最后一句有信息**：
+        //                            ①`e23` = R8 混淆后的类名 —— 旧文案拼
+        //                              `cause.javaClass.simpleName`，release 构建把依赖（含 media3）
+        //                              类名一起混淆 ⇒ 真机上等于没信息；
+        //                            ②`IOException → ExecutionException → 真异常` 是 **media3 1.10
+        //                              自己包的**：`OkHttpDataSource` 从阻塞 `call.execute()` 改成了
+        //                              `enqueue + SettableFuture.get()`，`catch ExecutionException →
+        //                              new IOException(e)`（`javap` 实测 1.10.1 字节码）⇒ 任何回调失败
+        //                              都长这样，**只看最里层那个异常**；
+        //                            ③`Connection reset` = 这条 TCP 被对面/中间设备掐了（CDN 边限速、
+        //                              代理切换出口、运营商侧重置）。唯一有效应对是重试。
+        //                            **默认策略不够**：`DefaultLoadErrorHandlingPolicy` 对 media 只重试
+        //                            **3 次**、延迟 1/2/3 s ⇒ 首发被掐后约 **6 秒**就放弃；而真机上常是
+        //                            连续几秒的一串掐断 ⇒「片头能看、播一会儿突然死」。
+        //                            修法：新增 `ui/player/PlaybackLoadErrorPolicy.kt` ——
+        //                            传输 **15** 次（延迟封顶 5 s，≈1 分钟耐心）/ DNS **3** /
+        //                            清单 **6** / **4xx·解析失败·文件不存在·明文禁令 = 0（立刻报错）**；
+        //                            ⚠️ 重试是**从断点续**（`ExtractingLoadable` 每次用
+        //                            `positionHolder.position` 重新 `open` ⇒ 带 `Range`，hembed 支持 206），
+        //                            所以多给几次只是「多等几秒」不是「重下整部」；
+        //                            ⚠️⚠️ **必须挂在 media source 的 factory 上**
+        //                            （`ProgressiveMediaSource.Factory` / `HlsMediaSource.Factory`）——
+        //                            media3 1.10 的 `ExoPlayer.Builder` **没有** `setLoadErrorHandlingPolicy`
+        //                            （`javap` 实测），而且本类自己 `createMediaSource` 后
+        //                            `player.setMediaSource`，压根不经过 `DefaultMediaSourceFactory`；
+        //                            错误文案改用 `Throwable.toNetworkErrorMessageRes()` 按**类型**判定
+        //                            （类型检查不受混淆影响）+ 复用首页那套三语文案，末尾保留
+        //                            `errorCodeName`，**未新增任何字符串**。
+        versionCode = 27_000_007
+        versionName = "27.0.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

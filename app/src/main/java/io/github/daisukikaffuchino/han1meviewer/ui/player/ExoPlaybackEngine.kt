@@ -18,8 +18,10 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import io.github.daisukikaffuchino.han1meviewer.R
 import io.github.daisukikaffuchino.han1meviewer.USER_AGENT
 import io.github.daisukikaffuchino.han1meviewer.logic.njav.PlaybackHttpClient
+import io.github.daisukikaffuchino.han1meviewer.util.toNetworkErrorMessageRes
 import io.github.daisukikaffuchino.utils.LogUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,13 +74,25 @@ class ExoPlaybackEngine(
         )
         .build()
 
-    private val player = ExoPlayer.Builder(context.applicationContext)
+    /**
+     * 重试策略：传输被掐（`SocketException: Connection reset` 之类）时退避重试，而不是直接报错。
+     *
+     * ⚠️⚠️ **它必须挂在 media source 的 factory 上，挂到 player 上不生效** ——
+     * `ExoPlayer.Builder` 在 media3 1.10 **没有** `setLoadErrorHandlingPolicy` 这个方法
+     * （`javap` 实测），而且本类是自己 `createMediaSource(...)` 之后
+     * `player.setMediaSource(...)`，压根不经过 `DefaultMediaSourceFactory`。
+     * 详见 [PlaybackLoadErrorPolicy] 的类注释（含「为什么会看到 ExecutionException」那一段）。
+     */
+    private val loadErrorPolicy = PlaybackLoadErrorPolicy()
+
+    private val appContext = context.applicationContext
+
+    private val player = ExoPlayer.Builder(appContext)
         .setLoadControl(loadControl)
         .build()
         .apply {
             addListener(this@ExoPlaybackEngine)
         }
-    private val appContext = context.applicationContext
     private val mutableState = MutableStateFlow(PlaybackEngineState())
     private var progressJob: Job? = null
     private var released = false
@@ -191,20 +205,17 @@ class ExoPlaybackEngine(
     override fun onPlayerError(error: PlaybackException) {
         progressJob?.cancel()
         LogUtil.e(TAG, "Playback failed", error)
-        // ⚠️ 错误信息必须**带出底层 cause**，否则界面只会看到一个笼统的
-        // `PlaybackException`。真正有用的线索几乎全在 cause 上：
-        //   403 → HttpDataSource.InvalidResponseCodeException("Response code: 403")
-        //   域名解析 → UnknownHostException
-        //   证书 → SSLHandshakeException
-        // 这条链路出问题时，界面提示是唯一的诊断入口（用户没法接 adb 抓日志时尤其重要）。
-        val detail = buildString {
-            append(error.errorCodeName)
-            error.cause?.let { cause ->
-                append("：")
-                append(cause.javaClass.simpleName)
-                cause.message?.takeIf { it.isNotBlank() }?.let { append(" ").append(it) }
-            }
-        }
+        // ⚠️ 界面提示是这条链路出问题时**唯一的诊断入口**（用户没法接 adb 抓日志时尤其重要），
+        // 所以它必须带出底层 cause。但原来的写法是
+        //
+        //     "${error.errorCodeName}：${cause.javaClass.simpleName} ${cause.message}"
+        //
+        // 而 release 构建里 R8 **会把依赖（含 media3）的类名一起混淆**，于是用户看到的是
+        // `ERROR_CODE_IO_NETWORK_CONNECTION_FAILED：e23 java.io.IOException: java.util.concurrent…`
+        // —— 那个 `e23` 谁都认不出来，等于把最有用的那一截丢了。
+        // 现在改成按**类型**判定（类型检查不受混淆影响）并复用首页那套三语齐全的文案，
+        // 见 [describePlaybackError]。
+        val detail = describePlaybackError(error)
         lastErrorMessage = detail
         mutableState.value = mutableState.value.copy(
             phase = PlaybackPhase.Error,
@@ -262,15 +273,57 @@ class ExoPlaybackEngine(
             .setDefaultRequestProperties(request.headers)
         val dataSourceFactory = DefaultDataSource.Factory(appContext, httpFactory)
         val item = MediaItem.fromUri(request.uri.toUri())
+        // ⚠️ 重试策略挂在 **factory** 上（理由见 [loadErrorPolicy] 的注释）。
         return if (request.uri.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) {
-            HlsMediaSource.Factory(dataSourceFactory).createMediaSource(item)
+            HlsMediaSource.Factory(dataSourceFactory)
+                .setLoadErrorHandlingPolicy(loadErrorPolicy)
+                .createMediaSource(item)
         } else {
-            ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(item)
+            ProgressiveMediaSource.Factory(dataSourceFactory)
+                .setLoadErrorHandlingPolicy(loadErrorPolicy)
+                .createMediaSource(item)
         }
     }
 
     private companion object {
         const val TAG = "ExoPlaybackEngine"
         const val PROGRESS_UPDATE_INTERVAL_MS = 250L
+
+        /** 兜底文案里技术细节的截断长度（避免把一整条异常链塞进错误提示）。 */
+        const val ERROR_DETAIL_MAX_CHARS = 200
+    }
+
+    /**
+     * 把 [PlaybackException] 翻成一句人话。
+     *
+     * 映射复用 `util/Networks.kt` 里那套「异常 → 文案」表（`home_error_*`，三语齐全）：
+     * 它认的类型（`UnknownHostException` / 超时 / TLS / `ConnectException` /
+     * `SocketException: Connection reset` / 403 / 404 / 5xx）**正好覆盖播放链路会遇到的全部形态**，
+     * 所以这里不需要再加一份文案。
+     *
+     * 判断走 [`Throwable.toNetworkErrorMessageRes`]，它自身也带消息兜底 ——
+     * 这一点对 media3 1.10 很关键：`OkHttpDataSource` 把失败包成
+     * `IOException(ExecutionException(SocketException))`，**最外层是个普通 `IOException`**，
+     * 靠类型匹配不到 `SocketException`；但那个 `IOException` 的 message 就是
+     * `cause.toString()`（里面含 `Connection reset`），消息匹配能兜住。
+     *
+     * ⚠️ 唯一不套本地化文案的是「兜底」（`home_error_generic`）：那条写的是「页面加载失败」，
+     * 放在播放器里是错的。这一档只摊开 `errorCodeName` + 原始 message ——
+     * 用户截图给我们时，靠的就是这一档。
+     */
+    private fun describePlaybackError(error: PlaybackException): String {
+        val cause = error.cause ?: error
+        val stringRes = cause.toNetworkErrorMessageRes()
+        return buildString {
+            if (stringRes == R.string.home_error_generic) {
+                append(error.errorCodeName)
+                cause.message?.takeIf { it.isNotBlank() }?.let {
+                    append("：").append(it.take(ERROR_DETAIL_MAX_CHARS))
+                }
+            } else {
+                append(appContext.getString(stringRes))
+                append("（").append(error.errorCodeName).append("）")
+            }
+        }
     }
 }
